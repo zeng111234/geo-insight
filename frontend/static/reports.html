@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<title>GEO Insight · 报告中心</title>
+</head>
+<body>
+<script>
+if (location.protocol === "file:") {
+  document.addEventListener("DOMContentLoaded", function () {
+    var bar = document.createElement("div");
+    bar.style.cssText = "position:sticky;top:0;z-index:99;background:#fdf4e3;color:#8a4f0a;border-bottom:1px solid #f2dcb3;padding:10px 16px;font:13px/1.7 system-ui,'Microsoft YaHei';";
+    bar.innerHTML = '页面是用文件方式打开的，接口请求会被浏览器拦掉。请双击项目根目录的 <b>start.bat</b>，再访问 <a style="color:#4b3fd1" href="http://127.0.0.1:8123">http://127.0.0.1:8123</a>。';
+    document.body.insertBefore(bar, document.body.firstChild);
+  });
+}
+</script>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span><div>GEO Insight<small>品牌在 AI 答案里的位置</small></div></div>
+    <nav>
+      <a href="/">工作台</a>
+      <a href="/settings">监控配置</a>
+      <a href="/studio">内容工作室</a>
+      <a href="/reports" class="active">报告中心</a>
+    </nav>
+  </aside>
+  <main>
+    <header class="top">
+      <h1>报告中心</h1>
+      <span class="sub">快照生成后不再变化，可直接打印为 PDF</span>
+      <span class="spacer"></span>
+      <select id="tracker" aria-label="监控对象"></select>
+      <input id="from" type="date" value="2026-11-01" aria-label="开始日期" />
+      <input id="to" type="date" value="2026-11-30" aria-label="结束日期" />
+      <button class="primary" id="generate">生成报告</button>
+    </header>
+
+    <div class="content">
+      <div id="message"></div>
+
+      <section class="panel">
+        <h2>已生成报告 <span class="badge" id="count"></span></h2>
+        <div class="body">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>周期</th><th class="num">天数</th><th class="num">有效样本</th>
+                <th class="num">提及率</th><th class="num">环比</th><th>可比性</th>
+                <th>生成时间</th><th>口径</th><th></th>
+              </tr></thead>
+              <tbody id="rows"><tr><td colspan="9" class="empty">加载中…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <div class="cards" id="summary" style="margin-top:14px"></div>
+
+      <section class="panel" style="margin-top:14px">
+        <h2>快照与口径明细 <span class="badge" id="hashMeta">—</span></h2>
+        <div class="body">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>周期</th><th>口径</th><th>模型集合 hash</th><th class="num">竞品集合</th>
+                <th>快照哈希</th><th class="num">结论</th><th>生成时间</th>
+              </tr></thead>
+              <tbody id="hashRows"><tr><td colspan="7" class="empty">加载中…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <div class="notice">
+        报告是生成时刻的不可变快照：之后采集到新数据，已生成的报告数字不会改变。
+        与上一周期对比时，若模型集合、竞品集合版本或口径版本不一致，报告标注「不可比」并且不输出涨跌幅。
+        同一监控对象、同一周期、同一口径重复生成时会复用已有快照（响应带 <code>reused</code>），不会多出一条记录。
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const API_BASE = location.protocol === "file:" ? "http://127.0.0.1:8123" : "";
+const API = API_BASE + "/v1";
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtPct = (v) => (v === null || v === undefined ? "—" : (v * 100).toFixed(1) + "%");
+
+function toast(text, kind = "") {
+  let el = document.querySelector(".toast");
+  if (!el) { el = document.createElement("div"); el.className = "toast"; document.body.appendChild(el); }
+  el.className = "toast show " + kind;
+  el.textContent = text;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => (el.className = "toast " + kind), 4200);
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...options });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.code || res.status);
+  return body;
+}
+
+const card = (label, value, sub) => `<div class="card"><div class="label">${esc(label)}</div><div class="value">${value}</div><div class="sub">${esc(sub)}</div></div>`;
+
+function renderList(data) {
+  const items = data.items || [];
+  $("count").textContent = items.length + " 份";
+  const summaryBox = $("summary"), hashBody = $("hashRows");
+  if (!items.length) {
+    $("rows").innerHTML = '<tr><td colspan="9" class="empty">还没有报告。选一个周期，点右上「生成报告」。</td></tr>';
+    if (summaryBox) summaryBox.innerHTML = card("报告份数", 0, "选周期后生成");
+    if (hashBody) hashBody.innerHTML = '<tr><td colspan="7" class="empty">暂无快照</td></tr>';
+    return;
+  }
+  // 概览与快照明细都从同一批列表数据推导，不再额外请求。
+  const latest = items.slice().sort((a, b) => (a.period_end < b.period_end ? 1 : -1))[0];
+  const comparableCount = items.filter((r) => r.comparable === true).length;
+  const conclusions = items.reduce((s, r) => s + (r.conclusion_count || 0), 0);
+  const latestRate = !latest.mention_rate || latest.mention_rate.status === "insufficient_samples"
+    ? "样本不足" : fmtPct(latest.mention_rate.value);
+  const latestDelta = latest.delta_pp === null || latest.delta_pp === undefined
+    ? "—（不可比）" : `${latest.delta_pp > 0 ? "+" : ""}${latest.delta_pp.toFixed(1)}pp`;
+  if (summaryBox) {
+    summaryBox.innerHTML =
+      card("报告份数", items.length, "生成时刻快照，不会被新数据改写") +
+      card("最新一期提及率", latestRate, `${latest.period_start} ~ ${latest.period_end} · 有效样本 ${latest.valid_total ?? 0}`) +
+      card("最新环比", latestDelta, latest.comparable === true ? "口径与模型集合一致" : "口径或模型集合变化") +
+      card("可比报告", `${comparableCount} / ${items.length}`, "只有可比的报告才输出涨跌幅") +
+      card("结论总数", conclusions, "每份报告自动生成结论");
+  }
+  if (hashBody) {
+    $("hashMeta").textContent = "同周期重复生成复用同一快照";
+    hashBody.innerHTML = items.map((r) => `<tr>
+      <td class="nowrap">${r.period_start} ~ ${r.period_end}</td>
+      <td class="mono">${esc(r.metric_version)}</td>
+      <td class="mono">${esc((r.model_set_hash || "—").slice(0, 12))}…</td>
+      <td class="num">v${r.competitor_set_version ?? "—"}</td>
+      <td class="mono">${esc((r.payload_hash || "").slice(0, 16))}…</td>
+      <td class="num">${r.conclusion_count ?? "—"}</td>
+      <td class="nowrap">${(r.created_at || "").slice(0, 16).replace("T", " ")}</td>
+    </tr>`).join("");
+  }
+  $("rows").innerHTML = items.map((r) => {
+    const rate = r.mention_rate;
+    const rateText = !rate ? "—" : rate.status === "insufficient_samples" ? '<span class="warn-text">样本不足</span>' : fmtPct(rate.value);
+    const delta = r.delta_pp === null || r.delta_pp === undefined
+      ? '<span class="muted">—</span>'
+      : `<span class="${r.delta_pp > 0 ? "good" : r.delta_pp < 0 ? "bad" : "muted"}">${r.delta_pp > 0 ? "+" : ""}${r.delta_pp.toFixed(1)}pp</span>`;
+    const comparable = r.comparable === true
+      ? '<span class="tag ok">可比</span>'
+      : r.comparable === false ? '<span class="tag warn">不可比</span>' : '<span class="tag">—</span>';
+    return `<tr>
+      <td class="nowrap">${r.period_start} ~ ${r.period_end}</td>
+      <td class="num">${r.days ?? "—"}</td>
+      <td class="num">${r.valid_total ?? "—"}</td>
+      <td class="num">${rateText}</td>
+      <td class="num">${delta}</td>
+      <td>${comparable}</td>
+      <td class="nowrap">${(r.created_at || "").slice(0, 16).replace("T", " ")}</td>
+      <td class="mono">${esc(r.metric_version)}</td>
+      <td><a href="/report/${r.id}">查看 →</a></td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadList() {
+  const tracker = $("tracker").value;
+  if (!tracker) return;
+  try {
+    renderList(await api(`/trackers/${tracker}/reports`));
+  } catch (e) {
+    $("rows").innerHTML = `<tr><td colspan="9" class="empty">读取失败：${esc(e.message)}</td></tr>`;
+  }
+}
+
+$("generate").addEventListener("click", async () => {
+  const tracker = $("tracker").value;
+  const from = $("from").value, to = $("to").value;
+  if (!tracker) return;
+  $("generate").disabled = true;
+  $("message").innerHTML = "";
+  try {
+    const report = await api(`/trackers/${tracker}/reports`, { method: "POST", body: JSON.stringify({ from, to }) });
+    const gen = report.generation || {};
+    toast(`报告已生成：${gen.duration_ms ?? "?"} ms，快照哈希 ${String(report.payload_hash || "").slice(0, 10)}…`);
+    await loadList();
+    window.location.href = `/report/${report.id}`;
+  } catch (e) {
+    $("message").innerHTML = `<div class="notice error">生成失败：${esc(e.message)}</div>`;
+  } finally {
+    $("generate").disabled = false;
+  }
+});
+
+async function init() {
+  try {
+    const items = (await api("/trackers")).items || [];
+    $("tracker").innerHTML = items.map((x) => `<option value="${x.id}">${esc(x.brand_name || x.id)}</option>`).join("");
+  } catch (e) {
+    $("message").innerHTML = `<div class="notice error">读取监控对象失败：${esc(e.message)}</div>`;
+    return;
+  }
+  await loadList();
+}
+
+$("tracker").addEventListener("change", loadList);
+init();
+</script>
+</body>
+</html>

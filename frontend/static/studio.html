@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<title>GEO Insight · 内容工作室</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* 布局与侧栏统一交给 app.css：nav.py 注入的侧栏依赖 .group / .side-foot / .ico，
+     这里若自带一套 nav 规则会导致该页侧栏和其它 11 页长得不一样。 */
+  /* 顶栏 */
+  main { min-width: 0; }
+  header.top {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  header.top h1 { font-size: 15px; margin: 0; font-weight: 600; color: #232838; }
+  header.top .sub { color: var(--muted); font-size: 11.5px; }
+  .spacer { margin-left: auto; }
+  .pill { border: 1px solid var(--border); background: var(--panel-2); border-radius: 999px; padding: 3px 10px; font-size: 11.5px; color: var(--muted); }
+  button {
+    font: inherit; font-size: 12px; cursor: pointer; color: var(--text);
+    background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 6px 11px;
+    transition: background .12s, border-color .12s;
+  }
+  button:hover:not(:disabled) { border-color: #ccd2e3; background: var(--subtle); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 2px solid rgba(108, 92, 231, .45); outline-offset: 1px;
+  }
+  .content { padding: 16px 20px 32px; }
+  /* 文章切换 */
+  .article-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; font-size: 12px;
+  }
+  .chip:hover { border-color: #ccd2e3; }
+  .chip.on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-weak); }
+  .tag { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2); }
+  .tag.published { color: var(--green-ink); border-color: var(--green-line); background: var(--green-tint); }
+  .tag.review { color: var(--amber-ink); border-color: var(--amber-line); background: var(--amber-tint); }
+  /* 三栏 */
+  .studio { display: grid; grid-template-columns: 300px minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
+  @media (max-width: 1180px) { .studio { grid-template-columns: 1fr; } }
+  .col { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .col > h2 {
+    font-size: 12.5px; margin: 0; padding: 11px 14px; border-bottom: 1px solid var(--border);
+    color: var(--text-strong); font-weight: 600; display: flex; align-items: center; gap: 8px;
+  }
+  .col > h2 .badge { font-size: 10.5px; color: var(--muted); font-weight: 400; }
+  .col .body { padding: 13px 14px; }
+  .field { margin-bottom: 13px; }
+  .field:last-child { margin-bottom: 0; }
+  .field .k { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .field .v { line-height: 1.68; color: var(--text-body); white-space: pre-wrap; word-break: break-word; }
+  .field .v.mono { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: #5f6a7d; }
+  /* 正文编辑 */
+  .editor-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--subtle); }
+  .editor-toolbar .hint { color: var(--muted); font-size: 11px; margin-left: auto; }
+  input[type="text"], textarea {
+    width: 100%; background: #ffffff; color: var(--text); border: 1px solid var(--border);
+    border-radius: 7px; padding: 9px 11px; font: inherit; line-height: 1.75;
+  }
+  input[type="text"]:focus, textarea:focus { border-color: var(--accent); outline: 2px solid rgba(108, 92, 231, .14); outline-offset: 0; }
+  textarea { resize: vertical; min-height: 320px; font-size: 13px; }
+  .editor-body { padding: 13px 14px; }
+  .editor-body .label { color: var(--muted); font-size: 11px; margin: 10px 0 5px; }
+  .notice { border-radius: 8px; padding: 9px 11px; font-size: 12px; margin-top: 10px; line-height: 1.65; }
+  .notice.warn { border: 1px solid var(--amber-line); background: var(--amber-tint); color: var(--amber-ink); }
+  .notice.error { border: 1px solid var(--red-line); background: var(--red-tint); color: var(--red-ink); }
+  .notice.ok { border: 1px solid var(--green-line); background: var(--green-tint); color: var(--green-ink); }
+  /* 事实 */
+  .fact { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; background: var(--subtle); }
+  .fact.pending { border-color: var(--amber-line); background: #fffdf7; }
+  .fact .claim { line-height: 1.6; margin-bottom: 5px; color: var(--text-body); }
+  .fact .src { color: var(--muted); font-size: 11px; }
+  .fact .verdict { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; margin-bottom: 5px; display: inline-block; }
+  .verdict.confirmed { color: var(--green-ink); background: var(--green-tint); }
+  .verdict.pending { color: var(--amber-ink); background: var(--amber-tint); }
+  .verdict.rejected { color: var(--red-ink); background: var(--red-tint); }
+  .empty { color: var(--muted); font-size: 12px; padding: 10px 0; }
+  /* 发布区 */
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 14px; box-shadow: var(--shadow); }
+  .panel > h2 { font-size: 12.5px; margin: 0; padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text-strong); font-weight: 600; }
+  .panel .body { padding: 13px 14px; }
+  .channels { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 9px; }
+  .channel { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: var(--subtle); }
+  .channel .name { font-weight: 500; color: var(--text-strong); }
+  .channel .state { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; }
+  .channel .state.connected { color: var(--green-ink); background: var(--green-tint); }
+  .channel .state.disconnected { color: #5f6a7d; background: var(--neutral-tint); }
+  .channel .state.expired { color: var(--amber-ink); background: var(--amber-tint); }
+  .channel .actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .channel label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+  .impact { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .kpi { border: 1px solid var(--border); border-radius: 8px; padding: 11px 13px; background: var(--subtle); }
+  .kpi .k { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  .kpi .v { font-size: 21px; font-weight: 600; color: #232838; }
+  .kpi .s { color: var(--muted); font-size: 11px; margin-top: 5px; }
+  .up { color: var(--teal); } .down { color: var(--red); } .flat { color: var(--muted); }
+  .toast {
+    position: fixed; right: 18px; bottom: 18px; max-width: 420px; padding: 11px 14px; border-radius: 9px;
+    background: #ffffff; border: 1px solid var(--border); color: var(--text-body); font-size: 12px; line-height: 1.65;
+    box-shadow: 0 8px 28px rgba(31, 36, 48, .14);
+    opacity: 0; transform: translateY(8px); transition: .18s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.warn { border-color: var(--amber-line); background: var(--amber-tint); color: var(--amber-ink); }
+  .toast.error { border-color: var(--red-line); background: var(--red-tint); color: var(--red-ink); }
+  a.plain { color: var(--accent); text-decoration: none; }
+  a.plain:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<script>
+// 用文件方式打开时给出明确指引，避免看到 Failed to fetch 不知所措
+if (location.protocol === "file:") {
+  document.addEventListener("DOMContentLoaded", function () {
+    var bar = document.createElement("div");
+    bar.style.cssText = "position:sticky;top:0;z-index:99;background:#fdf4e3;color:#8a4f0a;border-bottom:1px solid #f2dcb3;padding:10px 16px;font:13px/1.7 system-ui,'Microsoft YaHei';";
+    bar.innerHTML = '页面是用文件方式打开的，接口请求会被浏览器拦掉。请双击项目根目录的 <b>start.bat</b>，再访问 <a style="color:#4b3fd1" href="http://127.0.0.1:8123">http://127.0.0.1:8123</a>。';
+    document.body.insertBefore(bar, document.body.firstChild);
+  });
+}
+</script>
+
+<div class="shell">
+  <aside>
+    <div class="brand">
+      <span class="dot"></span>
+      <div>GEO Insight<small>品牌在 AI 答案里的位置</small></div>
+    </div>
+    <nav>
+      <a href="/">工作台</a>
+      <a href="/settings">监控配置</a>
+      <a href="/studio" class="active">内容工作室</a>
+      <a href="/reports">报告中心</a>
+    </nav>
+  </aside>
+
+  <main>
+    <header class="top">
+      <h1>内容工作室</h1>
+      <span class="sub" id="trackerLabel">辽宁辽征律师事务所 · 国内 AI 品牌可见度</span>
+      <span class="spacer"></span>
+      <span class="pill">人工成稿 · 系统只做事实核对与合规提示</span>
+      <a class="plain" href="/" style="font-size:12px">← 返回看板</a>
+    </header>
+
+    <div class="content">
+      <div class="article-bar" id="articleBar">
+        <span class="pill">文章</span>
+        <span class="empty">加载中…</span>
+      </div>
+
+      <div class="studio">
+        <section class="col">
+          <h2>创作要求 <span class="badge" id="reqMeta"></span></h2>
+          <div class="body" id="requirements"></div>
+        </section>
+
+        <section class="col">
+          <h2>正文编辑 <span class="badge" id="draftMeta"></span></h2>
+          <div class="editor-toolbar">
+            <button id="saveDraft" class="primary">保存</button>
+            <button id="jumpFacts">核对事实清单</button>
+            <span class="hint" id="saveState"></span>
+          </div>
+          <div class="editor-body">
+            <div class="label">文章标题</div>
+            <input type="text" id="title" />
+            <div class="label">文章正文</div>
+            <textarea id="body"></textarea>
+            <div id="compliance"></div>
+          </div>
+        </section>
+
+        <section class="col" id="factsPanel">
+          <h2>事实与证据 <span class="badge" id="factMeta"></span></h2>
+          <div class="body" id="facts"></div>
+        </section>
+      </div>
+
+      <section class="panel">
+        <h2>发布通道 <span class="tag" style="margin-left:6px">展示态 · 未接入真实登录与发帖</span></h2>
+        <div class="body">
+          <div class="channels" id="channels"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">
+            <button id="publishBtn" class="primary">一键发布到已选渠道</button>
+            <span class="hint" id="publishState" style="color:var(--muted);font-size:11.5px"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>发布后提及率 <span class="badge" id="impactMeta" style="color:var(--muted);font-weight:400;font-size:10.5px"></span></h2>
+        <div class="body" id="impact"></div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const API = (location.protocol === "file:" ? "http://127.0.0.1:8123" : "") + "/v1";
+const TRACKER = "11111111-1111-1111-1111-111111111111";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const VERDICT_TEXT = { confirmed: "已确认", pending: "待核实", rejected: "驳回" };
+const STATUS_TEXT = { draft: "草稿", review: "待审核", published: "已发布" };
+const CHANNEL_TEXT = { connected: "已连接", disconnected: "未连接", expired: "已过期" };
+const PUB_TEXT = { queued: "已入队", published: "已发布", failed: "失败" };
+
+const state = { articles: [], articleId: null, article: null, channels: [], impact: null, selected: new Set() };
+
+let toastTimer = null;
+function toast(msg, kind = "") {
+  const el = $("toast");
+  el.textContent = msg;
+  el.className = "toast show " + kind;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = "toast " + kind; }, 4200);
+}
+
+async function api(path, options) {
+  const res = await fetch(API + path, options);
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = { raw: text }; }
+  if (!res.ok) {
+    const err = new Error((data && data.message) || res.status + " " + res.statusText);
+    err.payload = data;
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+function pct(m) {
+  if (!m) return "—";
+  if (m.status === "insufficient_samples") return "样本不足";
+  return (m.value * 100).toFixed(1) + "%";
+}
+
+/* ---------- 文章列表 ---------- */
+function renderArticleBar() {
+  const bar = $("articleBar");
+  const chips = state.articles.map((a) => {
+    const on = a.id === state.articleId ? " on" : "";
+    return '<span class="chip' + on + '" data-id="' + a.id + '">' +
+      esc(a.title.length > 20 ? a.title.slice(0, 20) + "…" : a.title) +
+      '<span class="tag ' + a.status + '">' + (STATUS_TEXT[a.status] || a.status) + "</span></span>";
+  }).join("");
+  bar.innerHTML = '<span class="pill">文章</span>' + chips;
+  bar.querySelectorAll(".chip").forEach((el) => {
+    el.addEventListener("click", () => selectArticle(el.dataset.id));
+  });
+}
+
+/* ---------- 左栏：创作要求 ---------- */
+function renderRequirements(a) {
+  const rows = [
+    ["内部简报", a.brief],
+    ["优化目标", a.goal],
+    ["验收条件", a.acceptance],
+    ["品牌资料", a.brand_material],
+    ["事实校验阈值", a.fact_threshold],
+    ["关联问题", a.question_id],
+  ];
+  $("reqMeta").textContent = "v" + a.version;
+  $("requirements").innerHTML = rows.map(([k, v]) =>
+    '<div class="field"><div class="k">' + esc(k) + '</div><div class="v' +
+    (k === "关联问题" ? " mono" : "") + '">' + esc(v || "—") + "</div></div>"
+  ).join("");
+}
+
+/* ---------- 中栏：正文 ---------- */
+const RISK_WORDS = ["保证胜诉", "百分百", "包赢", "最低价", "全网最便宜", "稳赚"];
+
+function checkCompliance(text) {
+  const hits = RISK_WORDS.filter((w) => text.includes(w));
+  const box = $("compliance");
+  if (!hits.length) { box.innerHTML = ""; return; }
+  box.innerHTML = '<div class="notice warn">合规提示：正文出现 ' +
+    hits.map((h) => "「" + esc(h) + "」").join("、") +
+    "。律师业务不得对结果作承诺，建议改为可核实表述。该提示不阻断保存。</div>";
+}
+
+function renderEditor(a) {
+  $("draftMeta").textContent = "v" + a.version + " · " + (a.template_key || "无模板");
+  $("title").value = a.title;
+  $("body").value = a.body;
+  $("saveState").textContent = "";
+  checkCompliance(a.body);
+  $("body").addEventListener("input", () => checkCompliance($("body").value));
+}
+
+/* ---------- 右栏：事实 ---------- */
+function renderFacts(a) {
+  const facts = a.facts || [];
+  const pending = facts.filter((f) => f.verdict === "pending").length;
+  $("factMeta").textContent = facts.length ? facts.length + " 条 · " + pending + " 条待核实" : "暂无";
+  if (!facts.length) {
+    $("facts").innerHTML = '<div class="empty">该草稿还没有事实条目。补充来源后可进入审核。</div>';
+    return;
+  }
+  $("facts").innerHTML = facts.map((f) =>
+    '<div class="fact ' + (f.verdict === "pending" ? "pending" : "") + '">' +
+    '<span class="verdict ' + f.verdict + '">' + (VERDICT_TEXT[f.verdict] || f.verdict) + "</span>" +
+    '<div class="claim">' + esc(f.claim) + "</div>" +
+    '<div class="src">来源：' + esc(f.source_ref || "未标注") + "</div></div>"
+  ).join("");
+}
+
+/* ---------- 发布通道 ---------- */
+function renderChannels() {
+  $("channels").innerHTML = state.channels.map((c) => {
+    const connected = c.status === "connected";
+    const checked = state.selected.has(c.id) ? " checked" : "";
+    return '<div class="channel">' +
+      '<input type="checkbox" data-id="' + c.id + '"' + checked + (connected ? "" : " disabled") + " />" +
+      '<div><div class="name">' + esc(c.platform_name) + "</div>" +
+      '<div style="color:var(--muted);font-size:11px">' + esc(c.account_name || "未绑定账号") + "</div></div>" +
+      '<div class="actions">' +
+      '<span class="state ' + c.status + '">' + (CHANNEL_TEXT[c.status] || c.status) + "</span>" +
+      (connected ? "" : '<button data-connect="' + c.id + '">连接</button>') +
+      "</div></div>";
+  }).join("");
+
+  $("channels").querySelectorAll('input[type="checkbox"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      if (el.checked) state.selected.add(el.dataset.id); else state.selected.delete(el.dataset.id);
+      $("publishState").textContent = state.selected.size ? "已选 " + state.selected.size + " 个渠道" : "";
+    });
+  });
+  $("channels").querySelectorAll("[data-connect]").forEach((el) => {
+    el.addEventListener("click", () => connectChannel(el.dataset.connect, el));
+  });
+}
+
+async function connectChannel(id, btn) {
+  btn.disabled = true;
+  try {
+    const res = await api("/channels/" + id + "/connect", { method: "POST" });
+    await loadChannels();
+    toast(res.platform_name + " 已置为已连接。" + (res.note || ""), "warn");
+  } catch (e) {
+    toast("连接失败：" + e.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------- 发布后提及率 ---------- */
+function publicationTable() {
+  const pubs = (state.article && state.article.publications) || [];
+  if (!pubs.length) return "";
+  const rows = pubs.map((p) =>
+    "<tr><td>" + esc(p.platform_name) + "</td><td>" + (PUB_TEXT[p.status] || p.status) + "</td><td>" +
+    esc((p.published_at || "").slice(0, 16).replace("T", " ") || "—") + "</td><td>" +
+    (p.published_url ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链</a>' : "—") +
+    "</td></tr>"
+  ).join("");
+  const th = (t) => '<th style="text-align:left;color:var(--muted);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">' + t + "</th>";
+  return '<table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:12px">' +
+    "<thead><tr>" + th("渠道") + th("状态") + th("时间") + th("回链") + "</tr></thead>" +
+    "<tbody>" + rows + "</tbody></table>";
+}
+
+function renderImpact(data) {
+  const box = $("impact");
+  const pubs = (state.article && state.article.publications) || [];
+  if (!data || data.status === "not_published") {
+    $("impactMeta").textContent = "";
+    if (pubs.length) {
+      box.innerHTML = '<div class="notice warn">已入队 ' + pubs.length +
+        " 条发布记录，但还没有真实发布（首版不接自动发帖）。真实发布后这里才会出现发布前后对比。</div>" +
+        publicationTable();
+    } else {
+      box.innerHTML = '<div class="empty">该文章还没有发布记录，暂无对比数据。先在下面的发布通道里发起一次发布。</div>';
+    }
+    return;
+  }
+  const b = data.before.mention_rate, a2 = data.after.mention_rate;
+  const delta = data.delta_pp;
+  const deltaCls = delta === null ? "flat" : delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+  const deltaText = delta === null ? "不输出涨跌" : (delta > 0 ? "+" : "") + delta.toFixed(1) + "pp";
+  $("impactMeta").textContent =
+    "发布 " + data.published_at.slice(0, 10) + " · 窗口各 " + data.window_days + " 天 · 口径 " + data.metric_version +
+    " · 渠道 " + (data.channels || []).join("、");
+
+  box.innerHTML =
+    '<div class="impact">' +
+      '<div class="kpi"><div class="k">发布前 ' + data.before.from.slice(5) + "~" + data.before.to.slice(5) + "</div>" +
+        '<div class="v">' + pct(b) + '</div><div class="s">' + data.before.mention_total + " / " + data.before.valid_total + " 样本</div></div>" +
+      '<div class="kpi"><div class="k">发布后 ' + data.after.from.slice(5) + "~" + data.after.to.slice(5) + "</div>" +
+        '<div class="v">' + pct(a2) + '</div><div class="s">' + data.after.mention_total + " / " + data.after.valid_total + " 样本</div></div>" +
+      '<div class="kpi"><div class="k">变化</div><div class="v ' + deltaCls + '">' + deltaText + "</div>" +
+        '<div class="s">' + (data.comparable ? "两窗口样本均 ≥ 3" : "存在样本不足窗口") + "</div></div>" +
+    "</div>" +
+    (data.notes && data.notes.length ? '<div class="notice warn">' + data.notes.map(esc).join("<br/>") + "</div>" : "") +
+    publicationTable();
+}
+
+/* ---------- 数据加载 ---------- */
+async function loadChannels() {
+  const data = await api("/channels");
+  state.channels = data.items || [];
+  renderChannels();
+}
+
+async function selectArticle(id) {
+  state.articleId = id;
+  renderArticleBar();
+  const [article, impact] = await Promise.all([
+    api("/articles/" + id),
+    api("/articles/" + id + "/impact"),
+  ]);
+  state.article = article;
+  renderRequirements(article);
+  renderEditor(article);
+  renderFacts(article);
+  renderImpact(impact);
+}
+
+async function load() {
+  try {
+    const [list, channels] = await Promise.all([
+      api("/trackers/" + TRACKER + "/articles"),
+      api("/channels"),
+    ]);
+    state.articles = list.items || [];
+    state.channels = channels.items || [];
+    if (!state.articles.length) {
+      $("articleBar").innerHTML = '<span class="empty">该监控对象下还没有文章</span>';
+      return;
+    }
+    renderChannels();
+    const first = state.articles[0].id;
+    await selectArticle(first);
+  } catch (e) {
+    $("articleBar").innerHTML = '<span class="err" style="color:var(--red)">读取失败：' + esc(e.message) + "</span>";
+    toast("加载失败：" + e.message + "（确认 start.bat 已启动，并从 http://127.0.0.1:8123/studio 打开）", "error");
+  }
+}
+
+/* ---------- 交互 ---------- */
+$("saveDraft").addEventListener("click", async () => {
+  if (!state.article) return;
+  $("saveDraft").disabled = true;
+  try {
+    const updated = await api("/articles/" + state.articleId, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: $("title").value, body: $("body").value }),
+    });
+    state.article = updated;
+    $("draftMeta").textContent = "v" + updated.version + " · " + (updated.template_key || "无模板");
+    $("saveState").textContent = "已保存 · " + updated.updated_at.slice(11, 16);
+    toast("已保存，版本 v" + updated.version);
+  } catch (e) {
+    toast("保存失败：" + e.message, "error");
+  } finally {
+    $("saveDraft").disabled = false;
+  }
+});
+
+$("jumpFacts").addEventListener("click", () => {
+  const panel = $("factsPanel");
+  const pending = panel.querySelectorAll(".fact.pending");
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (!pending.length) {
+    toast("当前没有待核实事实。");
+    return;
+  }
+  pending.forEach((el) => { el.style.outline = "1px solid var(--amber)"; });
+  setTimeout(() => pending.forEach((el) => { el.style.outline = ""; }), 1800);
+  toast("还有 " + pending.length + " 条事实待补充来源，核实后才能进入审核。");
+});
+
+$("publishBtn").addEventListener("click", async () => {
+  if (!state.article) return;
+  if (!state.selected.size) {
+    toast("请先勾选至少一个已连接渠道。", "warn");
+    return;
+  }
+  $("publishBtn").disabled = true;
+  try {
+    const res = await api("/articles/" + state.articleId + "/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel_ids: Array.from(state.selected) }),
+    });
+    toast("已写入发布队列：" + res.queued.map((q) => q.channel).join("、") +
+      (res.note ? "。" + res.note : ""), "warn");
+    state.selected.clear();
+    $("publishState").textContent = "";
+    await selectArticle(state.articleId);
+  } catch (e) {
+    const blocked = (e.payload && e.payload.blocked) || [];
+    const names = blocked.map((b) => b.channel || b.channel_id).join("、");
+    toast("发布未发起：" + e.message + (names ? "（" + names + "）" : ""), "error");
+  } finally {
+    $("publishBtn").disabled = false;
+  }
+});
+
+load();
+</script>
+</body>
+</html>

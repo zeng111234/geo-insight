@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<script src="/static/app.js"></script>
+<title>GEO Insight · 问题监控</title>
+<style>
+  .mon-grid { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; align-items: stretch; }
+  .mon-grid > .panel { display: flex; flex-direction: column; min-width: 0; }
+  .mon-grid #questions { flex: 1; overflow-y: auto; min-height: 0; }
+  @media (max-width: 1100px) { .mon-grid { grid-template-columns: 1fr; } }
+  .qitem { padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .qitem:last-child { border-bottom: none; }
+  .qitem:hover { background: var(--subtle); }
+  .qitem.on { background: var(--accent-weak); border-left: 3px solid var(--accent); padding-left: 9px; }
+  .qitem .t { font-size: 12.5px; line-height: 1.5; color: var(--text); margin-bottom: 5px; }
+  .qitem .m { font-size: 11px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  .answer { border-bottom: 1px solid var(--border); padding: 12px 14px; }
+  .answer:last-child { border-bottom: none; }
+  .answer .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 7px; }
+  .answer .text { font-size: 12.5px; line-height: 1.7; color: var(--text-body); white-space: pre-wrap; }
+  .answer .cite { font-size: 11px; color: var(--muted); margin-top: 7px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <main>
+    <header class="top">
+      <h1>问题监控</h1>
+      <span class="sub">按问题查看每个模型的回答、提及位次与引用来源</span>
+      <span class="spacer"></span>
+      <select id="tracker" aria-label="监控对象"></select>
+      <input id="from" type="date" value="2026-11-01" aria-label="开始日期" />
+      <input id="to" type="date" value="2026-11-30" aria-label="结束日期" />
+      <button id="load" class="primary">查询</button>
+    </header>
+    <div class="content">
+      <div class="mon-grid">
+        <div class="panel">
+          <h2>问题集 <span class="badge" id="qMeta">—</span></h2>
+          <div id="questions"><div class="empty">加载中…</div></div>
+        </div>
+        <div class="panel">
+          <h2>问答明细 <span class="badge" id="aMeta">—</span></h2>
+          <div class="body" id="answers"><div class="empty">先在左侧选择一个问题</div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+(function () {
+  var G = window.GEO, $ = G.$, esc = G.esc;
+  var state = { questions: [], answers: [], answerTotal: 0, current: null };
+
+  function renderQuestions() {
+    var box = $("questions");
+    if (!state.questions.length) { box.innerHTML = G.empty("该监控对象还没有问题"); return; }
+    box.innerHTML = state.questions.map(function (q) {
+      return '<div class="qitem' + (q.id === state.current ? " on" : "") + '" data-id="' + esc(q.id) + '">' +
+        '<div class="t">' + esc(q.text) + "</div>" +
+        '<div class="m"><span class="tag ' + (q.tier === "core" ? "core" : "") + '">' +
+          (q.tier === "core" ? "核心" : "长尾") + "</span>" +
+        "<span>样本 " + G.num(q.sample_total) + "</span>" +
+        "<span>每日 " + G.num(q.daily_samples) + " 次</span></div></div>";
+    }).join("");
+    $("qMeta").textContent = state.questions.length + " 个问题";
+  }
+
+  function renderAnswers() {
+    var box = $("answers");
+    var list = state.answers;
+    $("aMeta").textContent = G.num(state.answerTotal) + " 条答案";
+    if (!list.length) { box.innerHTML = G.empty("该问题在当前周期没有有效答案"); return; }
+    var nav = G.pagerNav("answers", G.pagerInit("answers", loadAnswers).page,
+      state.answerPages || 1, state.answerTotal);
+    box.innerHTML = list.map(function (a) {
+      var own = (a.mentions || []).filter(function (m) { return m.subject_type === "own"; })[0];
+      var cites = (a.citations || []).length;
+      return '<div class="answer"><div class="head">' +
+        '<span class="tag">' + esc(a.model_key) + "</span>" +
+        '<span class="muted">' + esc(a.collected_at.slice(0, 16).replace("T", " ")) + "</span>" +
+        (own ? '<span class="tag ok">本品牌 · 第 ' + G.num(own.position) + " 位</span>"
+             : '<span class="tag">未提及</span>') +
+        (own && own.sentiment ? '<span class="tag">' + esc({pos:"正面",neu:"中性",neg:"负面"}[own.sentiment] || own.sentiment) + "</span>" : "") +
+        '<span class="spacer"></span><a class="plain" href="/answer/' + esc(a.id) + '">证据详情 →</a></div>' +
+        '<div class="text">' + esc((a.text || "").slice(0, 320)) + ((a.text || "").length > 320 ? "…" : "") + "</div>" +
+        '<div class="cite">引用 ' + cites + " 条 · 通道 " + esc(a.channel) + "</div></div>";
+    }).join("") + nav;
+  }
+
+  // 按问题在服务端过滤并分页：全量拉取 + 前端过滤只能看到最后 100 条里的残片，
+  // 而 196 条答案必须真能翻页翻到，所以每页都带 page 参数去服务端取。
+  var ANSWER_PAGE_SIZE = 10;
+
+  async function loadAnswers() {
+    var t = G.tracker();
+    if (!t || !state.current) {
+      state.answers = []; state.answerTotal = 0;
+      renderAnswers();
+      return;
+    }
+    var st = G.pagerInit("answers", loadAnswers);
+    $("answers").innerHTML = '<div class="empty">加载中…</div>';
+    try {
+      var d = await G.get("/trackers/" + t + "/answers?" + G.dates() +
+        "&questionId=" + encodeURIComponent(state.current) +
+        "&limit=" + ANSWER_PAGE_SIZE + "&page=" + st.page);
+      var total = (d.page && d.page.total) || 0;
+      var pages = Math.max(1, Math.ceil(total / ANSWER_PAGE_SIZE));
+      if (st.page > pages) { st.page = pages; return loadAnswers(); }
+      state.answers = d.items || [];
+      state.answerTotal = total;
+      state.answerPages = pages;
+      renderAnswers();
+    } catch (e) { G.fail(e, ["answers"]); }
+  }
+
+  async function load() {
+    var t = G.tracker(); if (!t) return;
+    G.pagerReset("answers");
+    $("questions").innerHTML = '<div class="empty">加载中…</div>';
+    try {
+      var qs = await G.get("/trackers/" + t + "/questions");
+      state.questions = qs.items || [];
+      if (!state.current || !state.questions.some(function (x) { return x.id === state.current; })) {
+        state.current = state.questions.length ? state.questions[0].id : null;
+      }
+      renderQuestions();
+      await loadAnswers();
+    } catch (e) { G.fail(e, ["questions", "answers"]); }
+  }
+
+  $("questions").addEventListener("click", function (e) {
+    var el = e.target.closest("[data-id]");
+    if (!el) return;
+    state.current = el.dataset.id;
+    G.pagerReset("answers");
+    renderQuestions(); loadAnswers();
+  });
+  $("load").addEventListener("click", load);
+  (async function () { await G.fillTrackers(); await load(); })();
+})();
+</script>
+</body>
+</html>

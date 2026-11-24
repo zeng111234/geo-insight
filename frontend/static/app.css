@@ -1,0 +1,298 @@
+/* 共享布局与组件样式。颜色只来自 theme.css，页面不再写死色值。 */
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+code { background: var(--panel-2); padding: 2px 5px; border-radius: 4px; }
+.muted { color: var(--muted); }
+.good { color: var(--teal); }
+.warn-text { color: var(--amber); }
+.bad { color: var(--red); }
+.nowrap { white-space: nowrap; }
+
+/* 外框 */
+.shell { display: grid; grid-template-columns: 196px minmax(0, 1fr); min-height: 100vh; }
+aside.side {
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  padding: 14px 10px;
+  position: sticky; top: 0; height: 100vh;
+  display: flex; flex-direction: column; overflow-y: auto;
+}
+aside.side nav { flex: 1; }
+.brand { display: flex; align-items: center; gap: 8px; padding: 2px 6px 14px; font-weight: 600; color: var(--text-strong); }
+.brand .dot { width: 10px; height: 10px; border-radius: 3px; background: var(--violet); flex: none; }
+.brand small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+aside.side nav a {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px; margin-bottom: 1px; border-radius: 7px;
+  color: var(--muted); font-size: 12.5px;
+}
+aside.side nav a .ico { flex: none; opacity: .8; }
+aside.side nav a:hover { background: var(--panel); color: var(--text); text-decoration: none; }
+aside.side nav a.active { background: var(--accent-weak); color: var(--accent-ink); font-weight: 500; }
+aside.side nav a.active .ico { opacity: 1; }
+aside.side nav .group { color: var(--muted); font-size: 11px; padding: 12px 9px 4px; opacity: .85; letter-spacing: .04em; }
+.side-foot {
+  margin-top: auto; padding: 10px 9px 2px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--text-body); line-height: 1.7;
+}
+.side-foot .k { color: var(--muted); font-size: 10.5px; margin-bottom: 2px; }
+
+/* 页面收口：口径与数据范围落在底部。内容少的页面下方会空一大片，
+   光调间距治不了，得用真实信息压住底边，视觉重心才不头重脚轻。 */
+.page-foot {
+  margin: 18px 20px 22px; padding: 13px 16px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel-2); font-size: 11.5px; line-height: 1.8; color: var(--text-body);
+}
+.page-foot .k {
+  color: var(--muted); font-size: 10.5px; letter-spacing: .05em;
+  margin-bottom: 5px; text-transform: uppercase;
+}
+.page-foot code {
+  font-size: 11px; color: var(--accent-ink); background: var(--accent-weak);
+  padding: 1px 5px; border-radius: 4px;
+}
+.page-foot .muted { margin-top: 4px; }
+
+/* main 用纵向 flex 撑满 shell 的 100vh，页脚才会沉到视口底部：
+   内容短的页面（如报告中心）下方不该留一大片空白。 */
+main { min-width: 0; display: flex; flex-direction: column; }
+header.top {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 12px 20px; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 20;
+}
+header.top h1 { font-size: 15px; font-weight: 600; margin: 0; color: var(--text-strong); }
+header.top .sub { color: var(--muted); font-size: 11.5px; }
+.spacer { margin-left: auto; }
+.content { padding: 16px 20px 20px; flex: 1 1 auto; }
+
+/* 控件 */
+button, .btn {
+  font: inherit; font-size: 12px; cursor: pointer;
+  color: var(--text); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 7px; padding: 6px 11px;
+  transition: background .12s, border-color .12s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+button:hover:not(:disabled), .btn:hover { border-color: #ccd2e3; background: var(--subtle); text-decoration: none; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.ghost { background: transparent; }
+button.danger { color: var(--red-ink); border-color: var(--red-line); background: var(--red-tint); }
+button.small { padding: 3px 8px; font-size: 11px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid rgba(108, 92, 231, .45); outline-offset: 1px;
+}
+input, select, textarea {
+  font: inherit; font-size: 12px; color: var(--text);
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 7px; padding: 6px 10px;
+}
+input[type="date"] { padding: 5px 8px; }
+textarea { width: 100%; line-height: 1.75; padding: 9px 11px; resize: vertical; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: 2px solid rgba(108, 92, 231, .14); }
+label.field { display: block; margin-bottom: 12px; }
+label.field > span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+label.field > input, label.field > select, label.field > textarea { width: 100%; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row.end { justify-content: flex-end; }
+
+/* 面板与栅格 */
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.panel > h2 {
+  font-size: 12.5px; font-weight: 600; color: var(--text-strong);
+  margin: 0; padding: 11px 14px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+  /* 标题文字是匿名 flex item，长 badge 会把它压成竖排折字；允许 badge 换行而不是挤标题。 */
+  flex-wrap: wrap; white-space: nowrap;
+}
+.panel > h2 .badge { margin-left: auto; white-space: normal; }
+.panel > .body { padding: 13px 14px; }
+/* 面板高度由内容决定。grid 默认 stretch 会把矮面板拉到和邻居一样高，
+   多出来的高度变成面板内部空白，看起来就是「头重脚轻」。 */
+.grid { display: grid; gap: 14px; align-items: start; }
+/* 同排面板等高：不留外部空隙（空白收进带边框卡片里）。
+   但图表必须按容器实际尺寸画满，否则又变成卡片内一片空白。 */
+.grid.c2, .grid.c3, .main-split, .grid.side { align-items: stretch; }
+.grid.c2 > .panel, .grid.c3 > .panel, .main-split > .panel, .grid.side > .panel {
+  display: flex; flex-direction: column; min-width: 0;
+}
+/* 只有显式标了 fill 的图表容器才拉伸，避免表格体被拉出空白 */
+.panel > .body.fill { flex: 1 1 auto; min-height: 120px; }
+/* 拉伸后面板内的 body 填满剩余空间，空白收在 body 内部（带 padding）而不是面板边缘 */
+.grid.c2 > .panel > .body, .grid.c3 > .panel > .body,
+.main-split > .panel > .body, .grid.side > .panel > .body { flex: 1 1 auto; }
+.main-split { grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
+.grid.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid.side { grid-template-columns: 360px minmax(0, 1fr); }
+.grid + .grid { margin-top: 14px; }
+/* 中等宽度：侧栏收窄但不消失。以前 1180px 直接 display:none，
+   在预览面板/笔记本上整块导航会凭空不见，看起来像页面坏了。 */
+@media (max-width: 1180px) {
+  .grid.c3, .grid.side { grid-template-columns: 1fr; }
+  .shell { grid-template-columns: 168px minmax(0, 1fr); }
+  aside.side { padding: 12px 8px; }
+  aside.side nav a { font-size: 12px; padding: 6px 7px; }
+  aside.side nav .group { padding: 10px 7px 3px; }
+  /* 顶栏控件多，窄屏先收掉副标题和留白，避免「口径说明」被挤到第二行。 */
+  header.top { padding: 10px 14px; gap: 8px; }
+  header.top .sub { display: none; }
+  header.top input[type="date"] { width: 132px; }
+}
+@media (max-width: 1000px) {
+  .main-split { grid-template-columns: 1fr; }
+}
+/* 极窄：侧栏改成顶部横向导航，仍然可见可点，而不是整块藏掉。 */
+@media (max-width: 760px) {
+  .grid.c2 { grid-template-columns: 1fr; }
+  .shell { display: block; }
+  aside.side {
+    position: static; height: auto; border-right: none;
+    border-bottom: 1px solid var(--border); overflow: visible;
+  }
+  aside.side nav { display: flex; flex-wrap: wrap; gap: 4px; }
+  aside.side nav .group { width: 100%; padding: 6px 4px 0; }
+  aside.side nav a { margin-bottom: 0; padding: 5px 8px; }
+  .brand { padding-bottom: 8px; }
+  .side-foot { display: none; }
+  .content { padding: 14px; }
+}
+
+/* 指标卡 */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 12px; }
+.card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 13px 14px; box-shadow: var(--shadow);
+}
+.card.clickable { cursor: pointer; text-align: left; }
+.card.clickable:hover { border-color: var(--accent); }
+.card .label { font-size: 11.5px; color: var(--muted); margin-bottom: 6px; }
+.card .value { font-size: 23px; font-weight: 600; line-height: 1.2; color: var(--text-strong); }
+.card .value.small { font-size: 15px; }
+.card .sub { font-size: 11px; color: var(--muted); margin-top: 6px; }
+.card .hint { font-size: 10.5px; color: var(--accent-ink); margin-top: 6px; }
+
+/* 徽标 / 标签 */
+.badge {
+  font-size: 11px; color: var(--muted); background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px;
+}
+.tag { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2); }
+.tag.ok { color: var(--green-ink); border-color: var(--green-line); background: var(--green-tint); }
+.tag.warn { color: var(--amber-ink); border-color: var(--amber-line); background: var(--amber-tint); }
+.tag.bad { color: var(--red-ink); border-color: var(--red-line); background: var(--red-tint); }
+.tag.core { color: var(--accent-ink); border-color: var(--accent-weak); background: var(--accent-weak); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: 11.5px;
+}
+.chip.on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-weak); }
+
+/* 表格 */
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; background: var(--subtle); white-space: nowrap; }
+tbody tr:hover td { background: var(--subtle); }
+tbody tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table-wrap { overflow-x: auto; }
+
+/* 空状态与提示 */
+.empty { color: var(--muted); font-size: 12.5px; padding: 22px 0; text-align: center; }
+.notice { border-radius: 8px; padding: 9px 11px; font-size: 12px; line-height: 1.65; margin-bottom: 12px; }
+.notice.ok { border: 1px solid var(--green-line); background: var(--green-tint); color: var(--green-ink); }
+.notice.warn { border: 1px solid var(--amber-line); background: var(--amber-tint); color: var(--amber-ink); }
+.notice.error { border: 1px solid var(--red-line); background: var(--red-tint); color: var(--red-ink); }
+.notice:last-child { margin-bottom: 0; }
+
+/* 明细分页：统一 10 行/页 */
+.pager {
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  padding: 10px 2px 2px;
+}
+.pager .pgbtn {
+  font: inherit; font-size: 11.5px; padding: 4px 12px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel); color: var(--text); cursor: pointer;
+}
+.pager .pgbtn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-ink); }
+.pager .pgbtn:disabled { opacity: 0.45; cursor: default; }
+.pager .pginfo { color: var(--muted); font-size: 11.5px; }
+.pager .pgjump {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--muted); font-size: 11.5px;
+}
+.pager .pgjump input {
+  width: 52px; padding: 3px 6px; font: inherit; font-size: 11.5px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text);
+  text-align: center;
+}
+.pager .pgjump input:focus { outline: 2px solid var(--accent-weak); border-color: var(--accent); }
+
+/* 图表按容器实测尺寸绘制（1:1），拉伸填充而不变形 */
+.spark { width: 100%; height: 100%; display: block; min-height: 140px; }
+
+/* 情感条 */
+.sentiment { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--panel-2); margin-top: 8px; }
+.sentiment span { display: block; height: 100%; }
+.sentiment .pos { background: var(--teal); }
+.sentiment .neu { background: #c3c9d8; }
+.sentiment .neg { background: var(--red); }
+
+/* 抽屉 */
+.scrim {
+  position: fixed; inset: 0; background: rgba(31, 36, 48, .28);
+  opacity: 0; pointer-events: none; transition: opacity .16s; z-index: 40;
+}
+.scrim.show { opacity: 1; pointer-events: auto; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(760px, 94vw);
+  background: var(--panel); border-left: 1px solid var(--border);
+  box-shadow: -8px 0 30px rgba(31, 36, 48, .12);
+  transform: translateX(100%); transition: transform .18s;
+  z-index: 50; display: flex; flex-direction: column;
+}
+.drawer.show { transform: translateX(0); }
+.drawer header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.drawer header h3 { margin: 0; font-size: 13.5px; color: var(--text-strong); }
+.drawer header .sub { color: var(--muted); font-size: 11.5px; }
+.drawer .drawer-body { padding: 14px 16px; overflow: auto; }
+
+/* 提示条 */
+.toast {
+  position: fixed; right: 18px; bottom: 18px; max-width: 420px;
+  padding: 11px 14px; border-radius: 9px;
+  background: var(--panel); border: 1px solid var(--border); color: var(--text-body);
+  font-size: 12px; line-height: 1.65; box-shadow: 0 8px 28px rgba(31, 36, 48, .14);
+  opacity: 0; transform: translateY(8px); transition: .18s; pointer-events: none; z-index: 60;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.warn { border-color: var(--amber-line); background: var(--amber-tint); color: var(--amber-ink); }
+.toast.error { border-color: var(--red-line); background: var(--red-tint); color: var(--red-ink); }
+
+/* 打印：报告导出 PDF 走浏览器打印，不需要额外渲染服务 */
+@media print {
+  body { background: #fff; font-size: 12px; }
+  aside.side, header.top .no-print, .no-print, .toast, .drawer, .scrim { display: none !important; }
+  .shell { display: block; }
+  .content { padding: 0; }
+  .panel { box-shadow: none; border-color: #d8dbe6; break-inside: avoid; }
+  .grid { gap: 10px; }
+  a { color: var(--text); }
+}

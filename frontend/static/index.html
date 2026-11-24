@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<title>GEO Insight · 工作台</title>
+</head>
+<body>
+<script>
+// 用文件方式打开时给出明确指引，避免看到 Failed to fetch 不知所措
+if (location.protocol === "file:") {
+  document.addEventListener("DOMContentLoaded", function () {
+    var bar = document.createElement("div");
+    bar.style.cssText = "position:sticky;top:0;z-index:99;background:#fdf4e3;color:#8a4f0a;border-bottom:1px solid #f2dcb3;padding:10px 16px;font:13px/1.7 system-ui,'Microsoft YaHei';";
+    bar.innerHTML = '页面是用文件方式打开的，接口请求会被浏览器拦掉。请双击项目根目录的 <b>start.bat</b>，再访问 <a style="color:#4b3fd1" href="http://127.0.0.1:8123">http://127.0.0.1:8123</a>。';
+    document.body.insertBefore(bar, document.body.firstChild);
+  });
+}
+</script>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span><div>GEO Insight<small>品牌在 AI 答案里的位置</small></div></div>
+    <nav>
+      <a href="/" class="active">工作台</a>
+      <a href="/settings">监控配置</a>
+      <a href="/studio">内容工作室</a>
+      <a href="/reports">报告中心</a>
+    </nav>
+  </aside>
+  <main>
+    <header class="top">
+      <h1>工作台</h1>
+      <span class="sub" id="scope">加载中…</span>
+      <span class="spacer"></span>
+      <select id="tracker" aria-label="监控对象"></select>
+      <input id="from" type="date" value="2026-11-01" aria-label="开始日期" />
+      <input id="to" type="date" value="2026-11-30" aria-label="结束日期" />
+      <button id="load" class="primary">查询</button>
+      <button id="methodBtn" class="ghost">口径说明</button>
+    </header>
+
+    <div class="content">
+      <div id="quality"></div>
+      <div class="sub" id="meta" style="margin-bottom:12px">正在读取…</div>
+      <div class="cards" id="cards"></div>
+
+      <div class="grid main-split" style="margin-top:14px">
+        <section class="panel">
+          <h2>提及率趋势 <span class="badge" id="trendBadge">按日</span></h2>
+          <div class="body fill" id="trend"><div class="empty">加载中…</div></div>
+          <div class="body" id="trendTable" style="padding-top:0"></div>
+        </section>
+        <section class="panel">
+          <h2>信源分布 <span class="badge" id="citeBadge"></span></h2>
+          <div class="body" id="citations"><div class="empty">加载中…</div></div>
+        </section>
+      </div>
+
+      <section class="panel" style="margin-top:14px">
+        <h2>问答明细
+          <span class="badge" id="answerBadge"></span>
+          <button type="button" class="badge" id="exportLink" style="cursor:pointer">导出 CSV</button>
+        </h2>
+        <div class="body" id="answers"><div class="empty">加载中…</div></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <header>
+    <div>
+      <h3 id="drawerTitle">—</h3>
+      <div class="sub" id="drawerSub"></div>
+    </div>
+    <span class="spacer"></span>
+    <button class="ghost small" id="drawerClose">关闭</button>
+  </header>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<script src="/static/app.js"></script>
+<script>
+const API_BASE = location.protocol === "file:" ? "http://127.0.0.1:8123" : "";
+const API = API_BASE + "/v1";
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const fmtPct = (v) => (v === null || v === undefined ? null : (v * 100).toFixed(1) + "%");
+const fmtNum = (v, d = 2) => (v === null || v === undefined ? null : Number(v).toFixed(d));
+const SENTI = { pos: "正面", neu: "中性", neg: "负面" };
+
+let state = { tracker: "", from: "2026-11-01", to: "2026-11-30" };
+
+function toast(text, kind = "") {
+  let el = document.querySelector(".toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "toast";
+    document.body.appendChild(el);
+  }
+  el.className = "toast show " + kind;
+  el.textContent = text;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => (el.className = "toast " + kind), 3600);
+}
+
+function openDrawer(title, sub, html) {
+  $("drawerTitle").textContent = title;
+  $("drawerSub").textContent = sub || "";
+  $("drawerBody").innerHTML = html;
+  $("drawer").classList.add("show");
+  $("drawer").setAttribute("aria-hidden", "false");
+  $("scrim").classList.add("show");
+}
+function closeDrawer() {
+  $("drawer").classList.remove("show");
+  $("drawer").setAttribute("aria-hidden", "true");
+  $("scrim").classList.remove("show");
+}
+$("scrim").addEventListener("click", closeDrawer);
+$("drawerClose").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+
+function card(label, metric, opts = {}) {
+  if (!metric) return "";
+  const insufficient = metric.status === "insufficient_samples";
+  const value = insufficient ? "样本不足" : (opts.kind === "num" ? fmtNum(metric.value) : fmtPct(metric.value));
+  const metricKey = opts.metric || "";
+  const hint = metricKey ? "点击查看构成样本 →" : "";
+  return `<div class="card clickable" role="button" tabindex="0" data-metric="${metricKey}" data-label="${esc(label)}">
+    <div class="label">${label}</div>
+    <div class="value ${insufficient ? "warn-text" : ""} ${insufficient ? "small" : ""}">${value ?? "—"}</div>
+    <div class="sub">样本基数 ${metric.sample_base ?? 0}</div>
+    ${hint ? `<div class="hint">${hint}</div>` : ""}
+  </div>`;
+}
+
+function sentimentCard(s) {
+  const insufficient = s.status === "insufficient_samples";
+  return `<div class="card clickable" role="button" tabindex="0" data-metric="sentiment" data-label="情感倾向">
+    <div class="label">情感倾向</div>
+    <div class="value ${insufficient ? "small warn-text" : ""}">${
+      insufficient ? "样本不足" : `正 ${fmtPct(s.pos)} · 中 ${fmtPct(s.neu)} · 负 ${fmtPct(s.neg)}`
+    }</div>
+    ${insufficient ? "" : `<div class="sentiment">
+      <span class="pos" style="width:${(s.pos || 0) * 100}%"></span>
+      <span class="neu" style="width:${(s.neu || 0) * 100}%"></span>
+      <span class="neg" style="width:${(s.neg || 0) * 100}%"></span>
+    </div>`}
+    <div class="sub">分母为提及样本 ${s.base} 条</div>
+    <div class="hint">点击查看构成样本 →</div>
+  </div>`;
+}
+
+function renderTrend(points) {
+  if (!points.length) {
+    $("trend").innerHTML = '<div class="empty">该周期没有按日数据</div>';
+    $("trendTable").innerHTML = "";
+    return;
+  }
+  // 按容器实际像素绘图（1:1），图表填满面板高度；同排面板拉齐后重绘一次。
+  const box = $("trend");
+  const draw = () => {
+    const cs = getComputedStyle(box);
+    const w = Math.max(360, box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
+    const h = Math.max(170, box.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom));
+    box.innerHTML = trendSVG(points, w, h);
+  };
+  draw();
+  requestAnimationFrame(draw);
+  if (!renderTrend._resize) {
+    renderTrend._resize = () => { if (state && state.lastPoints) renderTrend(state.lastPoints); };
+    window.addEventListener("resize", renderTrend._resize);
+  }
+  state.lastPoints = points;
+
+  // 折线只有图表区，下方用每日摘要把面板填满，顺带让人能核对每个点的分母。
+  const pg = GEO.pagerSlice("trendTable", points, function () { renderTrend(points); });
+  $("trendTable").innerHTML = `<div class="table-wrap"><table><thead><tr>
+    <th>日期</th><th class="num">有效样本</th><th class="num">提及数</th>
+    <th class="num">提及率</th><th class="num">平均排名</th></tr></thead><tbody>${pg.slice.map((p) => `
+      <tr><td class="nowrap">${esc(p.date)}</td>
+      <td class="num">${p.valid_total ?? "—"}</td>
+      <td class="num">${p.mention_total ?? "—"}</td>
+      <td class="num">${p.mention_rate === null || p.mention_rate === undefined ? "样本不足" : fmtPct(p.mention_rate)}</td>
+      <td class="num">${p.avg_rank === null || p.avg_rank === undefined ? "—" : fmtNum(p.avg_rank)}</td></tr>`).join("")}
+    </tbody></table></div>${pg.nav}`;
+}
+
+function trendSVG(points, w, h) {
+  const pad = 26;
+  const values = points.map((p) => p.mention_rate).filter((v) => v !== null);
+  const max = Math.max(0.01, ...values);
+  const step = points.length > 1 ? (w - pad * 2) / (points.length - 1) : 0;
+  const xy = points.map((p, i) => {
+    const x = pad + i * step;
+    const y = h - pad - ((p.mention_rate ?? 0) / max) * (h - pad * 2);
+    return { x, y, p, missing: p.mention_rate === null || p.mention_rate === undefined };
+  });
+  // 缺失日不进折线也不画圆点（否则会画成 0% 造成假下跌）；日期轴仍标「—」。
+  const present = xy.filter((o) => !o.missing);
+  const labelEvery = Math.max(1, Math.ceil(points.length / 12));
+  const valEvery = labelEvery * 2;
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="100%" height="100%" role="img" aria-label="提及率趋势">
+    <line x1="${pad}" y1="${h - pad}" x2="${w - pad}" y2="${h - pad}" stroke="var(--border)" stroke-width="1"/>
+    <polyline points="${present.map((o) => `${o.x},${o.y}`).join(" ")}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    ${present.map((o) => `<circle cx="${o.x}" cy="${o.y}" r="3.5" fill="var(--accent)"><title>${o.p.date} ${fmtPct(o.p.mention_rate) ?? "—"}</title></circle>`).join("")}
+    ${xy.map((o, i) => (i % labelEvery === 0 || i === xy.length - 1) ? `<text x="${o.x}" y="${h - 6}" fill="var(--muted)" font-size="11" text-anchor="middle">${o.missing ? "—" : o.p.date.slice(5)}</text>` : "").join("")}
+    ${present.map((o, i) => (i % valEvery === 0 || i === present.length - 1) ? `<text x="${o.x}" y="${o.y - 9}" fill="var(--muted)" font-size="10" text-anchor="middle">${fmtPct(o.p.mention_rate)}</text>` : "").join("")}
+  </svg>`;
+}
+
+function renderCitations(c, detail) {
+  // 只用一个 badge：以前往 badge 里再插一个 badge，会嵌套出「…18 个 URL 18 个 URL…」的重复文字。
+  // totals 与汇总口径一致（全量 URL / 全量次数），再拼一次就是重复；真正有用的信号是明细是否被截断。
+  const parts = c.total_citations
+    ? [`${c.total_citations} 次引用`, `${c.unique_urls} 个 URL`]
+    : ["无引用"];
+  if (detail && detail.items && detail.items.length < detail.total_urls) {
+    parts.push(`明细前 ${detail.items.length} 条`);
+  }
+  $("citeBadge").textContent = parts.join(" · ");
+  if (!c.total_citations) {
+    $("citations").innerHTML = '<div class="empty">该周期没有引用记录</div>';
+    return;
+  }
+  const unknown = c.unknown_published_share;
+  const bars = c.by_type.map((t) => `
+    <div class="row" style="margin-bottom:6px">
+      <span class="tag">${esc(t.media_type)}</span>
+      <span class="mono">${t.count}</span>
+      <span class="muted">${fmtPct(t.share)}</span>
+    </div>`).join("");
+  const media = c.top_media.slice(0, 5).map((m) =>
+    `<tr><td>${esc(m.media_name)}</td><td class="num">${m.count}</td><td class="num">${fmtPct(m.share)}</td></tr>`
+  ).join("");
+  const urls = detail && detail.items ? detail.items.slice(0, 6).map((u) =>
+    `<tr><td><a class="plain" href="${esc(u.url)}" target="_blank" rel="noreferrer">${esc(u.media_name || u.domain || u.url)}</a>
+       <div class="muted mono" style="font-size:11px">${esc(u.domain || "")}</div></td>
+     <td><span class="tag">${esc(u.media_type || "未知")}</span></td>
+     <td class="num">${u.times}</td><td class="num">${esc((u.first_seen || "").slice(0, 10))}</td></tr>`
+  ).join("") : "";
+  const urlBlock = urls
+    ? `<div class="label" style="margin:12px 0 6px">信源明细（按 URL 去重，次数累计）</div>
+       <div class="table-wrap"><table><thead><tr><th>来源</th><th>类型</th><th class="num">次数</th><th class="num">首次出现</th></tr></thead>
+       <tbody>${urls}</tbody></table></div>`
+    : "";
+  $("citations").innerHTML = `
+    ${unknown !== null && unknown > 0.5 ? `<div class="notice warn">发布时间未知占 ${fmtPct(unknown)}，时间分布不作结论。</div>` : ""}
+    ${bars}
+    <div class="table-wrap" style="margin-top:10px">
+      <table><thead><tr><th>媒体</th><th class="num">次数</th><th class="num">占比</th></tr></thead><tbody>${media}</tbody></table>
+    </div>${urlBlock}`;
+}
+
+function answerExportUrl() {
+  return `${API}/trackers/${state.tracker}/answers/export?from=${state.from}&to=${state.to}&format=csv`;
+}
+
+// 服务端分页：全周期 1300+ 条答案不可能一次拉完，「共 1302 条」必须真能翻到第 131 页。
+const ANSWER_PAGE_SIZE = 10;
+
+async function loadAnswers() {
+  const st = GEO.pagerInit("answers", loadAnswers);
+  const q = `from=${state.from}&to=${state.to}`;
+  try {
+    const res = await fetch(`${API}/trackers/${state.tracker}/answers?${q}&limit=${ANSWER_PAGE_SIZE}&page=${st.page}`);
+    const answers = await res.json();
+    const total = (answers.page && answers.page.total) || 0;
+    const pages = Math.max(1, Math.ceil(total / ANSWER_PAGE_SIZE));
+    if (st.page > pages) { st.page = pages; return loadAnswers(); }
+    renderAnswers(answers, pages);
+  } catch (e) {
+    $("answers").innerHTML = `<div class="notice error">问答明细读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+function renderAnswers(answers, pages) {
+  $("answerBadge").textContent = `${answers.page.total} 条`;
+  $("exportLink").dataset.url = answerExportUrl();
+  if (!answers.items.length) {
+    $("answers").innerHTML = '<div class="empty">该周期没有问答明细</div>';
+    return;
+  }
+  const rows = answers.items.map((a) => {
+    const m = a.mentions.find((x) => x.subject_type === "own");
+    const pos = m ? (m.position === null ? "无列表" : `第 ${m.position} 位`) : "未提及";
+    const senti = m ? (SENTI[m.sentiment] || m.sentiment) : "—";
+    return `<tr>
+      <td>${esc(a.question_text)}</td>
+      <td>${esc(a.model_key)}</td>
+      <td class="nowrap">${a.collected_at.slice(0, 10)}</td>
+      <td>${pos}</td>
+      <td>${senti}</td>
+      <td class="num">${a.citations.length}</td>
+      <td><a href="/answer/${a.id}">原文 →</a></td>
+    </tr>`;
+  }).join("");
+  $("answers").innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>问题</th><th>模型</th><th>日期</th><th>本品牌位次</th><th>情感</th><th class="num">引用</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>` +
+    GEO.pagerNav("answers", answers.page.page, pages, answers.page.total);
+}
+
+function renderQuality(overview, plan, method) {
+  const notes = [];
+  const mentioned = overview.cards.mention_count;
+  const noList = overview.no_list_samples;
+  // 阈值来自口径说明接口，口径变更不需要改前端（宪法原则 I）。
+  const noListThreshold = (method && method.no_list_alert_threshold) || 0.5;
+  if (mentioned > 0 && noList / mentioned > noListThreshold) {
+    notes.push(`无列表样本占提及样本的 ${fmtPct(noList / mentioned)}（${noList}/${mentioned}），超过 ${fmtPct(noListThreshold)}，平均排名只代表其余样本。`);
+  }
+  const f = plan && plan.failure;
+  if (f && f.status === "over_threshold") {
+    notes.push(`采样失败率 ${fmtPct(f.rate)}（${f.failed}/${f.attempted}），超过阈值 ${fmtPct(f.threshold)}，本期数据可能不完整。`);
+  }
+  $("quality").innerHTML = notes.length ? `<div class="notice warn">${notes.map(esc).join("<br/>")}</div>` : "";
+}
+
+async function load() {
+  const tracker = $("tracker").value;
+  if (!tracker) return;
+  state = { tracker, from: $("from").value, to: $("to").value };
+  // 换查询条件必须回第 1 页，否则会停在旧数据的第 N 页上。
+  GEO.pagerReset("answers");
+  GEO.pagerReset("trendTable");
+  const q = `from=${state.from}&to=${state.to}`;
+  const btn = $("load");
+  btn.disabled = true;
+  $("meta").textContent = "正在读取…";
+  try {
+    const [ovRes, trRes, citeRes, planRes, methodRes, citeDetailRes] = await Promise.all([
+      fetch(`${API}/trackers/${tracker}/metrics/overview?${q}`),
+      fetch(`${API}/trackers/${tracker}/metrics/trend?${q}`),
+      fetch(`${API}/trackers/${tracker}/citations/summary?${q}`),
+      fetch(`${API}/trackers/${tracker}/sampling-plan`),
+      fetch(`${API}/meta/methodology`),
+      fetch(`${API}/trackers/${tracker}/citations?${q}`),
+    ]);
+    if (!ovRes.ok) {
+      const err = await ovRes.json();
+      throw new Error(`${err.code}: ${err.message}（request_id ${err.request_id}）`);
+    }
+    const [ov, tr, cite, plan, method, citeDetail] = await Promise.all([
+      ovRes.json(), trRes.json(), citeRes.json(), planRes.json(),
+      methodRes.json(), citeDetailRes.json(),
+    ]);
+    const c = ov.cards;
+    $("meta").textContent =
+      `周期 ${ov.period.from} ~ ${ov.period.to} · 有效样本 ${ov.valid_total} · 采样记录 ${ov.sample_total} · ` +
+      `无列表样本 ${ov.no_list_samples} · 口径 ${ov.metric_version}`;
+    $("cards").innerHTML = [
+      `<div class="card"><div class="label">提及数</div><div class="value">${c.mention_count}</div>
+        <div class="sub">提及样本 / 有效样本 ${ov.valid_total}</div></div>`,
+      card("提及率", c.mention_rate, { metric: "mention_rate" }),
+      card("覆盖率", c.coverage_rate, { metric: "coverage_rate" }),
+      card("平均排名", c.avg_rank, { metric: "avg_rank", kind: "num" }),
+      card("Top1", c.top1_rate, { metric: "top1_rate" }),
+      card("Top3", c.top3_rate, { metric: "top3_rate" }),
+      card("Top10", c.top10_rate, { metric: "top10_rate" }),
+      sentimentCard(c.sentiment),
+    ].join("");
+    renderTrend(tr.points);
+    renderCitations(cite, citeDetail);
+    await loadAnswers();
+    renderQuality(ov, plan, method);
+  } catch (e) {
+    const openedAsFile = location.protocol === "file:";
+    $("meta").innerHTML = '<span class="bad">读取失败：' + esc(e.message) + "</span>";
+    $("cards").innerHTML = `<div class="notice error">${openedAsFile
+      ? "页面是以 file:// 打开的，浏览器会拦掉对 127.0.0.1 的请求。请改开 http://127.0.0.1:8123。"
+      : "后端没有响应，或该监控对象不存在。在项目根目录双击 start.bat 即可启动。"}</div>`;
+    $("trend").innerHTML = '<div class="empty">—</div>';
+    $("citations").innerHTML = '<div class="empty">—</div>';
+    $("answers").innerHTML = '<div class="empty">—</div>';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function showSamples(metric, label) {
+  GEO.pagerReset("sampleDrawer");
+  openDrawer(label, "正在读取构成样本…", '<div class="empty">加载中…</div>');
+  try {
+    const res = await fetch(`${API}/trackers/${state.tracker}/metrics/${metric}/samples?from=${state.from}&to=${state.to}`);
+    if (!res.ok) throw new Error((await res.json()).message);
+    const data = await res.json();
+    const head = `${data.rule} · 分母 ${data.sample_base} 条 · 口径 ${data.metric_version}`;
+    $("drawerSub").textContent = head;
+    if (!data.items.length) {
+      $("drawerBody").innerHTML = '<div class="empty">该周期没有样本</div>';
+      return;
+    }
+    const rows = data.items.map((it) => {
+      if (metric === "coverage_rate") {
+        return `<tr class="${it.mentioned ? "" : "muted"}">
+          <td>${esc(it.question_text)}</td>
+          <td><span class="tag ${it.tier === "core" ? "core" : ""}">${it.tier === "core" ? "核心" : "长尾"}</span></td>
+          <td class="num">${it.valid_total}</td>
+          <td>${it.mentioned ? '<span class="tag ok">已提及</span>' : '<span class="tag">未提及</span>'}</td>
+        </tr>`;
+      }
+      return `<tr class="${it.in_denominator ? "" : "muted"}">
+        <td class="nowrap">${it.day}</td>
+        <td>${esc(it.model_key)}</td>
+        <td>${esc(it.question_text)}</td>
+        <td>${it.mentioned ? '<span class="tag ok">提及</span>' : '<span class="tag">未提及</span>'}</td>
+        <td>${it.position === null ? "—" : "第 " + it.position + " 位"}</td>
+        <td>${it.sentiment ? (SENTI[it.sentiment] || it.sentiment) : "—"}</td>
+        <td>${it.in_denominator ? '<span class="tag core">计入</span>' : '<span class="tag">不计入</span>'}</td>
+        <td><a href="/answer/${it.answer_id}">原文 →</a></td>
+      </tr>`;
+    });
+    const cols = metric === "coverage_rate"
+      ? '<th>问题</th><th>层级</th><th class="num">样本</th><th>结果</th>'
+      : '<th>日期</th><th>模型</th><th>问题</th><th>提及</th><th>位次</th><th>情感</th><th>分母</th><th></th>';
+    const notice = `<div class="notice ${data.status === "insufficient_samples" ? "warn" : "ok"}">
+      ${data.status === "insufficient_samples"
+        ? `样本基数 ${data.sample_base} 条，低于 3 条，该指标不给结论。`
+        : `当前值 ${metric === "avg_rank" ? fmtNum(data.value) : fmtPct(data.value)}，分母 ${data.sample_base} 条。`}
+    </div>`;
+    // 渲染与请求分开：翻页只重新切片渲染，不再重新请求也不 reset。
+    // 以前 redraw 回调指向 showSamples，开头的 pagerReset 把页码拉回 1，翻页永远翻不动。
+    const render = () => {
+      const pg = GEO.pagerSlice("sampleDrawer", rows, render);
+      $("drawerBody").innerHTML = notice +
+        `<div class="table-wrap"><table><thead><tr>${cols}</tr></thead><tbody>${pg.slice.join("")}</tbody></table></div>${pg.nav}`;
+    };
+    render();
+  } catch (e) {
+    $("drawerBody").innerHTML = `<div class="notice error">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function showMethodology() {
+  openDrawer("口径说明", "分母、位次定义与去重规则", '<div class="empty">加载中…</div>');
+  try {
+    const data = await (await fetch(`${API}/meta/methodology`)).json();
+    $("drawerSub").textContent = `口径版本 ${data.metric_version} · 样本不足阈值 ${data.min_samples} 条`;
+    const defs = data.definitions.map((d) => `<tr>
+      <td><b>${esc(d.label)}</b></td>
+      <td>${esc(d.formula)}</td>
+      <td>${esc(d.denominator)}</td>
+      <td class="muted">${esc(d.note)}</td>
+    </tr>`).join("");
+    $("drawerBody").innerHTML = `
+      <div class="table-wrap"><table><thead><tr><th>指标</th><th>公式</th><th>分母</th><th>说明</th></tr></thead><tbody>${defs}</tbody></table></div>
+      <h3 style="font-size:12.5px;margin:16px 0 6px">统一规则</h3>
+      <ul style="margin:0;padding-left:18px;line-height:1.9">${data.rules.map((r) => `<li>${esc(r)}</li>`).join("")}</ul>`;
+  } catch (e) {
+    $("drawerBody").innerHTML = `<div class="notice error">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+$("load").addEventListener("click", load);
+$("exportLink").addEventListener("click", () => {
+  if (!state.tracker) { return; }
+  window.location.href = answerExportUrl();
+});
+$("methodBtn").addEventListener("click", showMethodology);
+$("cards").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-metric]");
+  if (el && el.dataset.metric) showSamples(el.dataset.metric, el.dataset.label);
+});
+$("cards").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const el = e.target.closest("[data-metric]");
+  if (el && el.dataset.metric) { e.preventDefault(); showSamples(el.dataset.metric, el.dataset.label); }
+});
+
+async function initTrackers() {
+  const sel = $("tracker");
+  try {
+    const res = await fetch(`${API}/trackers`);
+    if (!res.ok) throw new Error("tracker list failed");
+    const items = (await res.json()).items || [];
+    if (!items.length) throw new Error("empty");
+    sel.innerHTML = items.map((x) => `<option value="${x.id}">${esc(x.brand_name || x.id)}</option>`).join("");
+    const first = items[0];
+    const label = [first.industry, first.region].filter(Boolean).join(" · ");
+    $("scope").textContent = (label ? label + " · " : "") + "演示数据";
+  } catch (e) {
+    sel.innerHTML = '<option value="11111111-1111-1111-1111-111111111111">演示监控对象</option>';
+    $("scope").textContent = "演示数据";
+  }
+}
+
+initTrackers().then(load);
+</script>
+</body>
+</html>

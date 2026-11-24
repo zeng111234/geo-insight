@@ -1,0 +1,1851 @@
+openapi: 3.1.0
+info:
+  title: GEO Insight API
+  version: 0.2.0
+  description: 'GEO Insight 首版接口。覆盖监控配置、问题集、采样计划、指标、明细、信源、报告与下钻。
+
+    所有接口返回 JSON；错误统一为 {code, message, request_id, details}。
+
+    写操作接受 Idempotency-Key 头，但首版不校验重复提交；重复保护依赖数据库唯一键（见 contracts/README）。
+
+    本地实现为 Starlette + SQLite 单进程（见 docs/decisions/002），路由与状态码以本文件为准。
+
+    PDF 导出由报告页在浏览器打印完成，不提供服务端渲染端点（见 docs/decisions/005）。
+
+    security 段是契约目标：首版未启用鉴权，角色校验见 tasks.md 的 T091。
+
+    run 触发端点（FR-009）首版未实现：真实采集未接入，不提供空壳接口；见 tasks.md T085。
+
+    '
+servers:
+- url: https://api.geo-insight.local/v1
+  description: 本地开发
+security:
+- bearerAuth: []
+tags:
+- name: trackers
+- name: questions
+- name: runs
+- name: metrics
+- name: answers
+- name: citations
+- name: reports
+- name: brands
+- name: config
+- name: meta
+paths:
+  /trackers:
+    get:
+      tags:
+      - trackers
+      summary: 监控对象列表
+      parameters:
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/Limit'
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - draft
+          - active
+          - paused
+          - archived
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tracker'
+                  page:
+                    $ref: '#/components/schemas/PageMeta'
+    post:
+      tags:
+      - trackers
+      summary: 创建监控对象
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrackerCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerDetail'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /trackers/{trackerId}:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    get:
+      tags:
+      - trackers
+      summary: 监控对象详情
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - trackers
+      summary: 更新状态或配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrackerPatch'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackerDetail'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /trackers/{trackerId}/questions:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    get:
+      tags:
+      - questions
+      summary: 问题列表
+      parameters:
+      - name: tier
+        in: query
+        schema:
+          type: string
+          enum:
+          - core
+          - long_tail
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - active
+          - disabled
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Question'
+                  summary:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      core:
+                        type: integer
+                      long_tail:
+                        type: integer
+                  page:
+                    $ref: '#/components/schemas/PageMeta'
+    post:
+      tags:
+      - questions
+      summary: 批量导入问题
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - items
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    $ref: '#/components/schemas/QuestionCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Question'
+                  duplicates:
+                    type: array
+                    items:
+                      type: string
+  /questions/{questionId}:
+    parameters:
+    - name: questionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    patch:
+      tags:
+      - questions
+      summary: 修改层级或状态
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuestionPatch'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Question'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /trackers/{trackerId}/metrics/overview:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    get:
+      tags:
+      - metrics
+      summary: 指标卡
+      parameters:
+      - $ref: '#/components/parameters/From'
+      - $ref: '#/components/parameters/To'
+      - $ref: '#/components/parameters/Model'
+      - $ref: '#/components/parameters/Channel'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricOverview'
+  /trackers/{trackerId}/metrics/trend:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    get:
+      tags:
+      - metrics
+      summary: 指标趋势
+      parameters:
+      - $ref: '#/components/parameters/From'
+      - $ref: '#/components/parameters/To'
+      - $ref: '#/components/parameters/Model'
+      - name: granularity
+        in: query
+        schema:
+          type: string
+          enum:
+          - day
+          - week
+          default: day
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrendResponse'
+  /trackers/{trackerId}/answers:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    get:
+      tags:
+      - answers
+      summary: 问答明细
+      parameters:
+      - $ref: '#/components/parameters/From'
+      - $ref: '#/components/parameters/To'
+      - $ref: '#/components/parameters/Model'
+      - name: questionId
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: citationScope
+        in: query
+        schema:
+          type: string
+          enum:
+          - all
+          - brand
+          - competitor
+          - media
+          default: all
+      - $ref: '#/components/parameters/Page'
+      - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnswerList'
+  /trackers/{trackerId}/citations/summary:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    get:
+      tags:
+      - citations
+      summary: 信源分布
+      parameters:
+      - $ref: '#/components/parameters/From'
+      - $ref: '#/components/parameters/To'
+      - $ref: '#/components/parameters/Model'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitationSummary'
+  /trackers/{trackerId}/reports:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    post:
+      tags:
+      - reports
+      summary: 生成周期报告
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportCreate'
+      responses:
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+    get:
+      tags:
+      - reports
+      summary: 报告列表
+      parameters:
+      - $ref: '#/components/parameters/TrackerId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReportSummary'
+  /reports/{reportId}:
+    parameters:
+    - name: reportId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - reports
+      summary: 报告详情（快照）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+  /trackers/{trackerId}/brand:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    get:
+      tags:
+      - brands
+      summary: 品牌信息与别名
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrandProfile'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /brands/{brandId}/aliases:
+    parameters:
+    - name: brandId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    post:
+      tags:
+      - brands
+      summary: 新增品牌别名
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AliasCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alias'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /brands/{brandId}/aliases/{aliasId}:
+    parameters:
+    - name: brandId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    - name: aliasId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    delete:
+      tags:
+      - brands
+      summary: 删除品牌别名
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /trackers/{trackerId}/competitors:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    get:
+      tags:
+      - config
+      summary: 竞品集合与版本
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompetitorSet'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+      - config
+      summary: 新增竞品（版本递增）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompetitorCreate'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  version:
+                    type: integer
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /trackers/{trackerId}/competitors/{competitorId}:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    - name: competitorId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    delete:
+      tags:
+      - config
+      summary: 移除竞品（版本递增）
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /trackers/{trackerId}/sampling-plan:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    - $ref: '#/components/parameters/From'
+    - $ref: '#/components/parameters/To'
+    get:
+      tags:
+      - config
+      summary: 采样计划与失败率
+      description: 核心问题 3 次/日、长尾 1 次/日，按模型展开；失败率 = 失败 run_item / 全部 run_item。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SamplingPlan'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /meta/methodology:
+    get:
+      tags:
+      - meta
+      summary: 口径说明
+      description: 分母、位次定义、去重规则与统一规则，页面与报告共用同一份文案。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Methodology'
+  /trackers/{trackerId}/metrics/{metric}/samples:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    - name: metric
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+        - mention_rate
+        - mention_count
+        - avg_rank
+        - top1_rate
+        - top3_rate
+        - top10_rate
+        - sentiment
+        - coverage_rate
+    - $ref: '#/components/parameters/From'
+    - $ref: '#/components/parameters/To'
+    - $ref: '#/components/parameters/Model'
+    - $ref: '#/components/parameters/Channel'
+    get:
+      tags:
+      - metrics
+      summary: 指标构成样本（下钻）
+      description: 每个指标按自身分母返回；in_denominator=false 的样本页面显示但不计入。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricSamples'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /answers/{answerId}:
+    parameters:
+    - name: answerId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      tags:
+      - answers
+      summary: 答案详情（原文、提及、引用、推荐清单）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnswerDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /trackers/{trackerId}/answers/export:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    - $ref: '#/components/parameters/From'
+    - $ref: '#/components/parameters/To'
+    - name: format
+      in: query
+      schema:
+        type: string
+        enum:
+        - csv
+        - jsonl
+        default: csv
+    get:
+      tags:
+      - answers
+      summary: 原始答案批量导出
+      description: CSV 带 UTF-8 BOM，列含答案原文、提及位次、情感、引用数量；JSONL 每行一条。
+      responses:
+        '200':
+          description: 文件流
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/x-ndjson:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /trackers/{trackerId}/citations:
+    parameters:
+    - $ref: '#/components/parameters/TrackerId'
+    - $ref: '#/components/parameters/From'
+    - $ref: '#/components/parameters/To'
+    get:
+      tags:
+      - citations
+      summary: 信源明细（按 URL 去重，次数累计）
+      description: FR-020：同一 URL 只返回一行，times 为累计出现次数；最多 100 条。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CitationDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TrackerId:
+      name: trackerId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    From:
+      name: from
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    To:
+      name: to
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date
+    Model:
+      name: model
+      in: query
+      schema:
+        type: string
+    Channel:
+      name: channel
+      in: query
+      schema:
+        type: string
+        enum:
+        - api
+        - web
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 64
+  responses:
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: 状态冲突或重复
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: 参数校验失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      required:
+      - code
+      - message
+      - request_id
+      properties:
+        code:
+          type: string
+          example: INSUFFICIENT_PERMISSION
+        message:
+          type: string
+        request_id:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    PageMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+    Tracker:
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - question_summary
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        brand_id:
+          type: string
+          format: uuid
+        brand_name:
+          type: string
+        industry:
+          type: string
+        region:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - active
+          - paused
+          - archived
+        owner_id:
+          type: string
+          format: uuid
+        competitor_set_version:
+          type: integer
+          nullable: true
+        question_summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            core:
+              type: integer
+            long_tail:
+              type: integer
+        created_at:
+          type: string
+          format: date-time
+    TrackerCreate:
+      type: object
+      required:
+      - name
+      - brand_name
+      properties:
+        name:
+          type: string
+          maxLength: 160
+        brand_name:
+          type: string
+          maxLength: 120
+        industry:
+          type: string
+        region:
+          type: string
+        brand_aliases:
+          type: array
+          items:
+            type: string
+        competitor_names:
+          type: array
+          items:
+            type: string
+    TrackerPatch:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - active
+          - paused
+          - archived
+        industry:
+          type: string
+        region:
+          type: string
+    Question:
+      type: object
+      required:
+      - id
+      - text
+      - tier
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        text:
+          type: string
+        tier:
+          type: string
+          enum:
+          - core
+          - long_tail
+        intent:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+          - active
+          - disabled
+        daily_samples:
+          type: integer
+          description: core=3
+          long_tail=1: null
+        created_at:
+          type: string
+          format: date-time
+    QuestionCreate:
+      type: object
+      required:
+      - text
+      properties:
+        text:
+          type: string
+          maxLength: 500
+        tier:
+          type: string
+          enum:
+          - core
+          - long_tail
+          default: long_tail
+        intent:
+          type: string
+    QuestionPatch:
+      type: object
+      properties:
+        tier:
+          type: string
+          enum:
+          - core
+          - long_tail
+        status:
+          type: string
+          enum:
+          - active
+          - disabled
+        intent:
+          type: string
+    RunCreate:
+      type: object
+      required:
+      - tracker_id
+      properties:
+        tracker_id:
+          type: string
+          format: uuid
+        question_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: 为空时按采样计划取全部启用问题
+        models:
+          type: array
+          items:
+            type: string
+        channel:
+          type: string
+          enum:
+          - api
+          - web
+          default: api
+        reason:
+          type: string
+          maxLength: 200
+    Run:
+      type: object
+      required:
+      - id
+      - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        tracker_id:
+          type: string
+          format: uuid
+        trigger:
+          type: string
+          enum:
+          - schedule
+          - manual
+          - backfill
+        status:
+          type: string
+          enum:
+          - queued
+          - running
+          - completed
+          - partial
+          - failed
+        scheduled_for:
+          type: string
+          format: date-time
+        stats:
+          type: object
+          properties:
+            planned:
+              type: integer
+            succeeded:
+              type: integer
+            failed:
+              type: integer
+            skipped:
+              type: integer
+        failures:
+          type: array
+          items:
+            type: object
+            properties:
+              run_item_id:
+                type: string
+                format: uuid
+              question_id:
+                type: string
+                format: uuid
+              model:
+                type: string
+              error_code:
+                type: string
+    MetricValue:
+      type: object
+      properties:
+        value:
+          type: number
+          nullable: true
+        status:
+          type: string
+          enum:
+          - ok
+          - insufficient_samples
+        sample_base:
+          type: integer
+    MetricOverview:
+      type: object
+      required:
+      - metric_version
+      - period
+      - cards
+      properties:
+        metric_version:
+          type: string
+          example: v1
+        period:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date
+            to:
+              type: string
+              format: date
+        sample_total:
+          type: integer
+        valid_total:
+          type: integer
+        no_list_samples:
+          type: integer
+          description: 无列表结构、不计入平均排名的样本数
+        cards:
+          type: object
+          properties:
+            mention_count:
+              type: integer
+            mention_rate:
+              $ref: '#/components/schemas/MetricValue'
+            avg_rank:
+              $ref: '#/components/schemas/MetricValue'
+            top1_rate:
+              $ref: '#/components/schemas/MetricValue'
+            top3_rate:
+              $ref: '#/components/schemas/MetricValue'
+            top10_rate:
+              $ref: '#/components/schemas/MetricValue'
+            sentiment:
+              type: object
+              properties:
+                pos:
+                  type: number
+                neu:
+                  type: number
+                neg:
+                  type: number
+                base:
+                  type: integer
+                  description: 情感分母，等于提及样本数
+    TrendResponse:
+      type: object
+      properties:
+        metric_version:
+          type: string
+        granularity:
+          type: string
+          enum:
+          - day
+          - week
+        model_changes:
+          type: array
+          description: 模型集合变更点，前端需在趋势上标注
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              added:
+                type: array
+                items:
+                  type: string
+              removed:
+                type: array
+                items:
+                  type: string
+        points:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              mention_rate:
+                type: number
+                nullable: true
+              avg_rank:
+                type: number
+                nullable: true
+              valid_total:
+                type: integer
+    AnswerList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnswerItem'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+    AnswerItem:
+      type: object
+      properties:
+        answer_id:
+          type: string
+          format: uuid
+        question_id:
+          type: string
+          format: uuid
+        question_text:
+          type: string
+        model:
+          type: string
+        channel:
+          type: string
+          enum:
+          - api
+          - web
+        collected_at:
+          type: string
+          format: date-time
+        text:
+          type: string
+        raw_uri:
+          type: string
+        is_valid:
+          type: boolean
+        mentions:
+          type: array
+          items:
+            type: object
+            properties:
+              brand_name:
+                type: string
+              subject_type:
+                type: string
+                enum:
+                - own
+                - competitor
+              position:
+                type: integer
+                nullable: true
+              sentiment:
+                type: string
+                enum:
+                - pos
+                - neu
+                - neg
+              snippet:
+                type: string
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CitationItem'
+    CitationItem:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        domain:
+          type: string
+        media_name:
+          type: string
+          nullable: true
+        media_type:
+          type: string
+        cite_type:
+          type: string
+          enum:
+          - inline
+          - reference
+          - video
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+        published_at_unknown:
+          type: boolean
+    CitationSummary:
+      type: object
+      properties:
+        total_citations:
+          type: integer
+        unique_domains:
+          type: integer
+        unique_urls:
+          type: integer
+        video_share:
+          type: number
+        unknown_published_share:
+          type: number
+        by_type:
+          type: array
+          items:
+            type: object
+            properties:
+              media_type:
+                type: string
+              count:
+                type: integer
+              share:
+                type: number
+        top_media:
+          type: array
+          items:
+            type: object
+            properties:
+              media_name:
+                type: string
+              count:
+                type: integer
+              share:
+                type: number
+    ReportCreate:
+      type: object
+      required:
+      - from
+      - to
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+          description: 必须严格晚于 from（至少 2 天）
+    Report:
+      type: object
+      required:
+      - id
+      - tracker_id
+      - status
+      - payload_hash
+      - payload
+      properties:
+        id:
+          type: string
+          format: uuid
+        tracker_id:
+          type: string
+          format: uuid
+        period_start:
+          type: string
+          format: date
+        period_end:
+          type: string
+          format: date
+        status:
+          type: string
+          enum:
+          - queued
+          - generating
+          - ready
+          - failed
+        metric_version:
+          type: string
+        model_set_hash:
+          type: string
+        competitor_set_version:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        ready_at:
+          type: string
+          format: date-time
+          nullable: true
+        payload_hash:
+          type: string
+          description: payload 规范化 JSON 的 sha256，用于证明快照未被改写
+        generated_at:
+          type: string
+          format: date-time
+        comparable:
+          type: boolean
+          nullable: true
+        mention_rate:
+          $ref: '#/components/schemas/MetricValue'
+        payload:
+          type: object
+          description: 不可变快照：tracker / period / sample / cards / trend / citations / models / comparison / conclusions
+          properties:
+            metric_version:
+              type: string
+            generated_at:
+              type: string
+              format: date-time
+            period:
+              type: object
+            sample:
+              type: object
+            cards:
+              type: object
+            trend:
+              type: array
+              items:
+                type: object
+            citations:
+              type: object
+            models:
+              type: array
+              items:
+                type: string
+            model_set_hash:
+              type: string
+            competitor_set_version:
+              type: integer
+              nullable: true
+            competitor_names:
+              type: array
+              items:
+                type: string
+            comparison:
+              type: object
+              properties:
+                previous_period:
+                  type: object
+                comparable:
+                  type: boolean
+                incomparable_reasons:
+                  type: array
+                  items:
+                    type: string
+                  description: 人类可读原因；非空时 delta_pp 必须为 null
+                before:
+                  type: object
+                after:
+                  type: object
+                delta_pp:
+                  type: number
+                  nullable: true
+            conclusions:
+              type: array
+              items:
+                type: object
+                properties:
+                  level:
+                    type: string
+                    enum:
+                    - info
+                    - warn
+                    - risk
+                  text:
+                    type: string
+    Alias:
+      type: object
+      required:
+      - id
+      - alias
+      - alias_type
+      properties:
+        id:
+          type: string
+          format: uuid
+        alias:
+          type: string
+        alias_type:
+          type: string
+          enum:
+          - full
+          - short
+          - en
+          - misspell
+        is_active:
+          type: boolean
+    AliasCreate:
+      type: object
+      required:
+      - alias
+      properties:
+        alias:
+          type: string
+          maxLength: 120
+        alias_type:
+          type: string
+          enum:
+          - full
+          - short
+          - en
+          - misspell
+          default: short
+    BrandProfile:
+      type: object
+      required:
+      - id
+      - name
+      - aliases
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        industry:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        tracker_name:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - active
+          - paused
+          - archived
+        aliases:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alias'
+    TrackerDetail:
+      allOf:
+      - $ref: '#/components/schemas/Tracker'
+      - type: object
+        properties:
+          brand:
+            $ref: '#/components/schemas/BrandProfile'
+          competitors:
+            $ref: '#/components/schemas/CompetitorSet'
+          sampling:
+            $ref: '#/components/schemas/SamplingPlan'
+          data_range:
+            type: object
+            properties:
+              first_day:
+                type: string
+                format: date
+                nullable: true
+              last_day:
+                type: string
+                format: date
+                nullable: true
+    CompetitorSet:
+      type: object
+      required:
+      - version
+      - items
+      properties:
+        set_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          nullable: true
+          description: 集合变更即递增，历史指标不重算
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              aliases:
+                type: string
+                description: JSON 数组字符串
+    CompetitorCreate:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          maxLength: 160
+    FailureStats:
+      type: object
+      properties:
+        attempted:
+          type: integer
+        failed:
+          type: integer
+        rate:
+          type: number
+          nullable: true
+        threshold:
+          type: number
+        status:
+          type: string
+          enum:
+          - ok
+          - over_threshold
+          - insufficient_data
+    SamplingPlan:
+      type: object
+      required:
+      - tracker_id
+      - daily_planned
+      - questions
+      - failure
+      properties:
+        tracker_id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum:
+          - api
+          - web
+          nullable: true
+        models:
+          type: array
+          items:
+            type: string
+        core_times:
+          type: integer
+          description: 核心问题每日采样次数，默认 3
+        long_tail_times:
+          type: integer
+          description: 长尾问题每日采样次数，默认 1
+        timezone:
+          type: string
+        effective_from:
+          type: string
+          format: date
+          nullable: true
+        questions:
+          type: object
+          properties:
+            total:
+              type: integer
+            core:
+              type: integer
+            long_tail:
+              type: integer
+        daily_planned:
+          type: integer
+          description: （核心数×3 + 长尾数×1）× 模型数
+        breakdown:
+          type: object
+          properties:
+            core_questions:
+              type: integer
+            core_daily:
+              type: integer
+            long_tail_questions:
+              type: integer
+            long_tail_daily:
+              type: integer
+            model_count:
+              type: integer
+        failure:
+          $ref: '#/components/schemas/FailureStats'
+        notes:
+          type: array
+          items:
+            type: string
+    Methodology:
+      type: object
+      required:
+      - metric_version
+      - definitions
+      - rules
+      properties:
+        metric_version:
+          type: string
+        min_samples:
+          type: integer
+        no_list_alert_threshold:
+          type: number
+        sampling_failure_threshold:
+          type: number
+        definitions:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              label:
+                type: string
+              formula:
+                type: string
+              denominator:
+                type: string
+              note:
+                type: string
+        rules:
+          type: array
+          items:
+            type: string
+    SampleItem:
+      type: object
+      properties:
+        answer_id:
+          type: string
+          format: uuid
+        question_id:
+          type: string
+          format: uuid
+        question_text:
+          type: string
+        tier:
+          type: string
+          enum:
+          - core
+          - long_tail
+        model_key:
+          type: string
+        channel:
+          type: string
+          enum:
+          - api
+          - web
+        day:
+          type: string
+          format: date
+        collected_at:
+          type: string
+          format: date-time
+        mentioned:
+          type: boolean
+        position:
+          type: integer
+          nullable: true
+        sentiment:
+          type: string
+          enum:
+          - pos
+          - neu
+          - neg
+          nullable: true
+        snippet:
+          type: string
+          nullable: true
+        in_denominator:
+          type: boolean
+          description: false 表示该样本不计入本指标分母
+        valid_total:
+          type: integer
+          description: 仅 coverage_rate 使用
+        mention_total:
+          type: integer
+          description: 仅 coverage_rate 使用
+    MetricSamples:
+      type: object
+      required:
+      - metric
+      - rule
+      - sample_base
+      - status
+      - items
+      properties:
+        metric:
+          type: string
+        label:
+          type: string
+        rule:
+          type: string
+          description: 分母口径说明，页面直接展示
+        metric_version:
+          type: string
+        period:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date
+            to:
+              type: string
+              format: date
+        sample_base:
+          type: integer
+        status:
+          type: string
+          enum:
+          - ok
+          - insufficient_samples
+        value:
+          type: number
+          nullable: true
+        distribution:
+          type: object
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SampleItem'
+    AnswerDetail:
+      type: object
+      required:
+      - id
+      - text
+      - mentions
+      - citations
+      properties:
+        id:
+          type: string
+          format: uuid
+        tracker_id:
+          type: string
+          format: uuid
+        tracker_name:
+          type: string
+        brand_name:
+          type: string
+        question_id:
+          type: string
+          format: uuid
+        question_text:
+          type: string
+        tier:
+          type: string
+          enum:
+          - core
+          - long_tail
+        model_key:
+          type: string
+        model_version:
+          type: string
+          nullable: true
+        channel:
+          type: string
+          enum:
+          - api
+          - web
+        raw_uri:
+          type: string
+        text:
+          type: string
+        text_hash:
+          type: string
+        collected_at:
+          type: string
+          format: date-time
+        latency_ms:
+          type: integer
+          nullable: true
+        is_valid:
+          type: boolean
+        mentions:
+          type: array
+          items:
+            type: object
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/CitationItem'
+        blocks:
+          type: array
+          items:
+            type: object
+    ReportSummary:
+      type: object
+      required:
+      - id
+      - period_start
+      - period_end
+      - status
+      - metric_version
+      properties:
+        id:
+          type: string
+          format: uuid
+        period_start:
+          type: string
+          format: date
+        period_end:
+          type: string
+          format: date
+        days:
+          type: integer
+        status:
+          type: string
+          enum:
+          - queued
+          - generating
+          - ready
+          - failed
+        metric_version:
+          type: string
+        model_set_hash:
+          type: string
+        competitor_set_version:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        ready_at:
+          type: string
+          format: date-time
+          nullable: true
+        payload_hash:
+          type: string
+        valid_total:
+          type: integer
+        mention_rate:
+          $ref: '#/components/schemas/MetricValue'
+        comparable:
+          type: boolean
+          nullable: true
+        delta_pp:
+          type: number
+          nullable: true
+        conclusion_count:
+          type: integer
+    CitationDetail:
+      type: object
+      required:
+      - items
+      - total_urls
+      - total_occurrences
+      - rule
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+                format: uri
+              domain:
+                type: string
+              media_name:
+                type: string
+                nullable: true
+              media_type:
+                type: string
+                nullable: true
+              times:
+                type: integer
+                description: 同一 URL 累计引用次数
+              first_seen:
+                type: string
+                format: date
+        total_urls:
+          type: integer
+        total_occurrences:
+          type: integer
+        rule:
+          type: string

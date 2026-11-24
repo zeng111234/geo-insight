@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<title>GEO Insight · 监控配置</title>
+<style>
+  .alias-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .alias { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 10px; background: var(--subtle); font-size: 11.5px; }
+  .alias button { border: none; background: transparent; padding: 0 2px; color: var(--muted); font-size: 14px; line-height: 1; }
+  .alias button:hover { color: var(--red); background: transparent; }
+  .q-row td { vertical-align: middle; }
+  .status-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .num-lg { font-size: 26px; font-weight: 600; color: var(--text-strong); }
+  .kv { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: 12px; }
+  .kv:last-child { border-bottom: none; }
+  dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0; box-shadow: 0 20px 60px rgba(31,36,48,.18); width: min(560px, 94vw); }
+  dialog::backdrop { background: rgba(31,36,48,.32); }
+  dialog h2 { margin: 0; font-size: 14px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
+  dialog .dialog-body { padding: 14px 16px; }
+  dialog .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--subtle); }
+</style>
+</head>
+<body>
+<script>
+if (location.protocol === "file:") {
+  document.addEventListener("DOMContentLoaded", function () {
+    var bar = document.createElement("div");
+    bar.style.cssText = "position:sticky;top:0;z-index:99;background:#fdf4e3;color:#8a4f0a;border-bottom:1px solid #f2dcb3;padding:10px 16px;font:13px/1.7 system-ui,'Microsoft YaHei';";
+    bar.innerHTML = '页面是用文件方式打开的，接口请求会被浏览器拦掉。请双击项目根目录的 <b>start.bat</b>，再访问 <a style="color:#4b3fd1" href="http://127.0.0.1:8123">http://127.0.0.1:8123</a>。';
+    document.body.insertBefore(bar, document.body.firstChild);
+  });
+}
+</script>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span><div>GEO Insight<small>品牌在 AI 答案里的位置</small></div></div>
+    <nav>
+      <a href="/">工作台</a>
+      <a href="/settings" class="active">监控配置</a>
+      <a href="/studio">内容工作室</a>
+      <a href="/reports">报告中心</a>
+    </nav>
+  </aside>
+  <main>
+    <header class="top">
+      <h1>监控配置</h1>
+      <span class="sub" id="scope">品牌、别名、竞品、问题与采样计划</span>
+      <span class="spacer"></span>
+      <select id="tracker" aria-label="监控对象"></select>
+      <button id="newBtn">新建监控对象</button>
+    </header>
+
+    <div class="content">
+      <div id="hint"></div>
+
+      <div class="grid side">
+        <section class="panel">
+          <h2>品牌信息 <span class="badge" id="statusBadge"></span></h2>
+          <div class="body">
+            <label class="field"><span>监控名称</span><input id="name" type="text" placeholder="例：辽宁辽征 · 律所" /></label>
+            <label class="field"><span>品牌名称</span><input id="brandName" type="text" placeholder="答案中出现的正式名称" /></label>
+            <div class="row">
+              <label class="field" style="flex:1"><span>行业</span><input id="industry" type="text" /></label>
+              <label class="field" style="flex:1"><span>地区</span><input id="region" type="text" /></label>
+            </div>
+            <div class="row">
+              <button class="primary" id="saveBrand">保存修改</button>
+              <span class="muted" id="saveState"></span>
+            </div>
+
+            <h3 style="font-size:12px;margin:18px 0 6px;color:var(--text-strong)">品牌别名</h3>
+            <div class="muted" style="font-size:11px">用于答案中的品牌识别，覆盖简称、英文名与常见错写。</div>
+            <div class="alias-list" id="aliases"></div>
+            <div class="row" style="margin-top:10px">
+              <input id="aliasInput" type="text" placeholder="新增别名" style="flex:1" />
+              <select id="aliasType">
+                <option value="short">简称</option>
+                <option value="en">英文</option>
+                <option value="misspell">错写</option>
+                <option value="full">全称</option>
+              </select>
+              <button id="addAlias">添加</button>
+            </div>
+
+            <h3 style="font-size:12px;margin:18px 0 6px;color:var(--text-strong)">状态</h3>
+            <div class="status-btns">
+              <button class="small" data-status="active">启用监控</button>
+              <button class="small" data-status="paused">暂停采样</button>
+              <button class="small danger" data-status="archived">归档</button>
+            </div>
+            <div class="muted" style="font-size:11px;margin-top:6px">归档后不可重新启用；历史数据保留。</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>问题集 <span class="badge" id="qSummary"></span></h2>
+          <div class="body">
+            <label class="field"><span>批量导入（每行一条，* 开头标为核心问题）</span>
+              <textarea id="importText" rows="8" placeholder="* 沈阳哪一家律所最专业&#10;沈阳刑事辩护律师大概需要多少费用&#10;沈阳交通事故律师怎么收费"></textarea>
+            </label>
+            <div class="row">
+              <label class="field" style="margin:0"><span>其余问题默认</span>
+                <select id="defaultTier">
+                  <option value="long_tail">长尾（每日 1 次）</option>
+                  <option value="core">核心（每日 3 次）</option>
+                </select>
+              </label>
+              <span class="spacer"></span>
+              <button class="primary" id="importBtn">导入并去重</button>
+            </div>
+            <div id="importResult"></div>
+            <div class="table-wrap" style="margin-top:12px">
+              <table>
+                <thead><tr><th>问题</th><th>层级</th><th class="num">样本</th><th></th></tr></thead>
+                <tbody id="qBody"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+              </table>
+            </div>
+            <div class="muted" style="font-size:11px;margin-top:8px">层级调整从次日生效，不回改历史采样次数。</div>
+          </div>
+        </section>
+      </div>
+
+      <div class="grid c3" style="margin-top:14px">
+        <section class="panel">
+          <h2>竞品集合 <span class="badge" id="compBadge"></span></h2>
+          <div class="body">
+            <div id="competitors"></div>
+            <div class="row" style="margin-top:10px">
+              <input id="competitorInput" type="text" placeholder="新增竞品名称" style="flex:1" />
+              <button id="addCompetitor">添加</button>
+            </div>
+            <div class="muted" style="font-size:11px;margin-top:8px">竞品集合变更会递增版本，历史指标不重算。</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>采样计划 <span class="badge" id="planBadge"></span></h2>
+          <div class="body" id="plan"><div class="empty">加载中…</div></div>
+        </section>
+
+        <section class="panel">
+          <h2>数据导出 <span class="badge">原始答案</span></h2>
+          <div class="body">
+            <div class="muted" style="font-size:11px;margin-bottom:10px">导出含答案原文、提及位次、情感与引用数量，CSV 带 BOM 可直接用 Excel 打开。</div>
+            <div class="row">
+              <label class="field" style="margin:0"><span>开始</span><input id="exportFrom" type="date" value="2026-11-01" /></label>
+              <label class="field" style="margin:0"><span>结束</span><input id="exportTo" type="date" value="2026-11-30" /></label>
+            </div>
+            <div class="row" style="margin-top:12px">
+              <button type="button" class="btn" id="exportCsv">下载 CSV</button>
+              <button type="button" class="btn" id="exportJsonl">下载 JSONL</button>
+            </div>
+            <div class="muted" style="font-size:11px;margin-top:10px">原始答案保留 180 天，到期归档。</div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+
+<dialog id="newDialog">
+  <form id="newForm">
+    <h2>新建监控对象</h2>
+    <div class="dialog-body">
+      <label class="field"><span>监控名称 *</span><input id="nName" type="text" required placeholder="例：大连示例医美" /></label>
+      <label class="field"><span>品牌名称 *</span><input id="nBrand" type="text" required placeholder="答案中出现的正式名称" /></label>
+      <div class="row">
+        <label class="field" style="flex:1"><span>行业</span><input id="nIndustry" type="text" /></label>
+        <label class="field" style="flex:1"><span>地区</span><input id="nRegion" type="text" /></label>
+      </div>
+      <label class="field"><span>别名（逗号分隔）</span><input id="nAliases" type="text" placeholder="简称, 英文名" /></label>
+      <label class="field"><span>竞品（逗号分隔）</span><input id="nCompetitors" type="text" /></label>
+      <div class="notice warn">保存后不会自动产生数据：先导入问题集，系统才按核心 3 次 / 长尾 1 次安排采样。</div>
+      <div id="newError"></div>
+    </div>
+    <div class="dialog-foot">
+      <button type="button" id="newCancel">取消</button>
+      <button type="submit" class="primary">创建</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const API_BASE = location.protocol === "file:" ? "http://127.0.0.1:8123" : "";
+const API = API_BASE + "/v1";
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtPct = (v) => (v === null || v === undefined ? "—" : (v * 100).toFixed(1) + "%");
+const STATUS_TEXT = { draft: "草稿", active: "启用中", paused: "已暂停", archived: "已归档" };
+
+let state = { tracker: "", brandId: "" };
+
+function toast(text, kind = "") {
+  let el = document.querySelector(".toast");
+  if (!el) { el = document.createElement("div"); el.className = "toast"; document.body.appendChild(el); }
+  el.className = "toast show " + kind;
+  el.textContent = text;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => (el.className = "toast " + kind), 4000);
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(API + path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (res.status === 204) return null;
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || body.code || res.status);
+  return body;
+}
+
+function renderDetail(d) {
+  state.brandId = d.brand.id;
+  $("name").value = d.name || "";
+  $("brandName").value = d.brand.name || "";
+  $("industry").value = d.industry || "";
+  $("region").value = d.region || "";
+  $("statusBadge").textContent = STATUS_TEXT[d.status] || d.status;
+  $("scope").textContent = [d.brand.name, d.industry, d.region].filter(Boolean).join(" · ");
+
+  const aliases = d.brand.aliases || [];
+  $("aliases").innerHTML = aliases.length
+    ? aliases.map((a) => `<span class="alias">${esc(a.alias)}
+        <span class="muted" style="font-size:10px">${esc(a.alias_type)}</span>
+        <button data-alias="${a.id}" title="删除别名" aria-label="删除 ${esc(a.alias)}">×</button></span>`).join("")
+    : '<span class="muted" style="font-size:11.5px">还没有别名</span>';
+
+  const comp = d.competitors;
+  $("compBadge").textContent = comp.version === null ? "无集合" : `v${comp.version} · ${comp.items.length} 个`;
+  $("competitors").innerHTML = comp.items.length
+    ? comp.items.map((c) => `<div class="kv"><span>${esc(c.name)}</span>
+        <button class="small ghost" data-competitor="${c.id}" aria-label="删除 ${esc(c.name)}">移除</button></div>`).join("")
+    : '<div class="empty" style="padding:8px 0">还没有竞品</div>';
+
+  renderPlan(d.sampling);
+  renderQuestionHint(d.question_summary);
+  updateExport();
+}
+
+function renderPlan(p) {
+  const f = p.failure || {};
+  const tag = f.status === "over_threshold"
+    ? `<span class="tag bad">失败率偏高</span>`
+    : f.status === "ok" ? `<span class="tag ok">正常</span>` : `<span class="tag">无采样记录</span>`;
+  $("planBadge").innerHTML = tag;
+  $("plan").innerHTML = `
+    <div class="num-lg">${p.daily_planned}<span class="muted" style="font-size:12px;font-weight:400"> 条 / 日</span></div>
+    <div class="muted" style="font-size:11px;margin-bottom:8px">${(p.models || []).join("、") || "未配置模型"} · ${esc(p.timezone)}</div>
+    <div class="kv"><span>核心问题 ${p.breakdown.core_questions} 个 × ${p.core_times} 次 × ${p.breakdown.model_count} 模型</span><b>${p.breakdown.core_daily}</b></div>
+    <div class="kv"><span>长尾问题 ${p.breakdown.long_tail_questions} 个 × ${p.long_tail_times} 次 × ${p.breakdown.model_count} 模型</span><b>${p.breakdown.long_tail_daily}</b></div>
+    <div class="kv"><span>采样失败率</span><b class="${f.status === "over_threshold" ? "bad" : ""}">${fmtPct(f.rate)}（${f.failed || 0}/${f.attempted || 0}）</b></div>
+    <div class="kv"><span>失败率阈值</span><b>${fmtPct(f.threshold)}</b></div>
+    ${p.effective_from ? `<div class="kv"><span>计划生效日</span><b>${p.effective_from}</b></div>` : ""}
+    ${(p.notes || []).length ? `<div class="notice warn" style="margin-top:10px">${p.notes.map(esc).join("<br/>")}</div>` : ""}`;
+}
+
+function renderQuestionHint(summary) {
+  $("qSummary").textContent = `共 ${summary.total} · 核心 ${summary.core} · 长尾 ${summary.long_tail}`;
+  $("hint").innerHTML = summary.total === 0
+    ? '<div class="notice warn">该监控对象尚未导入问题集，不会产生任何采样与指标。请在右侧导入问题。</div>'
+    : "";
+}
+
+async function loadQuestions() {
+  const data = await api(`/trackers/${state.tracker}/questions`);
+  renderQuestionHint(data.summary);
+  $("qBody").innerHTML = data.items.length
+    ? data.items.map((q) => `<tr class="q-row">
+        <td>${esc(q.text)}</td>
+        <td><span class="tag ${q.tier === "core" ? "core" : ""}">${q.tier === "core" ? "核心" : "长尾"}</span></td>
+        <td class="num">${q.sample_total}</td>
+        <td><button class="small ghost" data-question="${q.id}" data-next="${q.tier === "core" ? "long_tail" : "core"}">
+          ${q.tier === "core" ? "改为长尾" : "设为核心"}</button></td>
+      </tr>`).join("")
+    : '<tr><td colspan="4" class="empty">还没有问题，先在上方导入</td></tr>';
+}
+
+async function load() {
+  const id = $("tracker").value;
+  if (!id) return;
+  state.tracker = id;
+  try {
+    renderDetail(await api(`/trackers/${id}`));
+    await loadQuestions();
+  } catch (e) {
+    $("hint").innerHTML = `<div class="notice error">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+function exportUrl(format) {
+  const from = $("exportFrom").value, to = $("exportTo").value;
+  return `${API}/trackers/${state.tracker}/answers/export?from=${from}&to=${to}&format=${format}`;
+}
+
+function updateExport() {
+  [["exportCsv", "csv"], ["exportJsonl", "jsonl"]].forEach(([id, fmt]) => {
+    $(id).dataset.url = exportUrl(fmt);
+  });
+}
+
+[["exportCsv", "csv"], ["exportJsonl", "jsonl"]].forEach(([id, fmt]) => {
+  $(id).addEventListener("click", () => {
+    if (!state.tracker) { return; }
+    window.location.href = exportUrl(fmt);
+  });
+});
+
+$("saveBrand").addEventListener("click", async () => {
+  const body = {
+    name: $("name").value.trim(),
+    brand_name: $("brandName").value.trim(),
+    industry: $("industry").value.trim(),
+    region: $("region").value.trim(),
+  };
+  if (!body.name || !body.brand_name) { toast("监控名称与品牌名称不能为空", "warn"); return; }
+  try {
+    renderDetail(await api(`/trackers/${state.tracker}`, { method: "PATCH", body: JSON.stringify(body) }));
+    $("saveState").textContent = "已保存 " + new Date().toLocaleTimeString();
+    toast("品牌信息已保存");
+  } catch (e) { toast("保存失败：" + e.message, "error"); }
+});
+
+document.querySelectorAll("[data-status]").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    try {
+      renderDetail(await api(`/trackers/${state.tracker}`, { method: "PATCH", body: JSON.stringify({ status: btn.dataset.status }) }));
+      toast("状态已更新为「" + (STATUS_TEXT[btn.dataset.status] || btn.dataset.status) + "」");
+    } catch (e) { toast("状态更新失败：" + e.message, "error"); }
+  });
+});
+
+$("addAlias").addEventListener("click", async () => {
+  const alias = $("aliasInput").value.trim();
+  if (!alias) return;
+  try {
+    await api(`/brands/${state.brandId}/aliases`, { method: "POST", body: JSON.stringify({ alias, alias_type: $("aliasType").value }) });
+    $("aliasInput").value = "";
+    renderDetail(await api(`/trackers/${state.tracker}`));
+  } catch (e) { toast("添加别名失败：" + e.message, "error"); }
+});
+
+$("aliases").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-alias]");
+  if (!btn) return;
+  try {
+    await api(`/brands/${state.brandId}/aliases/${btn.dataset.alias}`, { method: "DELETE" });
+    renderDetail(await api(`/trackers/${state.tracker}`));
+  } catch (err) { toast("删除别名失败：" + err.message, "error"); }
+});
+
+$("importBtn").addEventListener("click", async () => {
+  const text = $("importText").value;
+  if (!text.trim()) { toast("先粘贴要导入的问题", "warn"); return; }
+  $("importBtn").disabled = true;
+  try {
+    const r = await api(`/trackers/${state.tracker}/questions`, {
+      method: "POST",
+      body: JSON.stringify({ text, default_tier: $("defaultTier").value }),
+    });
+    $("importResult").innerHTML = `<div class="notice ${r.duplicate_count ? "warn" : "ok"}" style="margin-top:10px">
+      新增 ${r.created_count} 条${r.duplicate_count ? `，跳过重复 ${r.duplicate_count} 条：${r.duplicates.slice(0, 3).map(esc).join("、")}${r.duplicate_count > 3 ? "…" : ""}` : ""}。
+    </div>`;
+    $("importText").value = "";
+    await loadQuestions();
+    renderDetail(await api(`/trackers/${state.tracker}`));
+  } catch (e) { toast("导入失败：" + e.message, "error"); }
+  finally { $("importBtn").disabled = false; }
+});
+
+$("qBody").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-question]");
+  if (!btn) return;
+  try {
+    const r = await api(`/questions/${btn.dataset.question}`, { method: "PATCH", body: JSON.stringify({ tier: btn.dataset.next }) });
+    toast(`已改为${r.tier === "core" ? "核心" : "长尾"}，${r.effective_from} 生效；历史采样不变`);
+    await loadQuestions();
+    renderPlan(await api(`/trackers/${state.tracker}/sampling-plan`));
+  } catch (err) { toast("修改层级失败：" + err.message, "error"); }
+});
+
+$("addCompetitor").addEventListener("click", async () => {
+  const name = $("competitorInput").value.trim();
+  if (!name) return;
+  try {
+    await api(`/trackers/${state.tracker}/competitors`, { method: "POST", body: JSON.stringify({ name }) });
+    $("competitorInput").value = "";
+    renderDetail(await api(`/trackers/${state.tracker}`));
+    toast("已加入竞品集合，版本已递增");
+  } catch (e) { toast("添加竞品失败：" + e.message, "error"); }
+});
+
+$("competitors").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-competitor]");
+  if (!btn) return;
+  try {
+    await api(`/trackers/${state.tracker}/competitors/${btn.dataset.competitor}`, { method: "DELETE" });
+    renderDetail(await api(`/trackers/${state.tracker}`));
+  } catch (err) { toast("移除竞品失败：" + err.message, "error"); }
+});
+
+$("exportFrom").addEventListener("change", updateExport);
+$("exportTo").addEventListener("change", updateExport);
+
+$("newBtn").addEventListener("click", () => { $("newError").innerHTML = ""; $("newDialog").showModal(); });
+$("newCancel").addEventListener("click", () => $("newDialog").close());
+$("newForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const split = (v) => v.split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+  const body = {
+    name: $("nName").value.trim(),
+    brand_name: $("nBrand").value.trim(),
+    industry: $("nIndustry").value.trim(),
+    region: $("nRegion").value.trim(),
+    brand_aliases: split($("nAliases").value),
+    competitor_names: split($("nCompetitors").value),
+  };
+  try {
+    const created = await api("/trackers", { method: "POST", body: JSON.stringify(body) });
+    $("newDialog").close();
+    $("newForm").reset();
+    await initTrackers(created.id);
+    toast("已创建；导入问题后才会产生采样");
+  } catch (err) {
+    $("newError").innerHTML = `<div class="notice error">创建失败：${esc(err.message)}</div>`;
+  }
+});
+
+async function initTrackers(selectId) {
+  const items = (await api("/trackers")).items || [];
+  $("tracker").innerHTML = items.map((x) => `<option value="${x.id}">${esc(x.brand_name || x.id)}</option>`).join("");
+  if (selectId) $("tracker").value = selectId;
+  await load();
+}
+
+$("tracker").addEventListener("change", load);
+initTrackers();
+</script>
+</body>
+</html>

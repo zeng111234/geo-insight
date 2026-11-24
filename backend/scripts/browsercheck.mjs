@@ -1,0 +1,118 @@
+// 真实浏览器 DOM 冒烟：不引入 Playwright / 不装依赖，直接调系统 Chrome|Edge 的 --dump-dom。
+//
+// 为什么需要它：HTTP 200 只证明路由存在，node --check 只证明语法没错，
+// 两者都拦不住「页面读了接口里不存在的字段 → 整页报错」。这一层验证的是
+// JS 真的在浏览器里跑完、异步请求返回后 DOM 里真的有数据。
+//
+// 用法：先 python backend/run.py，再 node backend/scripts/browsercheck.mjs
+// 换端口：GEO_BASE=http://127.0.0.1:8124 node backend/scripts/browsercheck.mjs
+// 指定浏览器：GEO_CHROME="C:\path\to\chrome.exe"
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+
+const BASE = process.env.GEO_BASE || "http://127.0.0.1:8123";
+const CANDIDATES = [
+  process.env.GEO_CHROME,
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+].filter(Boolean);
+const CHROME = CANDIDATES.find(existsSync);
+
+if (!CHROME) {
+  console.log("SKIP  未找到 Chrome / Edge，跳过浏览器层检查（接口层与页面层检查仍有效）");
+  process.exit(0);
+}
+
+// 详情页必须用真实 ID：拿假 ID 去请求只会得到 404，页面显示「读取失败」是正确行为，
+// 不能拿来当成页面坏了的证据。
+const TRACKER = "11111111-1111-1111-1111-111111111111";
+let reportId = "", answerId = "";
+try {
+  const reps = await (await fetch(`${BASE}/v1/trackers/${TRACKER}/reports`)).json();
+  reportId = (reps.items || [])[0]?.id || "";
+  const ans = await (await fetch(`${BASE}/v1/trackers/${TRACKER}/answers?from=2026-11-01&to=2026-11-05&limit=1`)).json();
+  answerId = (ans.items || [])[0]?.id || "";
+} catch (e) { /* 下面统一报失败 */ }
+
+const PAGES = [
+  "/", "/settings", "/reports", "/report/" + reportId, "/answer/" + answerId, "/studio",
+  "/monitor", "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources"
+];
+
+// 页面专属的关键渲染结果：容器后面必须出现真实表格/图表，而不是占位或报错。
+// 正则用 id="x"[^>]*> 而不是 id="x"> —— 元素上常带 style 等其它属性。
+const EXTRA = {
+  "/": [
+    ["每日摘要表", /<div class="body" id="trendTable"[^>]*>[\s\S]{0,240}<table/],
+    ["明细翻页条", /class="pager"/],
+  ],
+  "/monitor": [["明细翻页条", /class="pager"/]],
+  "/insight": [
+    ["结论列表", /<ul class="concl">/],
+    ["趋势图", /<svg class="spark"/],
+    ["分问题表现", /<div class="body" id="byQuestion"[^>]*>[\s\S]{0,240}<table/],
+    ["明细翻页条", /class="pager"/],
+  ],
+  "/opportunities": [
+    ["覆盖矩阵", /<div class="body" id="matrix"[^>]*>[\s\S]{0,240}<table/],
+    ["样本明细", /<div class="body" id="samples"[^>]*>[\s\S]{0,240}<table/],
+    ["明细翻页条", /class="pager"/],
+  ],
+  "/tasks": [["文章明细", /<div class="body" id="articleTable"[^>]*>[\s\S]{0,240}<table/]],
+  "/publish": [
+    ["发布记录", /<div id="pubs"[^>]*>[\s\S]{0,240}<div class="pub-row"/],
+    ["渠道状态", /<div class="body" id="channels"[^>]*>[\s\S]{0,240}<table/],
+    ["发布效果对比", /<div id="impact"[^>]*>[\s\S]{0,240}<div class="imp"/],
+  ],
+  "/assets": [["问题覆盖", /<div class="body" id="questions"[^>]*>[\s\S]{0,240}<table/]],
+  "/sources": [["明细翻页条", /class="pager"/]],
+  "/reports": [
+    ["概览卡", /<div class="cards" id="summary"[^>]*>[\s\S]{0,240}<div class="card"/],
+    ["快照明细", /<tbody id="hashRows"[^>]*>[\s\S]{0,240}<tr/],
+  ],
+};
+
+const fails = [];
+const need = (ok, name) => {
+  if (!ok) fails.push(name);
+  console.log((ok ? "PASS  " : "FAIL  ") + name);
+};
+
+need(Boolean(reportId && answerId), `演示数据可解析出报告 / 答案 ID (${reportId.slice(0, 8)} / ${answerId.slice(0, 8)})`);
+
+for (const path of PAGES) {
+  let dom;
+  try {
+    dom = execFileSync(CHROME, [
+      "--headless=new", "--disable-gpu", "--no-sandbox",
+      "--disable-dev-shm-usage", "--virtual-time-budget=6000",
+      "--dump-dom", BASE + path,
+    ], {
+      encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"], timeout: 40000,
+    });
+  } catch (e) {
+    need(false, `浏览器: ${path} 渲染失败 (${String(e.message).slice(0, 90)})`);
+    continue;
+  }
+  // --dump-dom 会原样带上 <script> 源码，里面的错误模板字符串（如
+  // `<div class="notice error">读取失败…`）会被当成渲染结果误报。只看真实节点。
+  const rendered = dom.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const errors = (rendered.match(/class="notice error"/g) || []).length;
+  const pending = (rendered.match(/<div class="empty">加载中…<\/div>/g) || []).length;
+  const side = (rendered.match(/<aside class="side">/g) || []).length;
+  const active = (rendered.match(/class="active"/g) || []).length;
+  need(errors === 0 && pending === 0 && side === 1 && active === 1,
+    `浏览器: ${path} 无报错/无残留占位/单侧栏 (error=${errors} pending=${pending} side=${side} active=${active})`);
+
+  for (const [label, re] of (EXTRA[path] || [])) {
+    need(re.test(rendered), `浏览器: ${path} ${label}已渲染`);
+  }
+}
+
+console.log(fails.length ? `\n${fails.length} FAILED` : "\nALL BROWSER DOM CHECKS PASSED");
+process.exit(fails.length ? 1 : 0);

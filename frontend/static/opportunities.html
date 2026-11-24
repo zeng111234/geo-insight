@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<script src="/static/app.js"></script>
+<title>GEO Insight · 优化机会</title>
+<style>
+  .opp { border-bottom: 1px solid var(--border); padding: 12px 14px; }
+  .opp:last-child { border-bottom: none; }
+  .opp .h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 7px; }
+  .opp .q { font-size: 12.5px; font-weight: 500; }
+  .models { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <main>
+    <header class="top">
+      <h1>优化机会</h1>
+      <span class="sub">哪些问题在哪些模型里从未提到本品牌</span>
+      <span class="spacer"></span>
+      <select id="tracker" aria-label="监控对象"></select>
+      <input id="from" type="date" value="2026-11-01" aria-label="开始日期" />
+      <input id="to" type="date" value="2026-11-30" aria-label="结束日期" />
+      <button id="load" class="primary">查询</button>
+    </header>
+    <div class="content">
+      <div class="notice warn">这是<strong>基于采样样本的描述性统计</strong>，不是因果诊断：真实采集、答案语义解析与信源归因尚未接入，下面只列出「观测到未提及」的组合，不给出原因或效果承诺。</div>
+      <div class="cards" id="stats" style="margin-bottom:14px"></div>
+      <div class="panel"><h2>未提及组合 <span class="badge" id="oppMeta">—</span></h2><div id="list"><div class="empty">加载中…</div></div></div>
+      <div class="panel" style="margin-top:14px"><h2>问题 × 模型覆盖矩阵 <span class="badge">提及数 / 样本数</span></h2><div class="body" id="matrix"><div class="empty">加载中…</div></div></div>
+      <div class="panel" style="margin-top:14px"><h2>样本明细 <span class="badge" id="sampleMeta">—</span></h2><div class="body" id="samples"><div class="empty">加载中…</div></div></div>
+    </div>
+  </main>
+</div>
+<script>
+(function () {
+  var G = window.GEO, $ = G.$, esc = G.esc;
+  var stat = function (l, v, s) { return '<div class="card"><div class="label">' + esc(l) + '</div><div class="value">' + esc(v) + '</div><div class="sub">' + esc(s) + "</div></div>"; };
+  var SENTI = { pos: "正面", neu: "中性", neg: "负面" };
+
+  function renderMatrix(byQ, models) {
+    var keys = Object.keys(byQ);
+    if (!keys.length) { $("matrix").innerHTML = G.empty("当前周期没有样本"); return; }
+    var pg = G.pagerSlice("matrix", keys, function () { renderMatrix(byQ, models); });
+    $("matrix").innerHTML = '<div class="table-wrap"><table><thead><tr><th>问题</th><th>层级</th>' +
+      models.map(function (m) { return '<th class="num">' + esc(m) + "</th>"; }).join("") +
+      '<th class="num">合计</th></tr></thead><tbody>' +
+      pg.slice.map(function (k) {
+        var r = byQ[k];
+        var total = 0, hits = 0;
+        var cells = models.map(function (m) {
+          var v = r.models[m];
+          if (!v) return '<td class="num muted">—</td>';
+          total += v.total; hits += v.mentioned;
+          return '<td class="num"' + (v.mentioned ? "" : ' style="color:var(--red-ink)"') + '>' +
+            v.mentioned + " / " + v.total + "</td>";
+        }).join("");
+        return "<tr><td>" + esc(r.text) + "</td><td>" +
+          '<span class="tag ' + (r.tier === "core" ? "core" : "") + '">' +
+          (r.tier === "core" ? "核心" : "长尾") + "</span></td>" + cells +
+          '<td class="num">' + hits + " / " + total + "</td></tr>";
+      }).join("") + "</tbody></table></div>" + pg.nav +
+      '<div class="notice" style="margin-top:10px">红色表示该模型在此问题上 0 次提及；「—」表示该组合本周期没有采样，不能当作未提及。</div>';
+  }
+
+  function renderSamples(items) {
+    $("sampleMeta").textContent = G.num(items.length) + " 条";
+    if (!items.length) { $("samples").innerHTML = G.empty("当前周期没有样本"); return; }
+    var pg = G.pagerSlice("samples", items, function () { renderSamples(items); });
+    $("samples").innerHTML = '<div class="table-wrap"><table><thead><tr><th>日期</th><th>问题</th><th>模型</th>' +
+      "<th>结果</th><th class=\"num\">位次</th><th>情感</th><th class=\"num\">计入分母</th></tr></thead><tbody>" +
+      pg.slice.map(function (x) {
+        return '<tr><td class="nowrap"><a class="plain" href="/answer/' + esc(x.answer_id) + '">' + esc(x.day) + "</a></td>" +
+          "<td>" + esc(x.question_text) + "</td><td>" + esc(x.model_key) + "</td><td>" +
+          (x.mentioned ? '<span class="tag ok">已提及</span>' : '<span class="tag">未提及</span>') + "</td>" +
+          '<td class="num">' + (x.position === null || x.position === undefined ? "无列表" : "第 " + G.num(x.position) + " 位") + "</td>" +
+          "<td>" + esc(SENTI[x.sentiment] || "—") + "</td>" +
+          '<td class="num">' + (x.in_denominator ? "是" : "否") + "</td></tr>";
+      }).join("") + "</tbody></table></div>" + pg.nav +
+      '<div class="notice" style="margin-top:10px">点日期可打开答案原文与引用明细；「无列表」的提及不计入平均排名分母。</div>';
+  }
+
+  async function load() {
+    var t = G.tracker(); if (!t) return;
+    G.pagerReset("matrix"); G.pagerReset("samples");
+    var q = G.dates();
+    try {
+      var [samples, plan] = await Promise.all([
+        G.get("/trackers/" + t + "/metrics/mention_rate/samples?" + q),
+        G.get("/trackers/" + t + "/sampling-plan")
+      ]);
+      var models = (plan.models && plan.models.length) ? plan.models : ["doubao", "deepseek", "kimi"];
+      var items = (samples.items || []).filter(function (x) { return x.in_denominator; });
+      // 问题 × 模型：统计总样本与提及样本
+      var byQ = {};
+      items.forEach(function (x) {
+        var key = x.question_id || x.question_text;
+        if (!byQ[key]) byQ[key] = { text: x.question_text, tier: x.tier, models: {} };
+        var m = byQ[key].models[x.model_key] || { total: 0, mentioned: 0 };
+        m.total += 1;
+        if (x.mentioned) m.mentioned += 1;
+        byQ[key].models[x.model_key] = m;
+      });
+      var rows = [];
+      Object.keys(byQ).forEach(function (k) {
+        var r = byQ[k];
+        var missing = models.filter(function (m) {
+          var v = r.models[m];
+          return !v || v.mentioned === 0;
+        });
+        var total = Object.values(r.models).reduce(function (s, v) { return s + v.total; }, 0);
+        var hits = Object.values(r.models).reduce(function (s, v) { return s + v.mentioned; }, 0);
+        if (missing.length) rows.push({ text: r.text, tier: r.tier, missing: missing, total: total, hits: hits });
+      });
+      rows.sort(function (a, b) { return b.missing.length - a.missing.length || b.total - a.total; });
+
+      $("stats").innerHTML = stat("监控问题", Object.keys(byQ).length, "当前周期有样本的问题") +
+        stat("有效样本", items.length, "计入提及率分母") +
+        stat("提及样本", items.filter(function (x) { return x.mentioned; }).length, "本品牌被提到") +
+        stat("存在缺口的问题", rows.length, "至少一个模型未提及");
+      $("oppMeta").textContent = rows.length + " 条";
+      $("list").innerHTML = rows.length ? rows.map(function (r) {
+        return '<div class="opp"><div class="h"><span class="q">' + esc(r.text) + "</span>" +
+          '<span class="tag ' + (r.tier === "core" ? "core" : "") + '">' + (r.tier === "core" ? "核心" : "长尾") + "</span>" +
+          '<span class="muted">' + r.hits + " / " + r.total + " 次提及</span></div>" +
+          '<div class="models"><span class="muted" style="align-self:center">未提及模型：</span>' +
+          r.missing.map(function (m) { return '<span class="tag bad">' + esc(m) + "</span>"; }).join("") +
+          "</div></div>";
+      }).join("") : G.empty("当前周期每个问题在所有模型里都至少被提及一次");
+      renderMatrix(byQ, models);
+      renderSamples(items);
+    } catch (e) { G.fail(e, ["stats", "list", "matrix", "samples"]); }
+  }
+
+  $("load").addEventListener("click", load);
+  (async function () { await G.fillTrackers(); await load(); })();
+})();
+</script>
+</body>
+</html>

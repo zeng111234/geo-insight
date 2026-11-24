@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<script src="/static/app.js"></script>
+<title>GEO Insight · 任务发布</title>
+<style>
+  .pub-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--border); }
+  .pub-row:last-child { border-bottom: none; }
+  .imp { border-bottom: 1px solid var(--border); padding: 11px 14px; }
+  .imp:last-child { border-bottom: none; }
+  .imp .h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .imp .t { font-size: 12.5px; font-weight: 500; }
+  .imp .m { font-size: 11px; color: var(--muted); }
+  .delta { font-size: 13px; font-weight: 600; }
+  .delta.up { color: var(--green-ink); }
+  .delta.down { color: var(--red-ink); }
+  .delta.flat { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <main>
+    <header class="top">
+      <h1>任务发布</h1>
+      <span class="sub">发布记录、渠道状态与发布前后效果对比</span>
+      <span class="spacer"></span>
+      <select id="tracker" aria-label="监控对象"></select>
+      <button id="load" class="primary">刷新</button>
+      <a class="btn" href="/tasks">看创作进度 →</a>
+    </header>
+    <div class="content">
+      <div class="notice">发布与渠道登录是<strong>展示态</strong>：记录会真实写入数据库，但不发起真实登录或发帖，响应带 <code>integration: "demo"</code>。效果对比只描述采样结果，不构成因果承诺。</div>
+      <div class="cards" id="stats"></div>
+
+      <div class="panel" style="margin-top:14px">
+        <h2>发布记录 <span class="badge" id="pubMeta">—</span></h2>
+        <div id="pubs"><div class="empty">加载中…</div></div>
+      </div>
+
+      <div class="grid c2" style="margin-top:14px">
+        <div class="panel">
+          <h2>渠道状态 <span class="badge" id="chMeta">—</span></h2>
+          <div class="body" id="channels"><div class="empty">加载中…</div></div>
+        </div>
+        <div class="panel">
+          <h2>发布前后效果对比 <span class="badge" id="impMeta">—</span></h2>
+          <div id="impact"><div class="empty">加载中…</div></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+(function () {
+  var G = window.GEO, $ = G.$, esc = G.esc;
+  var stat = function (l, v, s) {
+    return '<div class="card"><div class="label">' + esc(l) + '</div><div class="value">' + esc(v) + '</div><div class="sub">' + esc(s) + "</div></div>";
+  };
+  var PUB_TEXT = { queued: "待发布（演示态）", published: "已发布", failed: "失败" };
+  var CH_TEXT = { connected: "已连接", expired: "已过期", disconnected: "未连接" };
+  var CH_TAG = { connected: "ok", expired: "warn", disconnected: "" };
+  var LOGIN_TEXT = { scan_qr: "扫码登录", oauth: "OAuth 授权", password: "账号密码" };
+
+  function renderStats(rows, channels) {
+    var pubs = [];
+    rows.forEach(function (r) { (r.publications || []).forEach(function (p) { pubs.push({ r: r, p: p }); }); });
+    var okCount = pubs.filter(function (x) { return x.p.status === "published"; }).length;
+    var connected = channels.filter(function (c) { return c.status === "connected"; }).length;
+    var deltas = rows.filter(function (r) { return r.impact && r.impact.comparable === true && typeof r.impact.delta_pp === "number"; })
+      .map(function (r) { return r.impact.delta_pp; });
+    var avgDelta = deltas.length ? deltas.reduce(function (a, b) { return a + b; }, 0) / deltas.length : null;
+    $("stats").innerHTML =
+      stat("发布记录", pubs.length, "其中成功 " + okCount + " 条") +
+      stat("已连接渠道", connected + " / " + channels.length, "过期与未连接不能直接发帖") +
+      stat("有发布记录的文章", rows.filter(function (r) { return (r.publications || []).length; }).length, "共 " + rows.length + " 篇文章") +
+      stat("发布后平均提及率变化", avgDelta === null ? "—" : (avgDelta > 0 ? "+" : "") + avgDelta.toFixed(1) + "pp",
+        deltas.length ? deltas.length + " 个可比窗口" : "暂无可比窗口");
+  }
+
+  function renderPubs(rows) {
+    var pubs = [];
+    rows.forEach(function (r) { (r.publications || []).forEach(function (p) { pubs.push({ r: r, p: p }); }); });
+    $("pubMeta").textContent = pubs.length + " 条";
+    if (!pubs.length) {
+      $("pubs").innerHTML = G.empty("还没有发布记录，可在内容工作室点「一键发布」生成演示记录");
+      return;
+    }
+    $("pubs").innerHTML = pubs.map(function (x) {
+      var p = x.p;
+      return '<div class="pub-row"><span class="tag">' + esc(p.platform_name || p.platform_key) + "</span>" +
+        '<span class="tag ' + (p.status === "published" ? "ok" : p.status === "failed" ? "bad" : "warn") + '">' +
+        esc(PUB_TEXT[p.status] || p.status) + "</span>" +
+        '<span class="muted">' + esc(x.r.title) + "</span>" +
+        '<span class="spacer"></span>' +
+        '<span class="muted">' + esc((p.published_at || "").slice(0, 16).replace("T", " ")) + "</span>" +
+        (p.published_url ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链 →</a>'
+                         : '<span class="muted">演示态，无真实回链</span>') +
+        (p.failure_reason ? '<span class="tag bad">' + esc(p.failure_reason) + "</span>" : "") + "</div>";
+    }).join("");
+  }
+
+  function renderChannels(channels) {
+    $("chMeta").textContent = channels.length + " 个渠道";
+    $("channels").innerHTML = '<div class="table-wrap"><table><thead><tr><th>渠道</th><th>状态</th>' +
+      "<th>登录方式</th><th>账号</th><th class=\"nowrap\">最后检查</th></tr></thead><tbody>" +
+      channels.map(function (c) {
+        return "<tr><td>" + esc(c.platform_name) + "</td><td>" +
+          '<span class="tag ' + (CH_TAG[c.status] || "") + '">' + esc(CH_TEXT[c.status] || c.status) + "</span></td>" +
+          "<td>" + esc(LOGIN_TEXT[c.login_mode] || "—") + "</td>" +
+          '<td class="muted">' + esc(c.account_name || "—") + "</td>" +
+          '<td class="nowrap">' + esc((c.last_checked_at || "").slice(0, 16).replace("T", " ") || "—") + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+
+  function renderImpact(rows) {
+    var list = rows.filter(function (r) { return r.impact && r.impact.status === "ok"; });
+    $("impMeta").textContent = list.length + " 篇有对比";
+    if (!list.length) { $("impact").innerHTML = G.empty("还没有可对比的发布效果"); return; }
+    $("impact").innerHTML = list.map(function (r) {
+      var im = r.impact;
+      var before = im.before && im.before.mention_rate, after = im.after && im.after.mention_rate;
+      var bt = !before || before.status === "insufficient_samples" ? "样本不足" : G.pct(before.value);
+      var at = !after || after.status === "insufficient_samples" ? "样本不足" : G.pct(after.value);
+      var d = im.delta_pp;
+      var dCls = d === null || d === undefined ? "flat" : d > 0 ? "up" : d < 0 ? "down" : "flat";
+      var dText = d === null || d === undefined ? "—" : (d > 0 ? "+" : "") + d.toFixed(1) + "pp";
+      return '<div class="imp"><div class="h"><span class="t">' + esc(r.title) + "</span>" +
+        '<span class="tag ' + (im.comparable === true ? "ok" : "warn") + '">' +
+        (im.comparable === true ? "可比" : "不可比") + "</span>" +
+        '<span class="muted">窗口 ' + esc(im.window_days) + " 天 · " + esc((im.channels || []).join("、")) + "</span>" +
+        '<span class="spacer"></span><span class="delta ' + dCls + '">' + esc(dText) + "</span></div>" +
+        '<div class="m">发布前 ' + esc(im.before.from) + " ~ " + esc(im.before.to) +
+        " 提及率 " + esc(bt) + "（" + esc(im.before.mention_total) + "/" + esc(im.before.valid_total) + "）" +
+        " · 发布后 " + esc(im.after.from) + " ~ " + esc(im.after.to) +
+        " 提及率 " + esc(at) + "（" + esc(im.after.mention_total) + "/" + esc(im.after.valid_total) + "）</div>" +
+        ((im.notes || []).length ? '<div class="m" style="margin-top:5px">说明：' + esc(im.notes.join("；")) + "</div>" : "") +
+        "</div>";
+    }).join("");
+  }
+
+  async function load() {
+    var t = G.tracker(); if (!t) return;
+    try {
+      var pair = await Promise.all([
+        G.get("/trackers/" + t + "/articles"),
+        G.get("/channels")
+      ]);
+      var items = (pair[0].items || []);
+      var channels = pair[1].items || [];
+      var rows = await Promise.all(items.map(function (a) {
+        return Promise.all([
+          G.get("/articles/" + a.id).catch(function () { return null; }),
+          G.get("/articles/" + a.id + "/impact").catch(function () { return null; })
+        ]).then(function (d) {
+          return { article: a, title: a.title, publications: (d[0] && d[0].publications) || [], impact: d[1] };
+        });
+      }));
+      renderStats(rows, channels);
+      renderPubs(rows);
+      renderChannels(channels);
+      renderImpact(rows);
+    } catch (e) { G.fail(e, ["stats", "pubs", "channels", "impact"]); }
+  }
+
+  $("load").addEventListener("click", load);
+  (async function () { await G.fillTrackers(); await load(); })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,424 @@
+"""Writes and reads for the configuration surface (FR-001 ~ FR-012).
+
+Kept separate from ``sqlite_repository`` so the read model used by the
+dashboard stays small. Both modules are "the repository layer": swapping
+storage means replacing these two files, nothing else.
+"""
+
+import re
+import sqlite3
+import uuid
+from datetime import date, timedelta
+
+TIERS = ("core", "long_tail")
+ALIAS_TYPES = ("full", "short", "en", "misspell")
+
+
+def uid() -> str:
+    return str(uuid.uuid4())
+
+
+def normalize(text: str) -> str:
+    """Question identity for duplicate detection.
+
+    Whitespace is stripped entirely (Chinese questions are often pasted with
+    stray spaces), then case-folded for latin text.
+    """
+    return re.sub(r"\s+", "", text or "").strip().lower()
+
+
+def tomorrow() -> str:
+    return (date.today() + timedelta(days=1)).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# 品牌与别名
+# ---------------------------------------------------------------------------
+
+def get_brand_profile(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT b.id, b.name, b.industry, b.region, t.name AS tracker_name, t.status
+        FROM tracker t JOIN brand b ON b.id = t.brand_id
+        WHERE t.id = ? AND t.tenant_id = ?
+        """,
+        (tracker_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return None
+    profile = dict(row)
+    profile["aliases"] = [
+        dict(r)
+        for r in conn.execute(
+            """SELECT id, alias, alias_type, is_active FROM brand_alias
+               WHERE brand_id = ? AND is_active = 1 ORDER BY alias_type, alias""",
+            (profile["id"],),
+        ).fetchall()
+    ]
+    return profile
+
+
+def get_brand(conn: sqlite3.Connection, brand_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM brand WHERE id = ?", (brand_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def add_alias(conn: sqlite3.Connection, brand_id: str, alias: str, alias_type: str) -> dict:
+    alias = alias.strip()
+    if alias_type not in ALIAS_TYPES:
+        raise ValueError("alias_type must be one of full|short|en|misspell")
+    exists = conn.execute(
+        "SELECT id FROM brand_alias WHERE brand_id = ? AND alias = ?", (brand_id, alias)
+    ).fetchone()
+    if exists:
+        raise ValueError("别名已存在")
+    alias_id = uid()
+    conn.execute(
+        "INSERT INTO brand_alias(id, brand_id, alias, alias_type, is_active) VALUES (?, ?, ?, ?, 1)",
+        (alias_id, brand_id, alias, alias_type),
+    )
+    conn.commit()
+    return {"id": alias_id, "alias": alias, "alias_type": alias_type, "is_active": 1}
+
+
+def remove_alias(conn: sqlite3.Connection, brand_id: str, alias_id: str) -> bool:
+    cur = conn.execute("DELETE FROM brand_alias WHERE id = ? AND brand_id = ?", (alias_id, brand_id))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# 监控对象
+# ---------------------------------------------------------------------------
+
+def create_tracker(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    name: str,
+    brand_name: str,
+    industry: str | None,
+    region: str | None,
+    aliases: list[str],
+    competitors: list[str],
+    owner_id: str | None,
+    now: str,
+) -> dict:
+    brand_id = uid()
+    conn.execute(
+        "INSERT INTO brand(id, tenant_id, name, industry, region, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (brand_id, tenant_id, brand_name, industry, region, now),
+    )
+    seen: set[str] = set()
+    for alias in [brand_name, *aliases]:
+        if not alias.strip() or alias.strip() in seen:
+            continue
+        seen.add(alias.strip())
+        conn.execute(
+            "INSERT INTO brand_alias(id, brand_id, alias, alias_type, is_active) VALUES (?, ?, ?, ?, 1)",
+            (uid(), brand_id, alias.strip(), "full" if alias.strip() == brand_name else "short"),
+        )
+
+    competitor_set_id = uid()
+    conn.execute(
+        "INSERT INTO competitor_set(id, tenant_id, version, created_at) VALUES (?, ?, 1, ?)",
+        (competitor_set_id, tenant_id, now),
+    )
+    for competitor in competitors:
+        if competitor.strip():
+            conn.execute(
+                "INSERT INTO competitor(id, competitor_set_id, name, aliases) VALUES (?, ?, ?, '[]')",
+                (uid(), competitor_set_id, competitor.strip()),
+            )
+
+    tracker_id = uid()
+    conn.execute(
+        """INSERT INTO tracker(id, tenant_id, brand_id, competitor_set_id, name, industry, region,
+                               status, owner_id, settings, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, '{}', ?, ?)""",
+        (tracker_id, tenant_id, brand_id, competitor_set_id, name, industry, region, owner_id, now, now),
+    )
+    # 问题集先建空集：FR-007 要求允许保存，但页面必须提示「不会产生数据」。
+    conn.execute(
+        "INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at) VALUES (?, ?, ?, ?, ?)",
+        (uid(), tenant_id, tracker_id, f"{name} · 问题集", now),
+    )
+    conn.commit()
+    return {"tracker_id": tracker_id, "brand_id": brand_id, "has_questions": False}
+
+
+def update_tracker(
+    conn: sqlite3.Connection,
+    tracker_id: str,
+    tenant_id: str,
+    *,
+    name: str | None,
+    brand_name: str | None,
+    industry: str | None,
+    region: str | None,
+    status: str | None,
+    now: str,
+) -> dict | None:
+    row = conn.execute(
+        "SELECT brand_id FROM tracker WHERE id = ? AND tenant_id = ?", (tracker_id, tenant_id)
+    ).fetchone()
+    if not row:
+        return None
+
+    fields, params = [], []
+    for column, value in (("name", name), ("industry", industry), ("region", region), ("status", status)):
+        if value is not None:
+            fields.append(f"{column} = ?")
+            params.append(value)
+    fields.append("updated_at = ?")
+    params.append(now)
+    conn.execute(f"UPDATE tracker SET {', '.join(fields)} WHERE id = ?", [*params, tracker_id])
+
+    if brand_name or industry or region:
+        brand_fields, brand_params = [], []
+        for column, value in (("name", brand_name), ("industry", industry), ("region", region)):
+            if value is not None:
+                brand_fields.append(f"{column} = ?")
+                brand_params.append(value)
+        if brand_fields:
+            conn.execute(
+                f"UPDATE brand SET {', '.join(brand_fields)} WHERE id = ?",
+                [*brand_params, row["brand_id"]],
+            )
+    conn.commit()
+    return dict(conn.execute("SELECT * FROM tracker WHERE id = ?", (tracker_id,)).fetchone())
+
+
+def set_tracker_status(
+    conn: sqlite3.Connection, tracker_id: str, tenant_id: str, status: str, now: str
+) -> tuple[bool, str | None]:
+    """状态机：archived 不可回 active（T048 / data-model 状态机）。"""
+    allowed = {"draft", "active", "paused", "archived"}
+    if status not in allowed:
+        return False, "status must be draft|active|paused|archived"
+    row = conn.execute(
+        "SELECT status FROM tracker WHERE id = ? AND tenant_id = ?", (tracker_id, tenant_id)
+    ).fetchone()
+    if not row:
+        return False, "tracker not found"
+    if row["status"] == "archived" and status != "archived":
+        return False, "已归档的监控对象不可重新启用"
+    conn.execute(
+        "UPDATE tracker SET status = ?, updated_at = ? WHERE id = ?", (status, now, tracker_id)
+    )
+    conn.commit()
+    return True, None
+
+
+# ---------------------------------------------------------------------------
+# 竞品集合
+# ---------------------------------------------------------------------------
+
+def list_competitors(conn: sqlite3.Connection, tracker_id: str) -> dict:
+    row = conn.execute(
+        "SELECT competitor_set_id FROM tracker WHERE id = ?", (tracker_id,)
+    ).fetchone()
+    if not row or not row["competitor_set_id"]:
+        return {"version": None, "items": []}
+    set_row = conn.execute(
+        "SELECT id, version FROM competitor_set WHERE id = ?", (row["competitor_set_id"],)
+    ).fetchone()
+    items = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT id, name, aliases FROM competitor WHERE competitor_set_id = ? ORDER BY name",
+            (row["competitor_set_id"],),
+        ).fetchall()
+    ]
+    return {"set_id": set_row["id"], "version": set_row["version"], "items": items}
+
+
+def add_competitor(conn: sqlite3.Connection, tracker_id: str, name: str) -> dict:
+    row = conn.execute(
+        "SELECT competitor_set_id FROM tracker WHERE id = ?", (tracker_id,)
+    ).fetchone()
+    if not row or not row["competitor_set_id"]:
+        raise ValueError("监控对象没有竞品集合")
+    set_id = row["competitor_set_id"]
+    exists = conn.execute(
+        "SELECT id FROM competitor WHERE competitor_set_id = ? AND name = ?", (set_id, name)
+    ).fetchone()
+    if exists:
+        raise ValueError("竞品已存在")
+    item_id = uid()
+    conn.execute(
+        "INSERT INTO competitor(id, competitor_set_id, name, aliases) VALUES (?, ?, ?, '[]')",
+        (item_id, set_id, name),
+    )
+    # 竞品集合变更必须留下版本，历史指标不重算（FR-003 / Edge Cases）。
+    conn.execute("UPDATE competitor_set SET version = version + 1 WHERE id = ?", (set_id,))
+    conn.commit()
+    version = conn.execute(
+        "SELECT version FROM competitor_set WHERE id = ?", (set_id,)
+    ).fetchone()["version"]
+    return {"id": item_id, "name": name, "version": version}
+
+
+def remove_competitor(conn: sqlite3.Connection, tracker_id: str, competitor_id: str) -> bool:
+    row = conn.execute(
+        "SELECT competitor_set_id FROM tracker WHERE id = ?", (tracker_id,)
+    ).fetchone()
+    if not row:
+        return False
+    cur = conn.execute(
+        "DELETE FROM competitor WHERE id = ? AND competitor_set_id = ?",
+        (competitor_id, row["competitor_set_id"]),
+    )
+    if cur.rowcount:
+        conn.execute(
+            "UPDATE competitor_set SET version = version + 1 WHERE id = ?",
+            (row["competitor_set_id"],),
+        )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# 问题集
+# ---------------------------------------------------------------------------
+
+def _question_set(conn: sqlite3.Connection, tracker_id: str, tenant_id: str, now: str) -> str:
+    row = conn.execute(
+        "SELECT id FROM question_set WHERE tracker_id = ? ORDER BY created_at LIMIT 1", (tracker_id,)
+    ).fetchone()
+    if row:
+        return row["id"]
+    set_id = uid()
+    conn.execute(
+        "INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at) VALUES (?, ?, ?, '问题集', ?)",
+        (set_id, tenant_id, tracker_id, now),
+    )
+    conn.commit()
+    return set_id
+
+
+def list_questions(conn: sqlite3.Connection, tracker_id: str) -> dict:
+    rows = conn.execute(
+        """
+        SELECT q.id, q.text, q.tier, q.intent, q.status, q.created_at,
+               (SELECT COUNT(*) FROM answer a WHERE a.question_id = q.id AND a.is_valid = 1) AS sample_total
+        FROM question q JOIN question_set qs ON qs.id = q.question_set_id
+        WHERE qs.tracker_id = ?
+        ORDER BY CASE q.tier WHEN 'core' THEN 0 ELSE 1 END, q.created_at
+        """,
+        (tracker_id,),
+    ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["daily_samples"] = 3 if item["tier"] == "core" else 1
+        items.append(item)
+    return {
+        "items": items,
+        "summary": {
+            "total": sum(1 for i in items if i["status"] == "active"),
+            "core": sum(1 for i in items if i["status"] == "active" and i["tier"] == "core"),
+            "long_tail": sum(1 for i in items if i["status"] == "active" and i["tier"] == "long_tail"),
+        },
+    }
+
+
+def import_questions(
+    conn: sqlite3.Connection,
+    tracker_id: str,
+    tenant_id: str,
+    items: list[dict],
+    now: str,
+) -> dict:
+    set_id = _question_set(conn, tracker_id, tenant_id, now)
+    existing = {
+        r["normalized_text"]
+        for r in conn.execute(
+            "SELECT normalized_text FROM question WHERE question_set_id = ?", (set_id,)
+        ).fetchall()
+    }
+    created, duplicates = [], []
+    for item in items:
+        text = (item.get("text") or "").strip()
+        tier = item.get("tier") or "long_tail"
+        if not text:
+            continue
+        if tier not in TIERS:
+            raise ValueError("tier must be core|long_tail")
+        key = normalize(text)
+        if key in existing:
+            duplicates.append(text)
+            continue
+        existing.add(key)
+        question_id = uid()
+        conn.execute(
+            """INSERT INTO question(id, tenant_id, question_set_id, text, normalized_text, tier, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'active', ?)""",
+            (question_id, tenant_id, set_id, text, key, tier, now),
+        )
+        created.append({"id": question_id, "text": text, "tier": tier})
+    conn.commit()
+    return {"created": created, "duplicates": duplicates, "question_set_id": set_id}
+
+
+def update_question_tier(
+    conn: sqlite3.Connection, question_id: str, tier: str, now: str
+) -> dict | None:
+    if tier not in TIERS:
+        raise ValueError("tier must be core|long_tail")
+    row = conn.execute(
+        """SELECT q.id, q.tier, qs.tracker_id FROM question q
+           JOIN question_set qs ON qs.id = q.question_set_id WHERE q.id = ?""",
+        (question_id,),
+    ).fetchone()
+    if not row:
+        return None
+    conn.execute("UPDATE question SET tier = ? WHERE id = ?", (tier, question_id))
+    # FR-012：层级变更次日生效，不回改历史采样次数。
+    effective_from = tomorrow()
+    conn.execute(
+        "UPDATE sampling_plan SET effective_from = ? WHERE tracker_id = ?",
+        (effective_from, row["tracker_id"]),
+    )
+    conn.commit()
+    return {
+        "id": question_id,
+        "previous_tier": row["tier"],
+        "tier": tier,
+        "effective_from": effective_from,
+        "history_unchanged": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 采样计划与失败率
+# ---------------------------------------------------------------------------
+
+def latest_plan(conn: sqlite3.Connection, tracker_id: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM sampling_plan WHERE tracker_id = ? ORDER BY effective_from DESC LIMIT 1",
+        (tracker_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def failure_stats(
+    conn: sqlite3.Connection, tracker_id: str, start: str | None = None, end: str | None = None
+) -> dict:
+    clauses = ["r.tracker_id = ?"]
+    params: list = [tracker_id]
+    if start and end:
+        clauses.append("date(COALESCE(ri.attempted_at, r.scheduled_for)) BETWEEN ? AND ?")
+        params.extend([start, end])
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS attempted,
+               SUM(CASE WHEN ri.status = 'failed' THEN 1 ELSE 0 END) AS failed
+        FROM run_item ri JOIN run r ON r.id = ri.run_id
+        WHERE {' AND '.join(clauses)}
+        """,
+        params,
+    ).fetchone()
+    attempted = int(row["attempted"] or 0)
+    failed = int(row["failed"] or 0)
+    return {"attempted": attempted, "failed": failed, "rate": (failed / attempted) if attempted else None}

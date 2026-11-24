@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<title>GEO Insight · 答案详情</title>
+<style>
+  .answer-text {
+    white-space: pre-wrap; word-break: break-word; line-height: 1.95;
+    font-size: 13px; color: var(--text-body);
+    border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; background: var(--subtle);
+  }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--border); font-size: 12px; }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted); }
+  .mention { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 9px; background: var(--subtle); }
+  .mention.own { border-color: var(--accent-weak); background: var(--accent-weak); }
+  .mention .head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+  .mention .snippet { font-size: 12px; color: var(--text-body); line-height: 1.7; }
+  .block-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .block-item { border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; font-size: 11.5px; background: var(--panel); }
+</style>
+</head>
+<body>
+<script>
+if (location.protocol === "file:") {
+  document.addEventListener("DOMContentLoaded", function () {
+    var bar = document.createElement("div");
+    bar.style.cssText = "position:sticky;top:0;z-index:99;background:#fdf4e3;color:#8a4f0a;border-bottom:1px solid #f2dcb3;padding:10px 16px;font:13px/1.7 system-ui,'Microsoft YaHei';";
+    bar.innerHTML = '页面是用文件方式打开的，接口请求会被浏览器拦掉。请双击项目根目录的 <b>start.bat</b>，再访问 <a style="color:#4b3fd1" href="http://127.0.0.1:8123">http://127.0.0.1:8123</a>。';
+    document.body.insertBefore(bar, document.body.firstChild);
+  });
+}
+</script>
+
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span><div>GEO Insight<small>品牌在 AI 答案里的位置</small></div></div>
+    <nav>
+      <a href="/" class="active">工作台</a>
+      <a href="/settings">监控配置</a>
+      <a href="/studio">内容工作室</a>
+      <a href="/reports">报告中心</a>
+    </nav>
+  </aside>
+  <main>
+    <header class="top">
+      <h1>答案详情</h1>
+      <span class="sub" id="crumb">加载中…</span>
+      <span class="spacer"></span>
+      <a class="btn" href="/">← 返回工作台</a>
+    </header>
+    <div class="content" id="content">
+      <div class="empty">正在读取…</div>
+    </div>
+  </main>
+</div>
+
+<script>
+const API_BASE = location.protocol === "file:" ? "http://127.0.0.1:8123" : "";
+const API = API_BASE + "/v1";
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const SENTI = { pos: "正面", neu: "中性", neg: "负面" };
+const answerId = location.pathname.split("/").pop();
+
+function renderMentions(mentions, brandName) {
+  if (!mentions.length) {
+    return '<div class="empty">这条答案里没有识别到品牌或竞品提及</div>';
+  }
+  return mentions.map((m) => {
+    const own = m.subject_type === "own";
+    const position = m.position === null ? '<span class="tag">无推荐列表</span>' : `<span class="tag core">第 ${m.position} 位</span>`;
+    const senti = `<span class="tag ${m.sentiment === "pos" ? "ok" : m.sentiment === "neg" ? "bad" : ""}">${SENTI[m.sentiment] || m.sentiment}</span>`;
+    return `<div class="mention ${own ? "own" : ""}">
+      <div class="head">
+        <b>${esc(m.brand_name || brandName)}</b>
+        <span class="tag">${own ? "本品牌" : "竞品"}</span>
+        ${position}${senti}
+        <span class="muted" style="font-size:11px">匹配「${esc(m.matched_alias)}」· ${esc(m.match_type)}</span>
+      </div>
+      <div class="snippet">${esc(m.snippet)}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderCitations(citations) {
+  if (!citations.length) return '<div class="empty">这条答案没有引用记录</div>';
+  return `<div class="table-wrap"><table>
+    <thead><tr><th class="num">#</th><th>媒体</th><th>类型</th><th>归属</th><th>发布时间</th><th>链接</th></tr></thead>
+    <tbody>${citations.map((c) => `<tr>
+      <td class="num">${c.position}</td>
+      <td>${esc(c.media_name || c.domain)}<div class="muted mono">${esc(c.domain)}</div></td>
+      <td><span class="tag">${esc(c.media_type)}</span></td>
+      <td>${c.owner_type === "brand" ? "本品牌" : c.owner_type === "competitor" ? "竞品" : "媒体"}</td>
+      <td>${c.published_at_unknown ? '<span class="tag warn">未知</span>' : esc((c.published_at || "").slice(0, 10))}</td>
+      <td><a href="${esc(c.url)}" target="_blank" rel="noreferrer">打开</a></td>
+    </tr>`).join("")}</tbody></table></div>`;
+}
+
+function render(d) {
+  $("crumb").textContent = `${d.tracker_name} · ${d.model_key} · ${d.collected_at.slice(0, 10)}`;
+  document.title = `GEO Insight · ${d.question_text.slice(0, 18)}`;
+  const blocks = (d.blocks || []).filter((b) => b.list_index !== null);
+  $("content").innerHTML = `
+    <div class="grid side" style="align-items:start">
+      <div>
+        <section class="panel">
+          <h2>采集信息</h2>
+          <div class="body">
+            <div class="kv"><span class="k">问题</span><b style="text-align:right">${esc(d.question_text)}</b></div>
+            <div class="kv"><span class="k">层级</span><span>${d.tier === "core" ? '<span class="tag core">核心</span>' : '<span class="tag">长尾</span>'}</span></div>
+            <div class="kv"><span class="k">模型</span><span>${esc(d.model_key)} <span class="muted mono">${esc(d.model_version || "")}</span></span></div>
+            <div class="kv"><span class="k">通道</span><span>${d.channel === "web" ? "网页端" : "API"}</span></div>
+            <div class="kv"><span class="k">采集时间</span><span>${d.collected_at.slice(0, 19).replace("T", " ")}</span></div>
+            <div class="kv"><span class="k">延迟</span><span>${d.latency_ms ? d.latency_ms + " ms" : "—"}</span></div>
+            <div class="kv"><span class="k">有效样本</span><span>${d.is_valid ? '<span class="tag ok">是</span>' : '<span class="tag bad">否</span>'}</span></div>
+            <div class="kv"><span class="k">原文哈希</span><span class="mono">${esc(d.text_hash.slice(0, 16))}…</span></div>
+            <div class="kv"><span class="k">原始存储</span><span class="mono">${esc((d.raw_uri || "").split("/").pop())}</span></div>
+          </div>
+        </section>
+
+        <section class="panel" style="margin-top:14px">
+          <h2>品牌提及 <span class="badge">${d.mentions.length} 条</span></h2>
+          <div class="body">${renderMentions(d.mentions, d.brand_name)}</div>
+        </section>
+
+        ${blocks.length ? `<section class="panel" style="margin-top:14px">
+          <h2>答案里的推荐清单</h2>
+          <div class="body"><div class="block-list">${blocks.map((b) => `<span class="block-item">${b.list_index}. ${esc(b.text)}</span>`).join("")}</div>
+          <div class="muted" style="font-size:11px;margin-top:8px">位次以这个列表的序号为准；品牌若只在正文出现，则记为无列表样本。</div></div>
+        </section>` : ""}
+      </div>
+
+      <div>
+        <section class="panel">
+          <h2>答案原文 <span class="badge">完整文本</span></h2>
+          <div class="body"><div class="answer-text">${esc(d.text)}</div></div>
+        </section>
+
+        <section class="panel" style="margin-top:14px">
+          <h2>引用来源 <span class="badge">${d.citations.length} 条</span></h2>
+          <div class="body">${renderCitations(d.citations)}</div>
+        </section>
+      </div>
+    </div>`;
+}
+
+(async () => {
+  try {
+    const res = await fetch(`${API}/answers/${answerId}`);
+    if (!res.ok) throw new Error((await res.json()).message || res.status);
+    render(await res.json());
+  } catch (e) {
+    $("content").innerHTML = `<div class="notice error">读取答案失败：${esc(e.message)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>

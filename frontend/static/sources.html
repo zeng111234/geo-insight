@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<script src="/static/app.js"></script>
+<title>GEO Insight · 行业信息分布</title>
+<style>
+  .src-grid { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: stretch; }
+  .src-grid > .panel { display: flex; flex-direction: column; min-width: 0; }
+  .src-grid #media { flex: 1; overflow-y: auto; min-height: 0; }
+  @media (max-width: 1100px) { .src-grid { grid-template-columns: 1fr; } }
+  .media-row { display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-bottom: 1px solid var(--border); }
+  .media-row:last-child { border-bottom: none; }
+  .media-row .rank { width: 20px; height: 20px; border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 11px; display: grid; place-items: center; flex: none; }
+  .media-row:nth-child(-n+3) .rank { background: var(--accent-weak); color: var(--accent-ink); }
+  .media-row .nm { flex: 1; font-size: 12px; }
+  .urlcell { max-width: 340px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <main>
+    <header class="top">
+      <h1>行业信息分布</h1>
+      <span class="sub">发现本项目中，AI 回答实际引用的媒体与内容</span>
+      <span class="spacer"></span>
+      <select id="tracker" aria-label="监控对象"></select>
+      <input id="from" type="date" value="2026-11-01" aria-label="开始日期" />
+      <input id="to" type="date" value="2026-11-30" aria-label="结束日期" />
+      <button id="load" class="primary">查询</button>
+    </header>
+    <div class="content">
+      <div class="cards" id="stats" style="margin-bottom:14px"></div>
+      <div class="src-grid">
+        <div class="panel">
+          <h2>媒体排行 <span class="badge" id="mediaMeta">—</span></h2>
+          <div id="media"><div class="empty">加载中…</div></div>
+        </div>
+        <div class="panel">
+          <h2>内容明细（按 URL 去重） <span class="badge" id="urlMeta">—</span></h2>
+          <div class="body"><div class="table-wrap" id="urls"><div class="empty">加载中…</div></div></div>
+        </div>
+      </div>
+      <div class="grid c2" style="margin-top:14px">
+        <div class="panel"><h2>类型分布</h2><div class="body" id="types"></div></div>
+        <div class="panel"><h2>发布时间完整度</h2><div class="body" id="freshness"></div></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+(function () {
+  var G = window.GEO, $ = G.$, esc = G.esc;
+
+  function stat(label, value, sub) {
+    return '<div class="card"><div class="label">' + esc(label) + '</div><div class="value">' + esc(value) +
+      '</div><div class="sub">' + esc(sub) + "</div></div>";
+  }
+  function bars(rows) {
+    if (!rows || !rows.length) return G.empty("该周期没有引用记录");
+    return '<div class="rows">' + rows.map(function (r) {
+      var w = Math.round((r.share || 0) * 100);
+      return '<div class="row" style="margin-bottom:8px"><span style="width:88px">' + esc(r.media_type) + "</span>" +
+        '<span style="flex:1;height:9px;border-radius:999px;background:var(--panel-2);overflow:hidden">' +
+        '<span style="display:block;height:100%;width:' + w + '%;background:var(--accent)"></span></span>' +
+        '<span class="mono" style="width:96px;text-align:right">' + G.num(r.count) + " · " + G.pct(r.share) + "</span></div>";
+    }).join("") + "</div>";
+  }
+
+  // 内容明细是全量去重后的 URL 清单（2000+），必须按页去服务端取，
+  // 否则「共 2435 个 URL」却只能翻到第 100 条，又是一个假总数。
+  var URL_PAGE_SIZE = 10;
+
+  async function loadUrls() {
+    var t = G.tracker(); if (!t) return;
+    var st = G.pagerInit("urls", loadUrls);
+    try {
+      var detail = await G.get("/trackers/" + t + "/citations?" + G.dates() +
+        "&limit=" + URL_PAGE_SIZE + "&page=" + st.page);
+      var items = detail.items || [];
+      var total = detail.total_urls || 0;
+      var pages = Math.max(1, Math.ceil(total / URL_PAGE_SIZE));
+      if (st.page > pages) { st.page = pages; return loadUrls(); }
+      $("urlMeta").textContent = G.num(total) + " 个 URL / " + G.num(detail.total_occurrences) + " 次出现";
+      var nav = G.pagerNav("urls", st.page, pages, total);
+      $("urls").innerHTML = (items.length ? "<table><thead><tr><th>内容 / 来源</th><th>媒体类型</th>" +
+        "<th class=\"num\">引用次数</th><th class=\"num\">占比</th><th class=\"num\">首次出现</th></tr></thead><tbody>" +
+        items.map(function (u) {
+          var share = detail.total_occurrences ? u.times / detail.total_occurrences : null;
+          return "<tr><td class=\"urlcell\"><a class=\"plain\" href=\"" + esc(u.url) + "\" target=\"_blank\" rel=\"noreferrer\">" +
+            esc(u.media_name || u.domain || u.url) + "</a><div class=\"muted mono\">" + esc(u.domain || "") + "</div></td>" +
+            "<td><span class=\"tag\">" + esc(u.media_type || "未知") + "</span></td>" +
+            "<td class=\"num\">" + G.num(u.times) + "</td><td class=\"num\">" + G.pct(share) + "</td>" +
+            "<td class=\"num\">" + esc((u.first_seen || "").slice(0, 10) || "—") + "</td></tr>";
+        }).join("") + "</tbody></table>" : G.empty("该周期没有引用记录")) + nav;
+    } catch (e) { G.fail(e, ["urls"]); }
+  }
+
+  async function load() {
+    var t = G.tracker(); if (!t) return;
+    G.pagerReset("urls");
+    var q = G.dates();
+    try {
+      var sum = await G.get("/trackers/" + t + "/citations/summary?" + q);
+      $("stats").innerHTML =
+        stat("引用次数", G.num(sum.total_citations), "按出现次数累计") +
+        stat("引用媒体", G.num(sum.unique_domains), "不同域名数") +
+        stat("引用内容", G.num(sum.unique_urls), "不同 URL 数") +
+        stat("视频引用占比", G.pct(sum.video_share), "视频类引用 / 全部引用");
+
+      var media = sum.top_media || [];
+      $("mediaMeta").textContent = media.length + " 个媒体";
+      $("media").innerHTML = media.length ? media.map(function (m, i) {
+        return '<div class="media-row"><span class="rank">' + (i + 1) + '</span><span class="nm">' +
+          esc(m.media_name) + '</span><span class="mono">' + G.num(m.count) + "</span>" +
+          '<span class="muted">' + G.pct(m.share) + "</span></div>";
+      }).join("") : G.empty("该周期没有引用记录");
+
+      $("types").innerHTML = bars(sum.by_type);
+      var unknown = sum.unknown_published_share;
+      $("freshness").innerHTML =
+        '<div class="notice ' + (unknown !== null && unknown > 0.5 ? "warn" : "") + '">发布时间未知占比 <strong>' +
+        G.pct(unknown) + "</strong>，已知占比 " + (unknown === null ? "—" : G.pct(1 - unknown)) +
+        "。</div><div class=\"muted\">当前只有「已知 / 未知」两档：真实采集尚未接入，1 天内 / 1 周内等分档需要信源的发布时间字段，不推测、不补假数据。</div>";
+      await loadUrls();
+    } catch (e) { G.fail(e, ["stats", "media", "urls", "types", "freshness"]); }
+  }
+
+  $("load").addEventListener("click", load);
+  (async function () { await G.fillTrackers(); await load(); })();
+})();
+</script>
+</body>
+</html>

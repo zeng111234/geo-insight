@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<script src="/static/app.js"></script>
+<title>GEO Insight · 品牌资产</title>
+</head>
+<body>
+<div class="shell">
+  <main>
+    <header class="top">
+      <h1>品牌资产</h1>
+      <span class="sub">品牌信息、别名、竞品集合版本与采样配置</span>
+      <span class="spacer"></span>
+      <select id="tracker" aria-label="监控对象"></select>
+      <button id="load" class="primary">刷新</button>
+      <a class="btn" href="/settings">去配置 →</a>
+    </header>
+    <div class="content">
+      <div class="grid c2">
+        <div class="panel"><h2>品牌信息</h2><div class="body" id="brand"><div class="empty">加载中…</div></div></div>
+        <div class="panel"><h2>监控对象概况</h2><div class="body" id="scope"><div class="empty">加载中…</div></div></div>
+      </div>
+      <div class="grid c2" style="margin-top:14px">
+        <div class="panel"><h2>品牌别名 <span class="badge" id="aliasMeta">—</span></h2><div class="body" id="aliases"></div></div>
+        <div class="panel"><h2>竞品集合 <span class="badge" id="compMeta">—</span></h2><div class="body" id="competitors"></div></div>
+      </div>
+      <div class="panel" style="margin-top:14px"><h2>采样计划</h2><div class="body" id="sampling"></div></div>
+      <div class="panel" style="margin-top:14px">
+        <h2>问题覆盖 <span class="badge" id="qMeta">—</span></h2>
+        <div class="body" id="questions"><div class="empty">加载中…</div></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+(function () {
+  var G = window.GEO, $ = G.$, esc = G.esc;
+  var kv = function (k, v) { return '<div class="row" style="margin-bottom:8px"><span class="muted" style="width:96px">' + esc(k) + "</span><strong>" + esc(v) + "</strong></div>"; };
+  var ALIAS_TYPE = { full: "全称", short: "简称", en: "英文名", misspell: "常见错写" };
+
+  async function load() {
+    var t = G.tracker(); if (!t) return;
+    try {
+      var [d, brand, comp, plan, questions] = await Promise.all([
+        G.get("/trackers/" + t),
+        G.get("/trackers/" + t + "/brand"),
+        G.get("/trackers/" + t + "/competitors"),
+        G.get("/trackers/" + t + "/sampling-plan"),
+        G.get("/trackers/" + t + "/questions")
+      ]);
+      $("brand").innerHTML = kv("品牌名称", brand.name) + kv("所属行业", brand.industry || "未填写") +
+        kv("地区", brand.region || "未填写") + kv("状态", brand.status || d.status) +
+        kv("监控对象", brand.tracker_name || d.name);
+      var qs = d.question_summary || {};
+      $("scope").innerHTML = kv("问题总数", G.num(qs.total)) + kv("核心 / 长尾", G.num(qs.core) + " / " + G.num(qs.long_tail)) +
+        kv("数据首日", (d.data_range && d.data_range.first_day) || "无") +
+        kv("数据末日", (d.data_range && d.data_range.last_day) || "无") +
+        kv("口径版本", d.metric_version || "v1");
+
+      var aliases = brand.aliases || [];
+      $("aliasMeta").textContent = aliases.length + " 个";
+      $("aliases").innerHTML = aliases.length ? "<table><thead><tr><th>别名</th><th>类型</th><th>启用</th></tr></thead><tbody>" +
+        aliases.map(function (a) {
+          return "<tr><td>" + esc(a.alias) + "</td><td><span class=\"tag\">" +
+            esc(ALIAS_TYPE[a.alias_type] || a.alias_type) + "</span></td><td>" +
+            (a.is_active === 0 ? "停用" : "是") + "</td></tr>";
+        }).join("") + "</tbody></table>" : G.empty("还没有别名，去「监控配置」添加");
+
+      var items = comp.items || [];
+      $("compMeta").textContent = "版本 " + G.num(comp.version);
+      $("competitors").innerHTML = items.length ? "<table><thead><tr><th>竞品</th><th>别名</th></tr></thead><tbody>" +
+        items.map(function (c) {
+          var names = [];
+          try { names = JSON.parse(c.aliases || "[]"); } catch (e) { names = []; }
+          return "<tr><td>" + esc(c.name) + "</td><td class=\"muted\">" + esc(names.join("、") || "—") + "</td></tr>";
+        }).join("") + "</tbody></table>" : G.empty("还没有竞品") +
+        '<div class="muted" style="margin-top:8px">竞品集合变更会递增版本号，历史指标不重算。</div>';
+
+      var b = plan.breakdown || {}, f = plan.failure || {};
+      $("sampling").innerHTML = '<div class="cards">' +
+        '<div class="card"><div class="label">每日计划采样</div><div class="value">' + G.num(plan.daily_planned) + '</div><div class="sub">' + (plan.models || []).join(" / ") + "</div></div>" +
+        '<div class="card"><div class="label">核心问题</div><div class="value">' + G.num(b.core_questions) + '</div><div class="sub">每题 ' + G.num(plan.core_times) + " 次/日</div></div>" +
+        '<div class="card"><div class="label">长尾问题</div><div class="value">' + G.num(b.long_tail_questions) + '</div><div class="sub">每题 ' + G.num(plan.long_tail_times) + " 次/日</div></div>" +
+        '<div class="card"><div class="label">采样失败率</div><div class="value">' + G.pct(f.rate) + '</div><div class="sub">' +
+          G.num(f.failed) + " / " + G.num(f.attempted) + " · 阈值 " + G.pct(f.threshold) + "</div></div></div>";
+
+      var qs2 = questions.items || [];
+      $("qMeta").textContent = qs2.length + " 个问题";
+      $("questions").innerHTML = qs2.length ? '<div class="table-wrap"><table><thead><tr><th>问题</th><th>层级</th>' +
+        "<th>状态</th><th class=\"num\">累计样本</th><th class=\"num\">每日采样</th><th class=\"nowrap\">创建时间</th></tr></thead><tbody>" +
+        qs2.map(function (x) {
+          return "<tr><td>" + esc(x.text) + "</td><td>" +
+            '<span class="tag ' + (x.tier === "core" ? "core" : "") + '">' +
+            (x.tier === "core" ? "核心" : "长尾") + "</span></td><td>" +
+            (x.status === "active" ? '<span class="tag ok">启用</span>' : esc(x.status)) + "</td>" +
+            '<td class="num">' + G.num(x.sample_total) + "</td>" +
+            '<td class="num">' + G.num(x.daily_samples) + "</td>" +
+            '<td class="nowrap">' + esc((x.created_at || "").slice(0, 10)) + "</td></tr>";
+        }).join("") + "</tbody></table></div>" +
+        '<div class="notice" style="margin-top:10px">每日采样 = 问题层级次数 × 模型数；层级调整次日生效，去「监控配置」可改。</div>'
+        : G.empty("还没有监控问题，去「监控配置」批量导入");
+    } catch (e) { G.fail(e, ["brand", "scope", "aliases", "competitors", "sampling", "questions"]); }
+  }
+
+  $("load").addEventListener("click", load);
+  (async function () { await G.fillTrackers(); await load(); })();
+})();
+</script>
+</body>
+</html>

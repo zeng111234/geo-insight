@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<title>GEO Insight · 报告详情</title>
+<style>
+  .report-head { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
+  .report-head h2 { margin: 0 0 4px; font-size: 19px; color: var(--text-strong); }
+  .report-head .meta { color: var(--muted); font-size: 11.5px; line-height: 1.8; }
+  .conclusion { display: flex; gap: 9px; padding: 7px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; line-height: 1.7; }
+  .conclusion:last-child { border-bottom: none; }
+  .conclusion .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; flex: none; background: var(--accent); }
+  .conclusion.warn .dot { background: var(--amber); }
+  .conclusion.risk .dot { background: var(--red); }
+  .cmp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .cmp .cell { border: 1px solid var(--border); border-radius: 8px; padding: 11px 13px; background: var(--subtle); }
+  .cmp .k { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+  .cmp .v { font-size: 20px; font-weight: 600; color: var(--text-strong); }
+  .cmp .s { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .sign { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; line-height: 1.9; }
+</style>
+</head>
+<body>
+<script>
+if (location.protocol === "file:") {
+  document.addEventListener("DOMContentLoaded", function () {
+    var bar = document.createElement("div");
+    bar.style.cssText = "position:sticky;top:0;z-index:99;background:#fdf4e3;color:#8a4f0a;border-bottom:1px solid #f2dcb3;padding:10px 16px;font:13px/1.7 system-ui,'Microsoft YaHei';";
+    bar.innerHTML = '页面是用文件方式打开的，接口请求会被浏览器拦掉。请双击项目根目录的 <b>start.bat</b>，再访问 <a style="color:#4b3fd1" href="http://127.0.0.1:8123">http://127.0.0.1:8123</a>。';
+    document.body.insertBefore(bar, document.body.firstChild);
+  });
+}
+</script>
+
+<div class="shell">
+  <aside class="side no-print">
+    <div class="brand"><span class="dot"></span><div>GEO Insight<small>品牌在 AI 答案里的位置</small></div></div>
+    <nav>
+      <a href="/">工作台</a>
+      <a href="/settings">监控配置</a>
+      <a href="/studio">内容工作室</a>
+      <a href="/reports" class="active">报告中心</a>
+    </nav>
+  </aside>
+  <main>
+    <header class="top">
+      <h1>报告</h1>
+      <span class="sub" id="crumb">加载中…</span>
+      <span class="spacer"></span>
+      <a class="btn no-print" href="/reports">← 返回列表</a>
+      <button class="primary no-print" id="printBtn">打印 / 导出 PDF</button>
+    </header>
+    <div class="content" id="content">
+      <div class="empty">正在读取报告…</div>
+    </div>
+  </main>
+</div>
+
+<script>
+const API_BASE = location.protocol === "file:" ? "http://127.0.0.1:8123" : "";
+const API = API_BASE + "/v1";
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pct = (v) => (v === null || v === undefined ? "—" : (v * 100).toFixed(1) + "%");
+const num = (v, d = 2) => (v === null || v === undefined ? "—" : Number(v).toFixed(d));
+const reportId = location.pathname.split("/").pop();
+
+function card(label, metric, kind) {
+  if (!metric) return "";
+  const bad = metric.status === "insufficient_samples";
+  const value = bad ? "样本不足" : kind === "num" ? num(metric.value) : pct(metric.value);
+  return `<div class="card">
+    <div class="label">${esc(label)}</div>
+    <div class="value ${bad ? "small warn-text" : ""}">${value}</div>
+    <div class="sub">样本基数 ${metric.sample_base ?? 0}</div>
+  </div>`;
+}
+
+function trendTable(points) {
+  if (!points.length) return '<div class="empty">该周期没有按日数据</div>';
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>日期</th><th class="num">有效样本</th><th class="num">提及数</th><th class="num">提及率</th></tr></thead>
+    <tbody>${points.map((p) => `<tr>
+      <td>${p.date}</td><td class="num">${p.valid_total}</td><td class="num">${p.mention_total}</td>
+      <td class="num">${p.mention_rate === null ? '<span class="muted">样本不足</span>' : pct(p.mention_rate)}</td>
+    </tr>`).join("")}</tbody></table></div>`;
+}
+
+function citations(c) {
+  if (!c.total_citations) return '<div class="empty">该周期没有引用记录</div>';
+  const types = c.by_type.map((t) => `<div class="row" style="margin-bottom:6px">
+      <span class="tag">${esc(t.media_type)}</span><span class="mono">${t.count}</span><span class="muted">${pct(t.share)}</span></div>`).join("");
+  const media = c.top_media.map((m) => `<tr><td>${esc(m.media_name)}</td><td class="num">${m.count}</td><td class="num">${pct(m.share)}</td></tr>`).join("");
+  return `${types}
+    <div class="table-wrap" style="margin-top:10px"><table>
+      <thead><tr><th>媒体</th><th class="num">次数</th><th class="num">占比</th></tr></thead><tbody>${media}</tbody></table></div>
+    <div class="sign">共 ${c.total_citations} 次引用 · ${c.unique_urls} 个唯一 URL · ${c.unique_domains} 个域名 ·
+      视频占比 ${pct(c.video_share)} · 发布时间未知 ${pct(c.unknown_published_share)}</div>`;
+}
+
+function render(report) {
+  const p = report.payload || {};
+  const cards = p.cards || {};
+  const cmp = p.comparison || {};
+  const tracker = p.tracker || {};
+  $("crumb").textContent = `${tracker.brand_name || ""} · ${(p.period || {}).from} ~ ${(p.period || {}).to}`;
+  document.title = `GEO Insight · ${tracker.brand_name || "报告"} ${(p.period || {}).from} ~ ${(p.period || {}).to}`;
+
+  const incomparable = cmp.comparable === false;
+  const deltaText = incomparable ? "不输出涨跌幅"
+    : cmp.delta_pp === null || cmp.delta_pp === undefined ? "无可比数据"
+    : `${cmp.delta_pp > 0 ? "+" : ""}${Number(cmp.delta_pp).toFixed(1)} 个百分点`;
+
+  const conclusions = (p.conclusions || []).map((c) =>
+    `<div class="conclusion ${c.level || "info"}"><span class="dot"></span><span>${esc(c.text)}</span></div>`).join("");
+
+  const modelList = (p.models || []).join("、") || "—";
+  const competitors = (p.competitor_names || []).join("、") || "未配置";
+
+  $("content").innerHTML = `
+    <div class="report-head">
+      <div>
+        <h2>${esc(tracker.brand_name || tracker.name || "监控对象")} · AI 答案可见度报告</h2>
+        <div class="meta">
+          周期 ${(p.period || {}).from} ~ ${(p.period || {}).to}（${(p.period || {}).days} 天） ·
+          有效样本 ${(p.sample || {}).valid_total} 条 · 提及 ${(p.sample || {}).mention_total} 条<br/>
+          监控对象 ${esc(tracker.name || "")} · ${esc(tracker.industry || "")} ${esc(tracker.region || "")} ·
+          模型 ${esc(modelList)}<br/>
+          生成时间 ${(p.generated_at || report.generated_at || "").slice(0, 19).replace("T", " ")} ·
+          口径 ${esc(p.metric_version)} · 快照哈希 <span class="mono">${String(report.payload_hash || "").slice(0, 16)}</span>
+        </div>
+      </div>
+    </div>
+
+    ${incomparable ? `<div class="notice warn"><b>与上一周期不可比</b>：${(cmp.incomparable_reasons || []).map(esc).join("；")}。本报告不输出涨跌幅。</div>` : ""}
+
+    <div class="cards">${[
+      card("提及率", cards.mention_rate),
+      card("覆盖率", cards.coverage_rate),
+      card("平均排名", cards.avg_rank, "num"),
+      card("Top3", cards.top3_rate),
+      card("情感（正面）", cards.sentiment ? { value: cards.sentiment.pos, status: cards.sentiment.status, sample_base: cards.sentiment.base } : null),
+      `<div class="card"><div class="label">无列表样本</div><div class="value">${(p.sample || {}).no_list_samples}</div>
+        <div class="sub">不计入平均排名</div></div>`,
+    ].join("")}</div>
+
+    <div class="grid c2" style="margin-top:14px">
+      <section class="panel"><h2>结论</h2><div class="body">${conclusions || '<div class="empty">没有结论</div>'}</div></section>
+      <section class="panel"><h2>与上一周期对比</h2><div class="body">
+        <div class="cmp">
+          <div class="cell"><div class="k">上一周期 ${(cmp.previous_period || {}).from} ~ ${(cmp.previous_period || {}).to}</div>
+            <div class="v">${pct((cmp.before || {}).mention_rate && cmp.before.mention_rate.value)}</div>
+            <div class="s">有效样本 ${(cmp.before || {}).valid_total ?? 0}</div></div>
+          <div class="cell"><div class="k">本期</div>
+            <div class="v">${pct((cmp.after || {}).mention_rate && cmp.after.mention_rate.value)}</div>
+            <div class="s">有效样本 ${(cmp.after || {}).valid_total ?? 0}</div></div>
+          <div class="cell"><div class="k">变化</div>
+            <div class="v ${incomparable ? "muted" : cmp.delta_pp > 0 ? "good" : cmp.delta_pp < 0 ? "bad" : ""}">${esc(deltaText)}</div>
+            <div class="s">${incomparable ? "不可比" : "同口径、同模型集合"}</div></div>
+        </div>
+        <div class="sign">口径 ${esc(p.metric_version)} · 模型集合哈希 <span class="mono">${esc(p.model_set_hash)}</span> ·
+          竞品集合版本 ${p.competitor_set_version === null ? "—" : "v" + p.competitor_set_version}（${esc(competitors)}）</div>
+      </div></section>
+    </div>
+
+    <div class="grid c2" style="margin-top:14px">
+      <section class="panel"><h2>按日趋势</h2><div class="body">${trendTable(p.trend || [])}</div></section>
+      <section class="panel"><h2>信源分布</h2><div class="body">${citations(p.citations || {})}</div></section>
+    </div>
+
+    <div class="sign">
+      本报告为生成时刻的不可变快照，之后的数据变化不会影响本页数字（FR-028）。<br/>
+      样本量低于 3 条时只显示「样本不足」，不输出百分比与排名（FR-018）。<br/>
+      平均排名与 TopN 的分母是「位次非空的提及样本」，无推荐列表的答案单独统计（FR-015）。
+    </div>`;
+}
+
+$("printBtn").addEventListener("click", () => window.print());
+
+(async () => {
+  try {
+    const res = await fetch(`${API}/reports/${reportId}`);
+    if (!res.ok) throw new Error((await res.json()).message || res.status);
+    render(await res.json());
+  } catch (e) {
+    $("content").innerHTML = `<div class="notice error">读取报告失败：${esc(e.message)}</div>`;
+  }
+})();
+</script>
+</body>
+</html>
