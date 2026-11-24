@@ -15,9 +15,12 @@
 
 ## Phase 1: H2 收尾(US2,P1,1.0 人日)
 
-- [ ] T004 H2-6 问题集与监控对象绑定:一对象多问题集可切换,切换后问题列表、指标口径、核心词与跑题判定同步变化 per FR-003 in `backend/src/geo/services/tracker_service.py`, `backend/src/geo/api/app.py`, `frontend/static/index.html` + 新增迁移
-- [ ] T005 H2-7 引用类型筛选:inline / reference / video 生效到接口与页面,筛选条数与手工 SQL 一致 per FR-004 in `backend/src/geo/api/app.py`, `frontend/static/index.html`;**过滤逻辑与 E1b(T016)必须同一份实现**,不允许两处各写一套(spec Edge 硬约束)
-- [ ] T006 H2 收尾验证:黄金窗口断言(22.22% / 9 样本)不动,全量测试数只增不减 per FR-012/SC-007
+- [X] T004 H2-6 问题集与监控对象绑定:一对象多问题集可切换,切换后问题列表、指标口径、核心词与跑题判定同步变化 per FR-003 in `backend/src/geo/services/tracker_service.py`, `backend/src/geo/api/app.py`, `frontend/static/settings.html` + 迁移 010
+  **2026-11-24 完成**:迁移 010 加 `tracker.active_question_set_id` + `question_set.keywords`(核心词从 tracker 下放到集,存量回填);口径跟随靠 sqlite_repository 的统一 SQL 谓词(`_filters` + 6 处 qs 联表查询,相关子查询挂 tracker_id,调用点零签名变更);切换走既有 PATCH `/v1/trackers/{id}`;问题集 CRUD 走 `/v1/trackers/{id}/question-sets`;UI 在 settings.html(下拉切换/新建);导入问题进生效集。seed 加第二问题集供切换演示。
+- [X] T005 H2-7 引用类型筛选:inline / reference / video 生效到接口与页面,筛选条数与手工 SQL 一致 per FR-004 in `backend/src/geo/api/app.py`, `frontend/static/sources.html`
+  **2026-11-24 完成**:`citeType` 参数落到 citations/summary 与 citations(detail)两处;合法值校验只有一份实现(`domain/citation.py citation_type_filter`,E1b 复用同源,spec Edge 硬约束);UI 筛选在 sources.html 头部;断言走接口 totals 与手工 SQL 对拍(冒烟 + test_h2_finish)。
+- [X] T006 H2 收尾验证:黄金窗口断言(22.22% / 9 样本)不动,全量测试数只增不减 per FR-012/SC-007
+  **2026-11-24 完成**:pytest 294 项(含 test_h2_finish 9 条新验收)+ 冒烟 106 条全绿;切走再切回黄金窗口分毫不动是显式断言(冒烟与集成测试各一条)。
 
 ## Phase 2: 安全补齐(US3,P1,对外演示前必须)
 

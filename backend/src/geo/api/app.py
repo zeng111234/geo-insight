@@ -28,6 +28,7 @@ from starlette.concurrency import run_in_threadpool
 
 from geo import db
 from geo.api import nav
+from geo.domain import citation as citation_domain
 from geo.domain import methodology as methodology_module
 from geo.domain import relevance
 from geo.repositories import config_repository as config_repo
@@ -43,6 +44,8 @@ from geo.services import (
     publish_service,
     report_service,
     sampling_service,
+    tracker_service,
+    update_service,
 )
 from geo.settings import settings
 
@@ -332,7 +335,8 @@ async def list_trackers(request: Request):
         items = repo.list_trackers(conn, _tenant(request))
         for item in items:
             item["question_summary"] = repo.question_summary(conn, item["id"])
-            item["keywords"] = relevance.parse_keywords(item.get("keywords"))
+            # H2-6:核心词属于生效问题集(不再读 tracker 行的旧列)
+            item["keywords"] = tracker_service.active_keywords(conn, item["id"])
         return JSONResponse({"items": items, "page": {"page": 1, "limit": len(items), "total": len(items)}})
     finally:
         conn.close()
@@ -468,8 +472,9 @@ async def list_answers(request: Request):
             page,
             limit,
         )
-        # 没有核心词时 off_topic 为 None（未判定），不能当成 False
-        keywords = relevance.parse_keywords((tracker or {}).get("keywords"))
+        # 没有核心词时 off_topic 为 None（未判定），不能当成 False;
+        # H2-6:核心词取当前生效问题集(切换问题集,跑题判定跟随)
+        keywords = tracker_service.active_keywords(conn, tracker_id)
         for item in items:
             item["off_topic"] = relevance.is_off_topic(item.get("text"), keywords)
         return JSONResponse(
@@ -492,6 +497,10 @@ async def citations_summary(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        try:
+            cite_type = citation_domain.citation_type_filter(request.query_params.get("citeType"))
+        except ValueError as e:
+            return _error(request, "VALIDATION_ERROR", str(e))
         return JSONResponse(
             metric_service.build_citation_summary(
                 conn,
@@ -500,6 +509,7 @@ async def citations_summary(request: Request):
                 period[1],
                 request.query_params.get("model"),
                 request.query_params.get("channel"),
+                cite_type,
             )
         )
     finally:
@@ -524,6 +534,10 @@ async def citations_detail(request: Request):
         # mediaType：视频/图文引用 tab 只需要某一类，在服务端过滤，
         # 否则前端得先拉全量再去重分页，页码会算错
         media_type = (request.query_params.get("mediaType") or "").strip() or None
+        try:
+            cite_type = citation_domain.citation_type_filter(request.query_params.get("citeType"))
+        except ValueError as e:
+            return _error(request, "VALIDATION_ERROR", str(e))
         detail = repo.url_dedup_citations(
             conn,
             tracker_id,
@@ -532,10 +546,12 @@ async def citations_detail(request: Request):
             limit=limit,
             offset=(page - 1) * limit,
             media_type=media_type,
+            cite_type=cite_type,
         )
         return JSONResponse({
             "items": detail["items"],
             "media_type": media_type,
+            "cite_type": cite_type,
             "total_urls": detail["total_urls"],
             "total_occurrences": detail["total_occurrences"],
             "page": {"page": page, "limit": limit, "total": detail["total_urls"]},
@@ -879,14 +895,25 @@ async def tracker_detail(request: Request):
                     return _error(request, "VALIDATION_ERROR", f"{key} must be a string")
             if "name" in payload and not payload["name"].strip():
                 return _error(request, "VALIDATION_ERROR", "name must not be empty")
-            # 核心词：数组或逗号分隔字符串都收，统一去重后存 JSON
-            keywords_json = None
+            # H2-6:切换生效问题集(校验归属);核心词从数组或逗号分隔字符串
+            # 统一去重后写进**生效问题集**(不再写 tracker 行)
+            if "active_question_set_id" in payload:
+                try:
+                    tracker_service.set_active_question_set(
+                        conn, tracker_id, tenant_id, str(payload["active_question_set_id"])
+                    )
+                except tracker_service.QuestionSetError as e:
+                    status_code = 404 if "not found" in str(e) else 400
+                    return _error(request, "QUESTION_SET_ERROR", str(e), status_code)
             if "keywords" in payload:
                 words = relevance.parse_keywords(payload["keywords"])
                 error = relevance.validate_keywords(words)
                 if error:
                     return _error(request, "VALIDATION_ERROR", error)
-                keywords_json = json.dumps(words, ensure_ascii=False)
+                try:
+                    tracker_service.update_active_keywords(conn, tracker_id, tenant_id, words)
+                except tracker_service.QuestionSetError as e:
+                    return _error(request, "QUESTION_SET_ERROR", str(e), 400)
             updated = config_repo.update_tracker(
                 conn,
                 tracker_id,
@@ -895,7 +922,7 @@ async def tracker_detail(request: Request):
                 brand_name=payload.get("brand_name"),
                 industry=payload.get("industry"),
                 region=payload.get("region"),
-                keywords=keywords_json,
+                keywords=None,
                 status=None,
                 now=_now(),
             )
@@ -1061,6 +1088,54 @@ async def competitor_delete(request: Request):
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+
+
+async def question_sets(request: Request):
+    """H2-6:问题集的列出与新建(一个监控对象可挂多个,切换走 tracker PATCH)。"""
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        tenant_id = _tenant(request)
+
+        if request.method == "GET":
+            items = tracker_service.list_question_sets(conn, tracker_id, tenant_id)
+            if items is None:
+                return _error(request, "NOT_FOUND", "tracker not found", 404)
+            return JSONResponse({"items": items})
+
+        payload = await _json_body(request)
+        if isinstance(payload, JSONResponse):
+            return payload
+        try:
+            created = tracker_service.create_question_set(
+                conn, tracker_id, tenant_id,
+                str(payload.get("name", "")), payload.get("keywords"), _now(),
+            )
+        except tracker_service.QuestionSetError as e:
+            return _error(request, "QUESTION_SET_ERROR", str(e), 400)
+        return JSONResponse(created, status_code=201)
+    finally:
+        conn.close()
+
+
+async def question_set_detail(request: Request):
+    """H2-6:问题集改名/改核心词。"""
+    payload = await _json_body(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+    conn = db.connect()
+    try:
+        try:
+            tracker_service.update_question_set(
+                conn, request.path_params["set_id"], _tenant(request),
+                payload.get("name"), payload.get("keywords"),
+            )
+        except tracker_service.QuestionSetError as e:
+            status_code = 404 if "not found" in str(e) else 400
+            return _error(request, "QUESTION_SET_ERROR", str(e), status_code)
+        return JSONResponse({"id": request.path_params["set_id"], "status": "updated"})
     finally:
         conn.close()
 
@@ -1270,6 +1345,47 @@ async def mention_recompute(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# 系统更新（「表哥同款」：Gitee 上的 update.json + zip，页内一键更新）
+# ---------------------------------------------------------------------------
+
+async def update_status(request: Request):
+    """页面首屏信息：当前版本 + 更新源（只读，GET 不涉 CSRF）。"""
+    source = update_service.read_source()
+    return JSONResponse(
+        {
+            "current": update_service.current_version(),
+            "source_url": source,
+            "has_source": bool(source),
+        }
+    )
+
+
+async def update_source_set(request: Request):
+    payload = await _json_body(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+    try:
+        url = update_service.write_source(payload.get("source_url", ""))
+    except update_service.UpdateError as exc:
+        return _error(request, "VALIDATION_ERROR", str(exc))
+    return JSONResponse({"source_url": url})
+
+
+async def update_check(request: Request):
+    # 错误不抛——进 payload.error 给页面展示（检查失败不算接口失败）
+    return JSONResponse(update_service.check())
+
+
+async def update_apply(request: Request):
+    try:
+        result = update_service.apply_update()
+    except update_service.UpdateError as exc:
+        return _error(request, "UPDATE_FAILED", str(exc))
+    # worker 已带着 2.5 秒宽限期起跑：这个 202 发完之后它才会停服务
+    return JSONResponse(result, status_code=202)
+
+
+# ---------------------------------------------------------------------------
 # 001 报告（FR-027 ~ FR-031）
 # ---------------------------------------------------------------------------
 
@@ -1365,6 +1481,7 @@ def create_app() -> Starlette:
         Route("/publish", _page("publish.html", "publish")),
         Route("/assets", _page("assets.html", "assets")),
         Route("/sources", _page("sources.html", "sources")),
+        Route("/update", _page("update.html")),
         Route("/favicon.ico", favicon),
         Route("/health", health),
         Route(f"{settings.api_prefix}/meta/methodology", methodology),
@@ -1393,6 +1510,8 @@ def create_app() -> Starlette:
             methods=["DELETE"],
         ),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/questions", questions, methods=["GET", "POST"]),
+        Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/question-sets", question_sets, methods=["GET", "POST"]),
+        Route(f"{settings.api_prefix}/question-sets/{{set_id}}", question_set_detail, methods=["PATCH"]),
         Route(f"{settings.api_prefix}/questions/{{question_id}}", question_tier, methods=["PATCH"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/sampling-plan", sampling_plan),
         Route(
@@ -1419,6 +1538,10 @@ def create_app() -> Starlette:
             mention_recompute,
             methods=["POST"],
         ),
+        Route(f"{settings.api_prefix}/system/update/status", update_status, methods=["GET"]),
+        Route(f"{settings.api_prefix}/system/update/source", update_source_set, methods=["POST"]),
+        Route(f"{settings.api_prefix}/system/update/check", update_check, methods=["POST"]),
+        Route(f"{settings.api_prefix}/system/update/apply", update_apply, methods=["POST"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/citations/summary", citations_summary),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/citations", citations_detail),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/reports", list_reports, methods=["GET"]),

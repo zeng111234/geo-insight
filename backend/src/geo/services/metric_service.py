@@ -138,8 +138,9 @@ def build_citation_summary(
     end: str,
     model: str | None,
     channel: str | None,
+    cite_type: str | None = None,
 ) -> dict:
-    return repo.citation_summary(conn, tracker_id, start, end, model, channel)
+    return repo.citation_summary(conn, tracker_id, start, end, model, channel, cite_type)
 
 
 # ---------------------------------------------------------------------------

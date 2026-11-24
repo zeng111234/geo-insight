@@ -58,6 +58,10 @@ def build_minimal_db(path: str | Path) -> sqlite3.Connection:
         "INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at) VALUES (?, ?, ?, '核心问题', ?)",
         (QUESTION_SET, TENANT, TRACKER, NOW),
     )
+    # H2-6:口径谓词认 tracker.active_question_set_id,夹具必须绑定,否则查询全空
+    conn.execute(
+        "UPDATE tracker SET active_question_set_id = ? WHERE id = ?", (QUESTION_SET, TRACKER)
+    )
     conn.execute(
         """INSERT INTO question(id, tenant_id, question_set_id, text, normalized_text, tier, created_at)
            VALUES (?, ?, ?, ?, ?, 'core', ?)""",

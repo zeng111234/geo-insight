@@ -101,6 +101,10 @@ def patch(path: str, payload: dict) -> tuple[int, dict]:
     return _request(path, payload, "PATCH")
 
 
+def patch(path: str, payload: dict) -> tuple[int, dict]:
+    return _request(path, payload, "PATCH")
+
+
 def delete(path: str) -> int:
     req = urllib.request.Request(BASE + path, method="DELETE")
     try:
@@ -489,6 +493,41 @@ def main() -> None:
             status == 202 and body["created"] == [] and len(body["existing"]) == 1,
             body,
         )
+
+        # ---- H2-6/H2-7 收尾(003 US2) ----
+        qsets = get(f"/v1/trackers/{TRACKER}/question-sets")[1]["items"]
+        check("two question sets seeded", len([s for s in qsets if s["name"] in ("律所核心问题", "长尾扩展集")]) == 2, qsets)
+        extra = next(s for s in qsets if s["name"] == "长尾扩展集")
+        main_set_id = next(s for s in qsets if s["name"] == "律所核心问题")["id"]
+        status, body = patch(f"/v1/trackers/{TRACKER}", {"active_question_set_id": extra["id"]})
+        check("switch question set accepted", status == 200, body)
+        status, body = get(f"/v1/trackers/{TRACKER}/questions")
+        check("questions follow active set (12 -> 2)", len(body["items"]) == 2, body["summary"])
+        status, body = get(f"/v1/trackers/{TRACKER}/metrics/overview?from=2026-11-01&to=2026-11-03")
+        check("metrics follow active set (9 -> 0 samples)", body["valid_total"] == 0, body["valid_total"])
+        # 切回主集:黄金窗口分毫不动(这是 H2-6 的硬验收)
+        status, body = patch(f"/v1/trackers/{TRACKER}", {"active_question_set_id": main_set_id})
+        check("switch back to main set", status == 200, body)
+        status, body = get(f"/v1/trackers/{TRACKER}/metrics/overview?from=2026-11-01&to=2026-11-03")
+        check("golden window restored after switch back", body["valid_total"] == 9, body["valid_total"])
+        status, body = get(f"/v1/articles/{ART_PUBLISHED}/impact")
+        check("golden impact 22.22% after switch back", body["before"]["mention_rate"]["value"] == 0.2222, body["before"])
+
+        # H2-7:引用类型筛选的条数与手工 SQL 对拍
+        import sqlite3 as _sq
+
+        with _sq.connect(DB) as _c:
+            _inline = _c.execute(
+                "SELECT COUNT(*) FROM citation c JOIN answer a ON a.id=c.answer_id "
+                "WHERE a.tracker_id = ? AND a.is_valid = 1 AND c.cite_type = 'inline'",
+                (TRACKER,),
+            ).fetchone()[0]
+        status, body = get(f"/v1/trackers/{TRACKER}/citations?from=2026-11-01&to=2026-11-30&citeType=inline&limit=1")
+        check("citation inline filter matches manual SQL",
+              status == 200 and body["total_occurrences"] == _inline,
+              {"api": body.get("total_occurrences"), "sql": _inline})
+        status, body = get(f"/v1/trackers/{TRACKER}/citations?from=2026-11-01&to=2026-11-30&citeType=bogus")
+        check("invalid citeType is 400", status == 400 and "citeType" in body["message"], body)
 
         # ---- 001 配置面 / 下钻 / 报告 ----
         status, ctype, html = get_html("/settings")

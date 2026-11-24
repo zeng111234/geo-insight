@@ -24,6 +24,12 @@ def _filters(
         f"{alias}.tracker_id = ?",
         f"{alias}.is_valid = 1",
         f"{day_of(alias + '.collected_at')} BETWEEN ? AND ?",
+        # H2-6(003 FR-003):口径跟「当前生效问题集」走。相关子查询挂在
+        # {alias}.tracker_id 上(它已被上面的绑定参数约束),不新增参数,
+        # 全部指标查询一次接上;active 为 NULL 时集合为空(无集可依)
+        f"{alias}.question_id IN (SELECT q.id FROM question q "
+        f"WHERE q.question_set_id = (SELECT t.active_question_set_id FROM tracker t "
+        f"WHERE t.id = {alias}.tracker_id))",
     ]
     params: list[Any] = [tracker_id, start, end]
     if model:
@@ -68,6 +74,7 @@ def question_summary(conn: sqlite3.Connection, tracker_id: str) -> dict:
                SUM(CASE WHEN q.tier = 'long_tail' THEN 1 ELSE 0 END) AS long_tail
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         """,
         (tracker_id,),
     ).fetchone()
@@ -81,6 +88,7 @@ def active_question_texts(conn: sqlite3.Connection, tracker_id: str, limit: int 
         SELECT q.text
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         ORDER BY q.created_at, q.id
         LIMIT ?
         """,
@@ -109,6 +117,7 @@ def active_questions(conn: sqlite3.Connection, tracker_id: str) -> list[dict]:
         SELECT q.id, q.text, q.tier
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         ORDER BY q.tier, q.created_at, q.id
         """,
         (tracker_id,),
@@ -176,6 +185,7 @@ def overview_counts(
         SELECT COUNT(*) AS active_questions
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         """,
         (tracker_id,),
     ).fetchone()
@@ -280,8 +290,12 @@ def citation_summary(
     end: str,
     model: str | None,
     channel: str | None,
+    cite_type: str | None = None,
 ) -> dict:
     where, params = _filters(tracker_id, start, end, model, channel)
+    if cite_type:  # H2-7:合法值由 domain.citation.citation_type_filter 保证
+        where += " AND c.cite_type = ?"
+        params = [*params, cite_type]
     base = f"""
         FROM citation c JOIN answer a ON a.id = c.answer_id
         WHERE {where}
@@ -619,6 +633,7 @@ def coverage_rows(
         LEFT JOIN answer a ON {on_clause}
         LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         GROUP BY q.id
         ORDER BY q.text
         """,
@@ -709,6 +724,7 @@ def url_dedup_citations(
     limit: int = 100,
     offset: int = 0,
     media_type: str | None = None,
+    cite_type: str | None = None,
 ) -> dict:
     """FR-020：内容明细按 URL 去重，次数仍按出现次数累计。
 
@@ -719,6 +735,9 @@ def url_dedup_citations(
     if media_type:
         where += " AND c.media_type = ?"
         params = [*params, media_type]
+    if cite_type:  # H2-7:合法值由 domain.citation.citation_type_filter 保证
+        where += " AND c.cite_type = ?"
+        params = [*params, cite_type]
     totals = conn.execute(
         f"""
         SELECT COUNT(DISTINCT c.url) AS total_urls, COUNT(*) AS total_occurrences
@@ -871,6 +890,7 @@ def question_performance_rows(
               AND {day_of('a.collected_at')} BETWEEN ? AND ?
         LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         GROUP BY q.id, q.text, q.tier
         ORDER BY q.tier, q.created_at, q.id
         """,

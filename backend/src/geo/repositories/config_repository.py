@@ -328,7 +328,10 @@ def remove_competitor(
 
 def _question_set(conn: sqlite3.Connection, tracker_id: str, tenant_id: str, now: str) -> str:
     row = conn.execute(
-        "SELECT id FROM question_set WHERE tracker_id = ? ORDER BY created_at LIMIT 1", (tracker_id,)
+        """SELECT id FROM question_set WHERE tracker_id = ?
+           ORDER BY (id = (SELECT active_question_set_id FROM tracker WHERE id = ?)) DESC, created_at
+           LIMIT 1""",
+        (tracker_id, tracker_id),
     ).fetchone()
     if row:
         return row["id"]
@@ -348,6 +351,7 @@ def list_questions(conn: sqlite3.Connection, tracker_id: str) -> dict:
                (SELECT COUNT(*) FROM answer a WHERE a.question_id = q.id AND a.is_valid = 1) AS sample_total
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ?
+          AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         ORDER BY CASE q.tier WHEN 'core' THEN 0 ELSE 1 END, q.created_at
         """,
         (tracker_id,),
