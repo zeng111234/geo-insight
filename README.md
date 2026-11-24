@@ -76,7 +76,7 @@ python backend/run.py
 | 指标看板 | **已接** `/metrics/overview` + `/metrics/by-question` + `/metrics/trend`：5 张指标卡 + 12 个问题的分问题表现（含对比条）+ 提及率趋势（缺数据断开）+ 引用概览 |
 | 问答明细 | **已接**：问题下拉 + 回答列表（服务端分页）+ 右栏引用信源，点一条回答右栏跟着换 |
 | 指标明细 | **已接** `/metrics/{m}/samples`：5 个指标可切，表里标出**哪些样本进了分母**，12 行/页 |
-| 趋势分析 | **已接** `/metrics/trend`：提及率折线（缺数据的日子断开不插值）+ 每日摘要表 |
+| 趋势分析 | **已接** `/metrics/trend`：按日 / 按周切换（`granularity=week`，周一为起点，标出实际天数），提及率折线（缺数据断开）+ 摘要表；平均排名按「位次和 ÷ 位次数」重算，不是日平均值再平均 |
 | 信源分析 | **已接** `/citations/summary` + `/citations`：总量、类型分布、媒体排行、URL 去重明细（服务端分页） |
 | 竞品排名 | **已接** `/competitors/ranking`：提及数、占比、平均位次、情感分布，带对比条 |
 | 竞品统计 | **已接** `/competitors/cooccurrence`：共现矩阵（含本方品牌），矩阵对称性有断言 |
@@ -247,17 +247,17 @@ curl "$B/articles/55555555-5555-5555-5555-555555555551/impact"
 
 ```bash
 cd backend
-python -m unittest discover -s tests -t . -p "test_*.py" -v   # 171 条（含 HTTP 层鉴权、审计、核心词，需 starlette）
+python -m unittest discover -s tests -t . -p "test_*.py" -v   # 178 条（含 HTTP 层鉴权、审计、核心词、周聚合，需 starlette）
 python scripts/smoke.py                                        # 86 条真实 HTTP 断言（自己登录，自动选空闲端口）
 
 # 后三个不看登录态：启动服务时显式关掉鉴权
 GEO_AUTH_REQUIRED=0 python run.py --no-browser &
 node scripts/pagecheck.mjs                                    # 77 条页面字段契约 + 侧栏结构 + 样式契约
-node scripts/browsercheck.mjs                                 # 69 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
+node scripts/browsercheck.mjs                                 # 75 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 ```
 
-合计 425 条，全部通过。
+合计 438 条，全部通过。
 
 用**系统 Python** 跑（`start.bat` 用的也是它）：`backend/.venv` 是历史残留，里面只有 pip，
 `starlette` 装在系统环境。空 venv 里跑单测不会报错，HTTP 层那 10 条会自动跳过并说明原因。

@@ -6,7 +6,6 @@ the golden-sample regression can exercise it without a database.
 """
 
 from dataclasses import asdict, dataclass
-from statistics import mean
 
 from geo.settings import settings
 
@@ -43,11 +42,23 @@ def coverage_rate(covered_questions: int, active_questions: int) -> MetricValue:
     return _metric(covered_questions / active_questions, active_questions)
 
 
+def avg_rank_summary(ranked: int, position_sum: float) -> MetricValue:
+    """用「位次数 + 位次和」算平均位次。
+
+    为什么要这个入口：按周聚合时拿不到每天的原始位次列表，
+    只能拿到汇总。直接对「日平均值」再平均会因为各天条数不同而算错，
+    所以统一回到 sum/count 这一步再除。
+    """
+    if not ranked:
+        return MetricValue(value=None, status="insufficient_samples", sample_base=0)
+    return _metric(position_sum / ranked, ranked, digits=2)
+
+
 def avg_rank(positions: list[int]) -> MetricValue:
     """Mean list index. Only samples that actually have a list index count."""
     if not positions:
         return MetricValue(value=None, status="insufficient_samples", sample_base=0)
-    return _metric(mean(positions), len(positions), digits=2)
+    return avg_rank_summary(len(positions), sum(positions))
 
 
 def top_n_rate(positions: list[int], n: int) -> MetricValue:

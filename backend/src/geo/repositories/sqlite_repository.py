@@ -204,7 +204,9 @@ def trend_rows(
         f"""
         SELECT {day_of('a.collected_at')} AS day,
                COUNT(*) AS valid_total,
-               COUNT(DISTINCT m.answer_id) AS mention_total
+               COUNT(DISTINCT m.answer_id) AS mention_total,
+               SUM(CASE WHEN m.position IS NOT NULL THEN 1 ELSE 0 END) AS ranked_total,
+               SUM(COALESCE(m.position, 0)) AS position_sum
         FROM answer a
         LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
         WHERE {where}

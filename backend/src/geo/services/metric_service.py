@@ -8,6 +8,7 @@ Rules enforced here (spec FR-015/016/017/018):
 """
 
 import sqlite3
+from datetime import date
 
 from geo.domain import metrics
 from geo.repositories import sqlite_repository as repo
@@ -47,6 +48,13 @@ def build_overview(
     }
 
 
+def _week_start(day: str) -> str:
+    """ISO 周的周一。按周一为周首（国内习惯），跨年也不会错位。"""
+    d = date.fromisoformat(day)
+    iso = d.isocalendar()
+    return date.fromisocalendar(iso[0], iso[1], 1).isoformat()
+
+
 def build_trend(
     conn: sqlite3.Connection,
     tracker_id: str,
@@ -54,25 +62,70 @@ def build_trend(
     end: str,
     model: str | None,
     channel: str | None,
+    granularity: str = "day",
 ) -> dict:
+    """按日或按周的趋势。
+
+    周聚合故意在 Python 里做，不另写一条 SQL：
+    这样「周值 = 该周各日之和」是结构上成立的，不靠两条查询碰巧一致。
+    平均位次用「位次和 ÷ 位次数」重算，而不是把日平均值再平均——
+    各天样本数不同时，后者会算错。
+    """
+    if granularity not in {"day", "week"}:
+        raise ValueError("granularity 只能是 day 或 week")
+
     rows = repo.trend_rows(conn, tracker_id, start, end, model, channel)
+    raw = [
+        {
+            "date": r["day"],
+            "days": 1,
+            "valid_total": int(r["valid_total"] or 0),
+            "mention_total": int(r["mention_total"] or 0),
+            "ranked_total": int(r["ranked_total"] or 0),
+            "position_sum": float(r["position_sum"] or 0),
+        }
+        for r in rows
+    ]
+
+    if granularity == "week":
+        buckets: dict[str, dict] = {}
+        for item in raw:
+            key = _week_start(item["date"])
+            cell = buckets.setdefault(
+                key,
+                {
+                    "date": key,
+                    "days": 0,
+                    "valid_total": 0,
+                    "mention_total": 0,
+                    "ranked_total": 0,
+                    "position_sum": 0.0,
+                },
+            )
+            for field in ("valid_total", "mention_total", "ranked_total", "position_sum"):
+                cell[field] += item[field]
+            cell["days"] += 1
+        raw = [buckets[key] for key in sorted(buckets)]
+
     points = []
-    for r in rows:
-        valid = r["valid_total"]
-        mentioned = r["mention_total"]
-        m = metrics.mention_rate(mentioned, valid)
+    for item in raw:
+        rate = metrics.mention_rate(item["mention_total"], item["valid_total"])
+        rank = metrics.avg_rank_summary(item["ranked_total"], item["position_sum"])
         points.append(
             {
-                "date": r["day"],
-                "mention_rate": m.value,
-                "avg_rank": None,
-                "valid_total": valid,
-                "mention_total": mentioned,
+                "date": item["date"],
+                "days": item["days"],
+                "valid_total": item["valid_total"],
+                "mention_total": item["mention_total"],
+                "mention_rate": rate.value,
+                "avg_rank": rank.value,
+                "ranked_total": item["ranked_total"],
             }
         )
+
     return {
         "metric_version": settings.metric_version,
-        "granularity": "day",
+        "granularity": granularity,
         "model_changes": [],
         "points": points,
     }

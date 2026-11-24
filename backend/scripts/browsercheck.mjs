@@ -51,7 +51,7 @@ try {
 const PAGES = [
   "/", "/settings", "/reports", "/report/" + reportId, "/answer/" + answerId, "/studio",
   "/monitor", "/monitor?tab=answers", "/monitor?tab=metrics",
-  "/monitor?tab=trend", "/monitor?tab=sources",
+  "/monitor?tab=trend", "/monitor?tab=trend&g=week", "/monitor?tab=sources",
   "/monitor?tab=competitors", "/monitor?tab=competitorStats", "/monitor?tab=media",
   "/monitor?tab=sentiment", "/monitor?tab=health",
   "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources"
@@ -87,8 +87,15 @@ const EXTRA = {
     ["明细翻页条", /class="pager"/],
   ],
   "/monitor?tab=trend": [
+    ["粒度切换", /data-granularity="day"[^>]*class="on"/],
     ["趋势折线", /class="spark"[\s\S]{0,200}<path/],
     ["每日摘要表", /id="trendTable"[^>]*>[\s\S]{0,300}<table/],
+  ],
+  "/monitor?tab=trend&g=week": [
+    ["按周高亮", /data-granularity="week"[^>]*class="on"/],
+    ["周表头", /<th>周（起）<\/th>/],
+    ["天数列", /<th class="num">天数<\/th>/],
+    ["按周数据行", /<tbody>[\s\S]{0,200}<td>\d{4}-\d{2}-\d{2}<\/td><td class="num">\d+<\/td>/],
   ],
   "/monitor?tab=sources": [
     ["类型分布条", /class="bar-row"[\s\S]{0,200}class="fill"/],

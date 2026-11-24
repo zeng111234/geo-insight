@@ -331,6 +331,9 @@ async def metrics_trend(request: Request):
     period = _period(request)
     if isinstance(period, JSONResponse):
         return period
+    granularity = (request.query_params.get("granularity") or "day").strip().lower()
+    if granularity not in {"day", "week"}:
+        return _error(request, "VALIDATION_ERROR", "granularity must be day|week")
     conn = db.connect()
     try:
         tracker_id = request.path_params["tracker_id"]
@@ -344,6 +347,7 @@ async def metrics_trend(request: Request):
                 period[1],
                 request.query_params.get("model"),
                 request.query_params.get("channel"),
+                granularity,
             )
         )
     finally:

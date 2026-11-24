@@ -180,7 +180,8 @@
     answerPages: 1,
     selectedAnswer: "",
     metric: "mention_rate",
-    mediaType: "video"
+    mediaType: "video",
+    granularity: "day"
   };
 
   var STATUS_TEXT = { active: "监控中", draft: "草稿", paused: "已暂停", archived: "已归档" };
@@ -201,12 +202,18 @@
   function readQuery() {
     var q = new URLSearchParams(location.search);
     var tab = q.get("tab");
-    return { tab: validTab(tab) ? tab : "dashboard", tracker: q.get("tracker") || "" };
+    return {
+      tab: validTab(tab) ? tab : "dashboard",
+      tracker: q.get("tracker") || "",
+      granularity: q.get("g") === "week" ? "week" : "day"
+    };
   }
   function syncUrl(push) {
     var url = new URL(location.href);
     url.searchParams.set("tab", state.tab);
     if (state.trackerId) url.searchParams.set("tracker", state.trackerId);
+    if (state.tab === "trend" && state.granularity === "week") url.searchParams.set("g", "week");
+    else url.searchParams.delete("g");
     if (push) history.pushState({ tab: state.tab }, "", url);
     else history.replaceState({ tab: state.tab }, "", url);
   }
@@ -546,26 +553,42 @@
   }
 
   async function renderTrendTab() {
-    var d = await G.get("/trackers/" + state.trackerId + "/metrics/trend?" + G.dates());
+    var g = state.granularity === "week" ? "week" : "day";
+    var d = await G.get("/trackers/" + state.trackerId + "/metrics/trend?" + G.dates() +
+      "&granularity=" + g);
     var pts = d.points || [];
-    if (!pts.length) { $("tabBody").innerHTML = G.empty("该周期没有按日数据"); return; }
-    $("tabBody").innerHTML = '<div class="tab-pad">' +
-      '<div class="rule">粒度 ' + esc(d.granularity === "day" ? "按日" : d.granularity) +
+    var toggle = '<div class="metric-bar">' +
+      [["day", "按日"], ["week", "按周"]].map(function (x) {
+        return '<button type="button" data-granularity="' + x[0] + '"' +
+          (x[0] === g ? ' class="on"' : "") + ">" + x[1] + "</button>";
+      }).join("") + "</div>";
+    if (!pts.length) {
+      $("tabBody").innerHTML = '<div class="tab-pad">' + toggle +
+        G.empty("该周期没有可用数据") + "</div>";
+      return;
+    }
+    $("tabBody").innerHTML = '<div class="tab-pad">' + toggle +
+      '<div class="rule">' + (g === "week" ? "按周（周一为起点）" : "按日") +
       " · " + pts.length + " 个数据点 · 折线为提及率，缺数据的日子直接断开不插值" +
+      (g === "week" ? " · 区间两端可能不满 7 天，表里标了实际天数" : "") +
       (d.model_changes && d.model_changes.length ? " · 周期内模型集合有变更" : "") + "</div>" +
       trendSvg(pts) + '<div class="table-wrap" id="trendTable"></div></div>';
-    renderTrendRows(pts);
+    renderTrendRows(pts, g);
   }
 
-  function renderTrendRows(all) {
+  function renderTrendRows(all, g) {
     var box = $("trendTable");
     if (!box) return;
-    var st = G.pagerSlice("mon-trend", all, function () { renderTrendRows(all); }, 12);
-    box.innerHTML = "<table><thead><tr><th>日期</th>" +
+    var st = G.pagerSlice("mon-trend", all, function () { renderTrendRows(all, g); }, 12);
+    var head = g === "week"
+      ? "<th>周（起）</th><th class=\"num\">天数</th>"
+      : "<th>日期</th>";
+    box.innerHTML = "<table><thead><tr>" + head +
       '<th class="num">有效样本</th><th class="num">提及数</th>' +
       '<th class="num">提及率</th><th class="num">平均排名</th></tr></thead><tbody>' +
       st.slice.map(function (p) {
         return "<tr><td>" + esc(p.date) + "</td>" +
+          (g === "week" ? '<td class="num">' + G.num(p.days) + "</td>" : "") +
           '<td class="num">' + G.num(p.valid_total) + "</td>" +
           '<td class="num">' + G.num(p.mention_total) + "</td>" +
           '<td class="num">' + fmtPct(p.mention_rate) + "</td>" +
@@ -894,6 +917,14 @@
       state.mediaType = mt.dataset.media;
       G.pagerReset("mon-media");
       renderTab();
+      return;
+    }
+    var gb = e.target.closest("[data-granularity]");
+    if (gb && state.tab === "trend") {
+      state.granularity = gb.dataset.granularity;
+      G.pagerReset("mon-trend");
+      syncUrl(true);
+      renderTab();
     }
   });
 
@@ -918,6 +949,7 @@
   window.addEventListener("popstate", function () {
     var q = readQuery();
     state.tab = q.tab;
+    state.granularity = q.granularity;
     if (q.tracker && q.tracker !== state.trackerId) {
       state.trackerId = q.tracker;
       $("tracker").value = state.trackerId;
@@ -933,6 +965,7 @@
   (async function init() {
     var q = readQuery();
     state.tab = q.tab;
+    state.granularity = q.granularity;
     await G.fillTrackers();
     try {
       var d = await G.get("/trackers");
