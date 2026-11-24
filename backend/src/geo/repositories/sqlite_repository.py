@@ -749,3 +749,33 @@ def latest_import_at(
         (tracker_id, start, end),
     ).fetchone()
     return row["last"] if row and row["last"] else None
+
+
+def question_performance_rows(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> list[dict]:
+    """按问题聚合：有效样本、本方提及、有位次的条数、平均位次。
+
+    从 question 出发左连，所以周期内一条样本都没有的问题也会出现（samples=0）。
+    这类问题不是"表现差"，是"没数据"，前端要能区分开。
+    """
+    rows = conn.execute(
+        f"""
+        SELECT q.id AS question_id, q.text AS question_text, q.tier,
+               COUNT(a.id) AS samples,
+               SUM(CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END) AS mentions,
+               SUM(CASE WHEN m.position IS NOT NULL THEN 1 ELSE 0 END) AS ranked,
+               AVG(m.position) AS avg_position
+        FROM question q
+        JOIN question_set qs ON qs.id = q.question_set_id
+        LEFT JOIN answer a
+               ON a.question_id = q.id AND a.is_valid = 1
+              AND {day_of('a.collected_at')} BETWEEN ? AND ?
+        LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
+        WHERE qs.tracker_id = ? AND q.status = 'active'
+        GROUP BY q.id, q.text, q.tier
+        ORDER BY q.tier, q.created_at, q.id
+        """,
+        (start, end, tracker_id),
+    ).fetchall()
+    return [dict(r) for r in rows]

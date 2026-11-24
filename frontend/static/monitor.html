@@ -85,6 +85,19 @@
   .bar-row .fill { display: block; height: 100%; background: var(--accent); }
   .bar-row .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .spark { width: 100%; height: 168px; display: block; }
+  .dash-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 12px; padding: 0 14px 14px; align-items: start; }
+  .dash-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+  .dash-head { display: flex; justify-content: space-between; align-items: baseline;
+    padding: 10px 12px 8px; font-size: 12.5px; font-weight: 600; color: var(--text-strong); }
+  .dash-head span { font-size: 10.5px; font-weight: 400; color: var(--muted); }
+  .dash-card .table-wrap { border: 0; border-top: 1px solid var(--border); border-radius: 0; }
+  .dash-card .spark { height: 232px; padding: 2px 10px 0; }
+  .dash-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    padding: 4px 12px 12px; font-size: 10.5px; color: var(--muted); }
+  .dash-facts b { display: block; font-size: 16px; font-weight: 600; color: var(--text-strong); margin: 2px 0 1px; }
+  .dash-cites { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px; }
+  @media (max-width: 1180px) { .dash-grid { grid-template-columns: 1fr; } }
   .sent-table .sentiment { margin-top: 0; }
   .note-line { margin-top: 12px; font-size: 11px; color: var(--muted); }
   .note-line code { font-size: 10.5px; background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }
@@ -244,7 +257,15 @@
 
   // ---- 各 tab 的渲染 ----
   async function renderDashboard() {
-    var d = await G.get("/trackers/" + state.trackerId + "/metrics/overview?" + G.dates());
+    // 三个请求互不依赖，并发发出去；串行等会让这块多花两个 RTT。
+    var base = "/trackers/" + state.trackerId;
+    var res = await Promise.all([
+      G.get(base + "/metrics/overview?" + G.dates()),
+      G.get(base + "/metrics/by-question?" + G.dates()),
+      G.get(base + "/metrics/trend?" + G.dates()),
+      G.get(base + "/citations/summary?" + G.dates())
+    ]);
+    var d = res[0], perf = res[1], trend = res[2], cites = res[3];
     var c = d.cards || {};
     var mention = metric(c.mention_rate);
     var rank = metric(c.avg_rank, "num");
@@ -273,11 +294,68 @@
           '<span class="neg" style="width:' + ((senti.neg || 0) * 100) + '%"></span></div>') +
       '<div class="s">分母为提及样本 ' + G.num(senti.base) + " 条</div></div>";
 
+    // 分问题表现：样本不足 / 未采集要分开标，不能都显示成 0%
+    var qRows = ((perf && perf.items) || []).map(function (q) {
+      var rateCell = q.status === "ok"
+        ? fmtPct(q.mention_rate)
+        : q.status === "no_samples"
+          ? '<span class="muted">未采集</span>'
+          : '<span class="muted">样本不足</span>';
+      var bar = q.status === "ok"
+        ? '<span class="cmp-bar"><span style="width:' + (q.mention_rate * 100).toFixed(1) + '%"></span></span>'
+        : "";
+      return "<tr><td>" + esc(q.text) + "</td>" +
+        '<td><span class="tag ' + (q.tier === "core" ? "core" : "") + '">' +
+        (q.tier === "core" ? "核心" : "长尾") + "</span></td>" +
+        '<td class="num">' + G.num(q.samples) + "</td>" +
+        '<td class="num">' + rateCell + "</td>" +
+        '<td class="num">' + fmtNum(q.avg_rank) + "</td>" +
+        '<td style="width:96px">' + bar + "</td></tr>";
+    }).join("");
+
+    // 趋势：只对"有样本的日子"算最新/最高，没样本的日子单独计数
+    var pts = (trend && trend.points) || [];
+    var withData = pts.filter(function (p) {
+      return p.mention_rate !== null && p.mention_rate !== undefined;
+    });
+    var latest = withData.length ? withData[withData.length - 1] : null;
+    var best = withData.reduce(function (a, b) {
+      return a === null || b.mention_rate > a.mention_rate ? b : a;
+    }, null);
+    var trendBox = pts.length
+      ? trendSvg(pts) +
+        '<div class="dash-facts">' +
+        '<div><i>最新</i><b>' + fmtPct(latest ? latest.mention_rate : null) + "</b><span>" +
+        esc(latest ? latest.date.slice(5) : "—") + "</span></div>" +
+        '<div><i>最高</i><b>' + fmtPct(best ? best.mention_rate : null) + "</b><span>" +
+        esc(best ? best.date.slice(5) : "—") + "</span></div>" +
+        '<div><i>无样本</i><b>' + (pts.length - withData.length) + " 天</b><span>共 " +
+        pts.length + " 天</span></div></div>"
+      : G.empty("该周期没有按日数据");
+
+    var citeBox = '<div class="dash-facts dash-cites">' +
+      "<div><i>引用</i><b>" + G.num(cites.total_citations) + "</b><span>条</span></div>" +
+      "<div><i>独立域名</i><b>" + G.num(cites.unique_domains) + "</b><span>个</span></div>" +
+      "<div><i>视频占比</i><b>" + fmtPct(cites.video_share) + "</b><span>按引用数</span></div>" +
+      "</div>";
+
     $("tabBody").innerHTML = '<div class="kpis">' +
       kpi("提问次数", G.num(d.valid_total), "周期内有效回答 " + G.num(d.valid_total) + " 条") +
       kpi("提及率", mention.text, mention.sub) +
       kpi("平均排名", rank.text, rank.sub) +
       exposure + sentiment +
+      "</div>" +
+      '<div class="dash-grid">' +
+      '<div class="dash-card"><div class="dash-head">分问题表现' +
+      '<span>' + G.num(perf.totals.questions) + " 个问题 · 覆盖 " +
+      G.num(perf.totals.covered) + "</span></div>" +
+      '<div class="table-wrap"><table><thead><tr><th>问题</th><th>层级</th>' +
+      '<th class="num">样本</th><th class="num">提及率</th><th class="num">均位</th>' +
+      '<th>对比</th></tr></thead><tbody>' +
+      (qRows || '<tr><td colspan="6"><div class="empty">当前没有启用中的问题</div></td></tr>') +
+      "</tbody></table></div></div>" +
+      '<div class="dash-card"><div class="dash-head">提及率趋势' +
+      '<span>缺数据的日子断开</span></div>' + trendBox + citeBox + "</div>" +
       "</div>" +
       '<div class="notice" style="margin:0 14px 14px">' +
       "口径：提及与排名按本品牌在答案中的出现位置统计；情感只统计提及到本品牌的样本。" +

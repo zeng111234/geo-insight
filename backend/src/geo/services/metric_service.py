@@ -296,3 +296,64 @@ def build_sentiment_by_model(
             f"少于 {settings.min_samples} 条的模型只标样本不足，不给比例"
         ),
     }
+
+
+def build_question_performance(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> dict:
+    """分问题表现：每个问题的样本数、提及率、平均位次。
+
+    样本不足 min_samples 的问题不给提及率 —— 1 条样本的 100% 和 30 条样本的 40%
+    放在一张表里比，只会误导。样本为 0 的问题单独标 "no_samples"。
+    """
+    rows = repo.question_performance_rows(conn, tracker_id, start, end)
+    items: list[dict] = []
+    total_samples = total_mentions = covered = 0
+    for r in rows:
+        samples = int(r["samples"] or 0)
+        mentions = int(r["mentions"] or 0)
+        total_samples += samples
+        total_mentions += mentions
+        if samples:
+            covered += 1
+        if samples == 0:
+            status = "no_samples"
+        elif samples < settings.min_samples:
+            status = "insufficient_samples"
+        else:
+            status = "ok"
+        items.append(
+            {
+                "question_id": r["question_id"],
+                "text": r["question_text"],
+                "tier": r["tier"],
+                "samples": samples,
+                "mentions": mentions,
+                "mention_rate": (
+                    round(mentions / samples, 4) if status == "ok" else None
+                ),
+                "status": status,
+                "ranked": int(r["ranked"] or 0),
+                "avg_rank": (
+                    round(r["avg_position"], 2)
+                    if r["avg_position"] is not None
+                    else None
+                ),
+            }
+        )
+    return {
+        "metric_version": settings.metric_version,
+        "period": {"from": start, "to": end},
+        "items": items,
+        "totals": {
+            "questions": len(items),
+            "covered": covered,
+            "samples": total_samples,
+            "mentions": total_mentions,
+            "mention_rate": (
+                round(total_mentions / total_samples, 4) if total_samples else None
+            ),
+            "min_samples": settings.min_samples,
+        },
+        "rule": "提及率 = 提及数 ÷ 该问题的有效样本；样本少于 min_samples 不给比例，0 条标未采集",
+    }

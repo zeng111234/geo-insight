@@ -70,6 +70,10 @@ const EXTRA = {
     ["标签页导航", /id="tabs"[^>]*>[\s\S]{0,600}data-tab="dashboard"/],
     ["指标看板卡", /class="kpi[\s\S]{0,300}提问次数/],
     ["监控列表项", /class="titem[\s\S]{0,200}data-tracker=/],
+    ["分问题表现表", /分问题表现[\s\S]{0,600}<th>问题<\/th>/],
+    ["分问题对比条", /<th>问题<\/th>[\s\S]{0,2400}class="cmp-bar"/],
+    ["趋势折线", /提及率趋势[\s\S]{0,300}class="spark"[\s\S]{0,300}<path/],
+    ["引用概览", /独立域名<\/i>/],
   ],
   "/monitor?tab=answers": [
     ["问题下拉", /id="qSelect"/],

@@ -72,7 +72,7 @@ python backend/run.py
 
 | tab | 状态 |
 |---|---|
-| 指标看板 | **已接** `/metrics/overview`：提问次数、提及率、平均排名、高位曝光 Top1/Top3/Top10、情感倾向 |
+| 指标看板 | **已接** `/metrics/overview` + `/metrics/by-question` + `/metrics/trend`：5 张指标卡 + 12 个问题的分问题表现（含对比条）+ 提及率趋势（缺数据断开）+ 引用概览 |
 | 问答明细 | **已接**：问题下拉 + 回答列表（服务端分页）+ 右栏引用信源，点一条回答右栏跟着换 |
 | 指标明细 | **已接** `/metrics/{m}/samples`：5 个指标可切，表里标出**哪些样本进了分母**，12 行/页 |
 | 趋势分析 | **已接** `/metrics/trend`：提及率折线（缺数据的日子断开不插值）+ 每日摘要表 |
@@ -247,11 +247,11 @@ python scripts/smoke.py                                        # 86 条真实 HT
 # 后三个不看登录态：启动服务时显式关掉鉴权
 GEO_AUTH_REQUIRED=0 python run.py --no-browser &
 node scripts/pagecheck.mjs                                    # 77 条页面字段契约 + 侧栏结构 + 样式契约
-node scripts/browsercheck.mjs                                 # 64 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
+node scripts/browsercheck.mjs                                 # 68 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 ```
 
-合计 395 条，全部通过。
+合计 404 条，全部通过。
 
 用**系统 Python** 跑（`start.bat` 用的也是它）：`backend/.venv` 是历史残留，里面只有 pip，
 `starlette` 装在系统环境。空 venv 里跑单测不会报错，HTTP 层那 10 条会自动跳过并说明原因。
