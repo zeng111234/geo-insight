@@ -2,8 +2,9 @@
 
 页面 HTML 里的 <aside class="side">...</aside> 会被整体替换；
 新页面可以不写 aside，自动插入到 .shell 里。
-分组结构参考客户截图（工作台 / 优化执行 / 分析报告 / 洞察工具），
-但每个入口都有真实接口支撑，不提供死链或伪装成可点的占位。
+分组与命名按参考系统逐字对齐（决策 009）：工作台 / 优化执行 / 分析报告 / 品牌资产 / 探索工具。
+`/settings` 不在菜单里——参考系统也没有这一项，它是对象头「问题设置」的目标页，
+路由里 active 传 "monitor"，这样进来时侧栏高亮在「问题监控」，用户知道自己在哪。
 """
 
 from __future__ import annotations
@@ -43,8 +44,7 @@ NAV_GROUPS: list[tuple[str, list[tuple[str, str, str, str]]]] = [
         [
             ("home", "首页", "/", "home"),
             ("monitor", "问题监控", "/monitor", "monitor"),
-            ("insight", "AI 洞察", "/insight", "insight"),
-            ("settings", "监控配置", "/settings", "settings"),
+            ("insight", "AI 舆情", "/insight", "insight"),
         ],
     ),
     (
@@ -60,19 +60,24 @@ NAV_GROUPS: list[tuple[str, list[tuple[str, str, str, str]]]] = [
         "分析报告",
         [
             ("reports", "报告中心", "/reports", "report"),
+        ],
+    ),
+    (
+        "品牌资产",
+        [
             ("assets", "品牌资产", "/assets", "assets"),
         ],
     ),
     (
-        "洞察工具",
+        "探索工具",
         [
-            ("sources", "行业信息分布", "/sources", "sources"),
+            ("sources", "行业信源分布", "/sources", "sources"),
         ],
     ),
 ]
 
-# 详情页归属：高亮对应的主入口
-DETAIL_ACTIVE = {"report": "reports", "answer": "monitor"}
+# 详情页归属由路由显式指定（见 app.py 的 _page 调用），不在这里再维护一份映射。
+# 曾经有过 DETAIL_ACTIVE，但从没被读过——留着只会让人以为改了它就生效。
 
 
 def render_sidebar(active: str) -> str:

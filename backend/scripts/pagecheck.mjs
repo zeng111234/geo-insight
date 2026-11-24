@@ -93,8 +93,10 @@ for (const path of PAGES) {
   const dead = (html.match(/href="#"/g) || []).length;
   const groups = (html.match(/class="group"/g) || []).length;
   const foot = (html.match(/class="page-foot"/g) || []).length;
-  need(r.status === 200 && side === 1 && active === 1 && dead === 0 && groups === 4 && foot === 1,
-    `侧栏: ${path} 单侧栏/单高亮/4 分组/单页脚/无死链 (side=${side} active=${active} dead=${dead} group=${groups} foot=${foot})`);
+  // 分组数必须与 nav.py 的 NAV_GROUPS 长度一致：决策 009 后是 5 组
+  // （工作台 / 优化执行 / 分析报告 / 品牌资产 / 探索工具）。加分组时两边一起改。
+  need(r.status === 200 && side === 1 && active === 1 && dead === 0 && groups === 5 && foot === 1,
+    `侧栏: ${path} 单侧栏/单高亮/5 分组/单页脚/无死链 (side=${side} active=${active} dead=${dead} group=${groups} foot=${foot})`);
 }
 
 // ---- 侧栏样式契约（静态闸门） ----

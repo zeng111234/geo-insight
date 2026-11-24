@@ -136,6 +136,16 @@ async def login_page(request: Request):
     )
 
 
+def _is_https(request: Request) -> bool:
+    """判断这次请求在外网看来是不是 HTTPS。
+
+    线上跑在反向代理后面：浏览器地址栏是 https，但 uvicorn 收到的 scheme 可能仍是 http，
+    所以先看代理头 X-Forwarded-Proto，再退回真实 scheme。本地双击 start.bat 走 http，两者都是 false。
+    """
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    return proto == "https" or request.url.scheme == "https"
+
+
 async def login_submit(request: Request):
     # 直接用 parse_qs 解析 urlencoded 表单：Starlette 的 request.form()
     # 在 multipart 场景要额外依赖，而登录表单只有两个字段，不值得为它引包。
@@ -154,13 +164,19 @@ async def login_submit(request: Request):
 
     token, ttl = auth_service.create_session(user)
     response = RedirectResponse(next_url, status_code=303)
-    # secure=False 因为本地是 http；上 https 后要同时打开 secure。
+    # 本地 http 用 lax（浏览器不接受给 http 设 None），线上 https 必须 None + Secure。
+    # 原因：发布后的应用是在应用卡的 iframe 里打开的，SameSite=lax 的 cookie 在第三方上下文
+    # 不会被发送，登录成功后立刻被弹回登录页，看起来就是一页空白。
+    # 代价：SameSite=None 失去它提供的 CSRF 防护。这个演示应用的写操作都要人主动点，
+    # 真要对外用之前得补 CSRF token（记在决策 010）。
+    is_https = _is_https(request)
     response.set_cookie(
         settings.cookie_name,
         token,
         max_age=ttl,
         httponly=True,
-        samesite="lax",
+        samesite="none" if is_https else "lax",
+        secure=is_https,
         path="/",
     )
     return response
@@ -1096,7 +1112,7 @@ def create_app() -> Starlette:
         Route("/logout", logout, methods=["POST"]),
         Route("/", dashboard),
         Route("/studio", studio_page),
-        Route("/settings", _page("settings.html", "settings")),
+        Route("/settings", _page("settings.html", "monitor")),
         Route("/reports", _page("reports.html", "reports")),
         Route("/report/{report_id}", _page("report.html", "reports")),
         Route("/answer/{answer_id}", _page("answer.html", "monitor")),

@@ -16,6 +16,9 @@
   @media (max-width: 1100px) { .mon-grid { grid-template-columns: 1fr; } }
 
   .mon-list { overflow: hidden; }
+  /* 左栏标题里多了一个「新建」按钮：badge 仍然靠右，按钮接在它后面 */
+  .mon-list > h2 .badge { margin-left: auto; }
+  .mon-list > h2 button.small { flex: none; }
   .mon-list .search { padding: 0 10px 10px; }
   .mon-list .search input { width: 100%; }
   #trackerList { flex: 1; overflow-y: auto; min-height: 0; }
@@ -127,7 +130,10 @@
     <div class="content">
       <div class="mon-grid">
         <div class="panel mon-list">
-          <h2>监控列表 <span class="badge" id="listMeta">—</span></h2>
+          <!-- 菜单里没有「监控配置」（参考系统也没有），新建入口放在左栏顶部；
+               E1e 会把它改成右侧抽屉，现在先跳配置页，不留死路 -->
+          <h2>监控列表 <span class="badge" id="listMeta">—</span>
+            <button type="button" class="small" id="newTracker">＋ 新建</button></h2>
           <div class="search"><input id="listSearch" type="search" placeholder="搜索名称或行业" /></div>
           <div id="trackerList"><div class="empty">加载中…</div></div>
         </div>
@@ -226,6 +232,10 @@
       return (t.name + " " + (t.industry || "") + " " + (t.region || "")).toLowerCase().indexOf(kw) >= 0;
     });
     $("listMeta").textContent = items.length + " / " + state.trackers.length;
+    if (!state.trackers.length) {
+      $("trackerList").innerHTML = G.empty("还没有监控对象，点上方「＋ 新建」开始");
+      return;
+    }
     if (!items.length) { $("trackerList").innerHTML = G.empty("没有匹配的监控对象"); return; }
     $("trackerList").innerHTML = items.map(function (t) {
       var qs = t.question_summary || {};
@@ -943,6 +953,7 @@
   });
 
   $("listSearch").addEventListener("input", renderTrackerList);
+  $("newTracker").addEventListener("click", function () { location.href = "/settings"; });
   $("refreshBtn").addEventListener("click", function () { renderTab(); });
   $("load").addEventListener("click", function () { renderTab(); });
 

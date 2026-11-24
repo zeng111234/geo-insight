@@ -86,6 +86,39 @@ class AuthHttpTest(unittest.TestCase):
         self.assertIn("SameSite=lax", cookie)
         self.assertIn("Path=/", cookie)
 
+    def test_https_login_sets_cross_site_cookie(self):
+        """线上（HTTPS，反向代理后面）必须发 SameSite=None; Secure。
+
+        为什么单列一条：发布后的应用是在应用卡的 iframe 里打开的，
+        SameSite=lax 的 cookie 在第三方上下文里浏览器根本不发送，
+        于是登录成功也会立刻被弹回登录页，用户看到的是一页空白。
+        本地 http 仍用 lax——浏览器不接受给 http 设 None。
+        """
+        body = f"email={settings.admin_email}&password={settings.admin_password}"
+        response = self.client.post(
+            "/login",
+            content=body,
+            headers={**FORM, "x-forwarded-proto": "https"},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        cookie = response.headers["set-cookie"]
+        self.assertIn("samesite=none", cookie.lower())
+        self.assertIn("secure", cookie.lower())
+
+    def test_http_login_keeps_lax(self):
+        """本地双击 start.bat 走 http，cookie 必须是 lax 且不带 Secure。
+
+        带 Secure 的 cookie 在 http 下会被浏览器直接丢掉，本地就登不进去了。
+        """
+        response = self.login()
+
+        cookie = response.headers["set-cookie"]
+        self.assertIn("samesite=lax", cookie.lower())
+        # 只看属性段，避免 token 本身碰巧含这个词造成误判
+        self.assertNotIn("; secure", cookie.lower())
+
     def test_login_then_api_works(self):
         self.login()
         self.assertEqual(self.client.get("/v1/trackers").status_code, 200)
