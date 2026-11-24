@@ -31,6 +31,7 @@ from geo.repositories import config_repository as config_repo
 from geo.repositories import report_repository as report_repo
 from geo.repositories import sqlite_repository as repo
 from geo.services import (
+    audit_service,
     auth_service,
     config_service,
     content_service,
@@ -177,6 +178,12 @@ def _tenant(request: Request) -> str:
         # 任何登录用户都能改个请求头看别人的数据。
         return user["tenant_id"]
     return request.headers.get("X-Tenant-Id", settings.default_tenant_id)
+
+
+def _actor_id(request: Request) -> str | None:
+    """审计里的操作人。鉴权关闭时没有会话，返回 None —— 不编造系统用户。"""
+    user = getattr(request.state, "user", None)
+    return user.get("user_id") if user else None
 
 
 def _error(request: Request, code: str, message: str, status: int = 400) -> JSONResponse:
@@ -623,12 +630,32 @@ async def brand_aliases(request: Request):
 async def brand_alias_delete(request: Request):
     conn = db.connect()
     try:
+        tenant_id = _tenant(request)
+        brand_id = request.path_params["brand_id"]
+        # 先验归属：接口按 id 删除，不校验的话知道 id 就能删别人的别名
+        if config_repo.brand_tenant(conn, brand_id) != tenant_id:
+            return _error(request, "NOT_FOUND", "brand not found", 404)
+
         removed = config_repo.remove_alias(
-            conn, request.path_params["brand_id"], request.path_params["alias_id"]
+            conn, brand_id, request.path_params["alias_id"], commit=False
         )
-        if not removed:
+        if removed is None:
             return _error(request, "NOT_FOUND", "alias not found", 404)
+
+        audit_service.record(
+            conn,
+            tenant_id=tenant_id,
+            actor_id=_actor_id(request),
+            action="alias.delete",
+            object_type="brand_alias",
+            object_id=removed["id"],
+            before=removed,
+        )
+        conn.commit()
         return Response(status_code=204)
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -660,12 +687,31 @@ async def competitors(request: Request):
 async def competitor_delete(request: Request):
     conn = db.connect()
     try:
+        tenant_id = _tenant(request)
+        tracker_id = request.path_params["tracker_id"]
+        if not repo.get_tracker(conn, tracker_id, tenant_id):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+
         removed = config_repo.remove_competitor(
-            conn, request.path_params["tracker_id"], request.path_params["competitor_id"]
+            conn, tracker_id, request.path_params["competitor_id"], commit=False
         )
-        if not removed:
+        if removed is None:
             return _error(request, "NOT_FOUND", "competitor not found", 404)
+
+        audit_service.record(
+            conn,
+            tenant_id=tenant_id,
+            actor_id=_actor_id(request),
+            action="competitor.delete",
+            object_type="competitor",
+            object_id=removed["id"],
+            before=removed,
+        )
+        conn.commit()
         return Response(status_code=204)
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

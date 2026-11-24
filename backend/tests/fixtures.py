@@ -50,9 +50,9 @@ def build_minimal_db(path: str | Path) -> sqlite3.Connection:
         (COMPETITOR_SET,),
     )
     conn.execute(
-        """INSERT INTO tracker(id, tenant_id, brand_id, name, created_at, updated_at)
-           VALUES (?, ?, ?, '测试监控', ?, ?)""",
-        (TRACKER, TENANT, BRAND, NOW, NOW),
+        """INSERT INTO tracker(id, tenant_id, brand_id, competitor_set_id, name, created_at, updated_at)
+           VALUES (?, ?, ?, ?, '测试监控', ?, ?)""",
+        (TRACKER, TENANT, BRAND, COMPETITOR_SET, NOW, NOW),
     )
     conn.execute(
         "INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at) VALUES (?, ?, ?, '核心问题', ?)",

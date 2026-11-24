@@ -153,6 +153,22 @@ python scripts/import_answers.py --file gaps.csv
 - **核销是实时差分，不是状态机**：没有「待办表」要维护，重算一次就是最新缺口。撤销导入批次后缺口会重新出现，这也是对的——数据没了就该重采。
 - `--fail-on-gap` 让存在缺口时返回 2，方便挂定时任务报警。
 
+**④ 删改留痕（审计）**
+
+删别名、移除竞品这类不可逆操作，界面先弹确认框（写清后果，不只是「确定吗」），确认后**删除与审计在同一个事务里提交**——
+审计写失败就整体回滚，不会出现「删了没记账」。
+
+```bash
+python scripts/audit_log.py                        # 最近 20 条
+python scripts/audit_log.py --action alias.delete  # 只看某类动作
+python scripts/audit_log.py --json
+```
+
+- `before_json` 存**完整行快照**，不是差异：差异能算出来，快照丢了就真丢了。
+- 记「谁」：`actor_id` 取自登录会话，查询时 join 出邮箱；鉴权关闭时留空，不编造系统用户。
+- 只记删改，不记读——记全量读会把真正要查的那条淹掉。
+- 两个删除接口都校验对象归属当前租户：知道 id 也删不了别人的数据。
+
 ## 接口
 
 契约权威源：`specs/001-geo-insight-platform/contracts/openapi.yaml`（OpenAPI 3.1，21 路径），根目录 `contracts/openapi.yaml` 是同步副本。
@@ -204,7 +220,7 @@ curl "$B/articles/55555555-5555-5555-5555-555555555551/impact"
 
 ```bash
 cd backend
-python -m unittest discover -s tests -t . -p "test_*.py" -v   # 119 条（含 HTTP 层鉴权，需 starlette）
+python -m unittest discover -s tests -t . -p "test_*.py" -v   # 134 条（含 HTTP 层鉴权与审计，需 starlette）
 python scripts/smoke.py                                        # 86 条真实 HTTP 断言（自己登录，自动选空闲端口）
 
 # 后三个不看登录态：启动服务时显式关掉鉴权
@@ -214,7 +230,7 @@ node scripts/browsercheck.mjs                                 # 32 条真实浏�
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 ```
 
-合计 336 条，全部通过。
+合计 351 条，全部通过。
 
 用**系统 Python** 跑（`start.bat` 用的也是它）：`backend/.venv` 是历史残留，里面只有 pip，
 `starlette` 装在系统环境。空 venv 里跑单测不会报错，HTTP 层那 10 条会自动跳过并说明原因。
@@ -272,5 +288,7 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
 - **多用户与角色**：只有一个预置账号，没有注册、改密、角色区分（`app_user.role` 已在表里但没启用）；
   session 存在进程内，重启即失效，多进程部署会互相看不见
 - 渠道真实登录与发帖（002 T019/T020）；按周聚合；片段级情感聚合；合规命中审计落库
-- 契约 fuzz（Schemathesis）、交互 E2E（表单提交等完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖，但**其余交互（表单提交、下钻抽屉、打印）仍未模拟用户操作**
+- **审计只覆盖两类删除**（别名、竞品）。导入批次回滚同样是破坏性操作，还没接审计；
+  也没有审计的查询接口（只有 `scripts/audit_log.py`）
+- 契约 fuzz（Schemathesis）、交互 E2E（表单提交等完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖；删除确认做过一次 CDP 真实点击验证（临时脚本，未入库），但**其余交互（表单提交、下钻抽屉、打印）仍未模拟用户操作**
 - **AI 成稿与积分**：按决策 003 整体取消，不是待办

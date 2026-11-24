@@ -162,6 +162,19 @@ if (location.protocol === "file:") {
   </main>
 </div>
 
+<dialog id="confirmDialog">
+  <form method="dialog">
+    <h2 id="confirmTitle">确认删除</h2>
+    <div class="dialog-body">
+      <p id="confirmText" style="margin:0;font-size:12.5px;line-height:1.7"></p>
+    </div>
+    <div class="dialog-foot">
+      <button value="cancel">取消</button>
+      <button value="ok" class="danger">删除</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="newDialog">
   <form id="newForm">
     <h2>新建监控对象</h2>
@@ -212,6 +225,21 @@ async function api(path, options = {}) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message || body.code || res.status);
   return body;
+}
+
+async function confirmDelete(title, detail) {
+  const dlg = $("confirmDialog");
+  $("confirmTitle").textContent = title;
+  $("confirmText").textContent = detail;
+  return new Promise((resolve) => {
+    const done = () => {
+      dlg.removeEventListener("close", done);
+      resolve(dlg.returnValue === "ok");
+    };
+    dlg.addEventListener("close", done);
+    dlg.returnValue = "";
+    dlg.showModal();
+  });
 }
 
 function renderDetail(d) {
@@ -347,6 +375,12 @@ $("addAlias").addEventListener("click", async () => {
 $("aliases").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-alias]");
   if (!btn) return;
+  const alias = (btn.getAttribute("aria-label") || "").replace(/^删除\s*/, "");
+  const ok = await confirmDelete(
+    "删除别名",
+    `从品牌别名里移除「${alias}」。历史提及不会改变 —— 别名只影响今后的识别。`
+  );
+  if (!ok) return;
   try {
     await api(`/brands/${state.brandId}/aliases/${btn.dataset.alias}`, { method: "DELETE" });
     renderDetail(await api(`/trackers/${state.tracker}`));
@@ -397,6 +431,12 @@ $("addCompetitor").addEventListener("click", async () => {
 $("competitors").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-competitor]");
   if (!btn) return;
+  const name = (btn.getAttribute("aria-label") || "").replace(/^删除\s*/, "");
+  const ok = await confirmDelete(
+    "移除竞品",
+    `从竞品集合里移除「${name}」。这会把集合版本号加一 —— 报告里能看出对比口径变过。`
+  );
+  if (!ok) return;
   try {
     await api(`/trackers/${state.tracker}/competitors/${btn.dataset.competitor}`, { method: "DELETE" });
     renderDetail(await api(`/trackers/${state.tracker}`));

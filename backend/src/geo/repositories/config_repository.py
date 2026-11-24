@@ -65,6 +65,12 @@ def get_brand(conn: sqlite3.Connection, brand_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def brand_tenant(conn: sqlite3.Connection, brand_id: str) -> str | None:
+    """品牌归属的租户。删除类操作必须先过这一关，否则知道 id 就能删别人的数据。"""
+    row = conn.execute("SELECT tenant_id FROM brand WHERE id = ?", (brand_id,)).fetchone()
+    return row["tenant_id"] if row else None
+
+
 def add_alias(conn: sqlite3.Connection, brand_id: str, alias: str, alias_type: str) -> dict:
     alias = alias.strip()
     if alias_type not in ALIAS_TYPES:
@@ -83,10 +89,24 @@ def add_alias(conn: sqlite3.Connection, brand_id: str, alias: str, alias_type: s
     return {"id": alias_id, "alias": alias, "alias_type": alias_type, "is_active": 1}
 
 
-def remove_alias(conn: sqlite3.Connection, brand_id: str, alias_id: str) -> bool:
-    cur = conn.execute("DELETE FROM brand_alias WHERE id = ? AND brand_id = ?", (alias_id, brand_id))
-    conn.commit()
-    return cur.rowcount > 0
+def remove_alias(
+    conn: sqlite3.Connection, brand_id: str, alias_id: str, commit: bool = True
+) -> dict | None:
+    """删除别名，返回被删那一行（没删到返回 None）。
+
+    返回快照而不是 bool，是为了让调用方能把 ``before`` 写进审计。
+    ``commit=False`` 时把事务留给调用方 —— 删除与审计必须一起提交或一起回滚。
+    """
+    row = conn.execute(
+        "SELECT id, brand_id, alias, alias_type, is_active FROM brand_alias WHERE id = ? AND brand_id = ?",
+        (alias_id, brand_id),
+    ).fetchone()
+    if row is None:
+        return None
+    conn.execute("DELETE FROM brand_alias WHERE id = ? AND brand_id = ?", (alias_id, brand_id))
+    if commit:
+        conn.commit()
+    return dict(row)
 
 
 # ---------------------------------------------------------------------------
@@ -261,23 +281,38 @@ def add_competitor(conn: sqlite3.Connection, tracker_id: str, name: str) -> dict
     return {"id": item_id, "name": name, "version": version}
 
 
-def remove_competitor(conn: sqlite3.Connection, tracker_id: str, competitor_id: str) -> bool:
+def remove_competitor(
+    conn: sqlite3.Connection, tracker_id: str, competitor_id: str, commit: bool = True
+) -> dict | None:
+    """移除竞品，返回被删那一行（没删到返回 None）。
+
+    竞品集合是版本化快照，删一个要 bump version —— 否则报告里"对比的是哪一版"
+    就对不上了。版本号变化也一并带回去，供审计记录。
+    """
     row = conn.execute(
         "SELECT competitor_set_id FROM tracker WHERE id = ?", (tracker_id,)
     ).fetchone()
     if not row:
-        return False
-    cur = conn.execute(
-        "DELETE FROM competitor WHERE id = ? AND competitor_set_id = ?",
-        (competitor_id, row["competitor_set_id"]),
+        return None
+    set_id = row["competitor_set_id"]
+    before = conn.execute(
+        "SELECT id, competitor_set_id, name, aliases FROM competitor WHERE id = ? AND competitor_set_id = ?",
+        (competitor_id, set_id),
+    ).fetchone()
+    if before is None:
+        return None
+    conn.execute(
+        "DELETE FROM competitor WHERE id = ? AND competitor_set_id = ?", (competitor_id, set_id)
     )
-    if cur.rowcount:
-        conn.execute(
-            "UPDATE competitor_set SET version = version + 1 WHERE id = ?",
-            (row["competitor_set_id"],),
-        )
-    conn.commit()
-    return cur.rowcount > 0
+    conn.execute("UPDATE competitor_set SET version = version + 1 WHERE id = ?", (set_id,))
+    version = conn.execute(
+        "SELECT version FROM competitor_set WHERE id = ?", (set_id,)
+    ).fetchone()["version"]
+    if commit:
+        conn.commit()
+    snapshot = dict(before)
+    snapshot["set_version_after"] = version
+    return snapshot
 
 
 # ---------------------------------------------------------------------------
