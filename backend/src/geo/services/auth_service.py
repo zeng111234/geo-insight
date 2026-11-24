@@ -110,6 +110,15 @@ def ensure_admin_password(
     user = find_user(conn, target_email)
     if user is None:
         tenant_id = settings.default_tenant_id
+        # 空库自愈:app_user.tenant_id 外键指向 tenant,「迁移过但没 seed」的库
+        # (pytest 的临时库就是这种状态)里租户行不存在,直接插用户会 FK 崩,
+        # 连 create_app 都起不来。租户已存在时这里什么都不做。
+        if conn.execute("SELECT 1 FROM tenant WHERE id = ?", (tenant_id,)).fetchone() is None:
+            conn.execute(
+                """INSERT INTO tenant(id, name, slug, plan, status, created_at)
+                   VALUES (?, '默认租户', 'default', 'internal', 'active', ?)""",
+                (tenant_id, time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+            )
         conn.execute(
             """INSERT INTO app_user(id, tenant_id, email, display_name, role, status, created_at, password_hash)
                VALUES (?, ?, ?, '管理员', 'admin', 'active', ?, ?)""",

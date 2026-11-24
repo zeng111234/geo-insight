@@ -6,8 +6,10 @@
 
 import time
 import unittest
+from pathlib import Path
 
 from geo.services import auth_service
+from geo.settings import settings
 
 
 class PasswordTest(unittest.TestCase):
@@ -91,6 +93,58 @@ class SessionTest(unittest.TestCase):
         second, _ = auth_service.create_session(self.user)
         self.assertNotEqual(first, second)
         self.assertGreaterEqual(len(first), 32)
+
+
+class EnsureAdminOnMigratedEmptyDbTest(unittest.TestCase):
+    """回归:「迁移过但没 seed」的库上建管理员曾直接 FK 崩。
+
+    pytest 的临时库(tests/__init__.py 把 GEO_DB_PATH 指过去)就是这种状态:
+    schema 由迁移链建出来、但没有租户行。ensure_admin_password 插 app_user
+    时外键指向 tenant,曾经在这里 IntegrityError,连 create_app/import app
+    都起不来,三个集成测试模块在收集阶段一起红。修法是插用户前把默认租户
+    自愈出来;租户已存在时必须原样不动(不能重复插)。
+    """
+
+    def setUp(self):
+        import sqlite3
+        import tempfile
+
+        from geo import migrate
+
+        self._tmp = tempfile.TemporaryDirectory()
+        conn = sqlite3.connect(Path(self._tmp.name) / "empty.db")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        migrate.apply(conn)
+        self.conn = conn
+
+    def tearDown(self):
+        self.conn.close()
+        self._tmp.cleanup()
+
+    def test_creates_tenant_and_admin_together(self):
+        result = auth_service.ensure_admin_password(self.conn)
+
+        self.assertEqual(result, "created")
+        tenant = self.conn.execute(
+            "SELECT id, slug FROM tenant WHERE id = ?", (settings.default_tenant_id,)
+        ).fetchone()
+        self.assertIsNotNone(tenant, "默认租户没有被自愈出来")
+        user = self.conn.execute(
+            "SELECT tenant_id FROM app_user WHERE email = ?", (settings.admin_email,)
+        ).fetchone()
+        self.assertIsNotNone(user)
+        self.assertEqual(user["tenant_id"], settings.default_tenant_id)
+
+    def test_rerun_neither_duplicates_tenant_nor_touches_password(self):
+        first = auth_service.ensure_admin_password(self.conn)
+        second = auth_service.ensure_admin_password(self.conn)
+
+        self.assertEqual((first, second), ("created", "unchanged"))
+        tenants = self.conn.execute("SELECT COUNT(*) AS n FROM tenant").fetchone()["n"]
+        self.assertEqual(tenants, 1)
+        users = self.conn.execute("SELECT COUNT(*) AS n FROM app_user").fetchone()["n"]
+        self.assertEqual(users, 1)
 
 
 if __name__ == "__main__":
