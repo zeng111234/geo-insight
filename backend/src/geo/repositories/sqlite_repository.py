@@ -701,3 +701,51 @@ def competitor_cooccurrence_rows(
         (tracker_id, start, end),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def sentiment_by_model_rows(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> list[dict]:
+    """按模型拆情感：只统计本方品牌的提及。
+
+    从 answer 出发左连 mention，所以「一次都没提及」的模型也会出现
+    （mentions=0），这本身就是要看的结论 —— 不能因为没数据就从列表里消失。
+
+    分母是"有提及的样本"，不是有效样本 —— 没提到品牌的答案没有情感可言。
+    位次一并带出来，方便对照「情感差的模型是不是也排得靠后」。
+    """
+    rows = conn.execute(
+        f"""
+        SELECT a.model_key,
+               COUNT(m.id) AS mentions,
+               SUM(CASE WHEN m.sentiment = 'pos' THEN 1 ELSE 0 END) AS pos,
+               SUM(CASE WHEN m.sentiment = 'neu' THEN 1 ELSE 0 END) AS neu,
+               SUM(CASE WHEN m.sentiment = 'neg' THEN 1 ELSE 0 END) AS neg,
+               SUM(CASE WHEN m.position IS NOT NULL THEN 1 ELSE 0 END) AS ranked,
+               AVG(m.position) AS avg_position
+        FROM answer a
+        LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
+        WHERE a.tracker_id = ? AND a.is_valid = 1
+          AND {day_of('a.collected_at')} BETWEEN ? AND ?
+        GROUP BY a.model_key
+        ORDER BY a.model_key
+        """,
+        (tracker_id, start, end),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def latest_import_at(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> str | None:
+    """区间内最后一次成功的导入时间；没有则 None（不要伪造时间）。"""
+    row = conn.execute(
+        f"""
+        SELECT MAX(started_at) AS last
+        FROM import_batch
+        WHERE tracker_id = ? AND status = 'completed'
+          AND {day_of('started_at')} BETWEEN ? AND ?
+        """,
+        (tracker_id, start, end),
+    ).fetchone()
+    return row["last"] if row and row["last"] else None

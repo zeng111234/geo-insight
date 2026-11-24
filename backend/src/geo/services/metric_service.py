@@ -254,3 +254,45 @@ def build_competitor_cooccurrence(
         "labels": labels,
         "matrix": matrix,
     }
+
+
+def build_sentiment_by_model(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> dict:
+    """按模型拆分情感分布。
+
+    每个模型独立判样本是否足够：不足就标 ``insufficient_samples``，
+    不给三个看起来能比较、其实没法比较的比例。
+    """
+    rows = repo.sentiment_by_model_rows(conn, tracker_id, start, end)
+    items: list[dict] = []
+    pooled: list[str] = []
+    for r in rows:
+        sentiments = (
+            ["pos"] * int(r["pos"] or 0)
+            + ["neu"] * int(r["neu"] or 0)
+            + ["neg"] * int(r["neg"] or 0)
+        )
+        pooled.extend(sentiments)
+        items.append(
+            {
+                "model_key": r["model_key"],
+                "mentions": int(r["mentions"] or 0),
+                "ranked": int(r["ranked"] or 0),
+                "avg_position": (
+                    round(r["avg_position"], 2) if r["avg_position"] is not None else None
+                ),
+                **metrics.sentiment_distribution(sentiments),
+            }
+        )
+    return {
+        "metric_version": settings.metric_version,
+        "period": {"from": start, "to": end},
+        "items": items,
+        "total": metrics.sentiment_distribution(pooled),
+        "min_samples": settings.min_samples,
+        "rule": (
+            "分母 = 各模型下本方品牌的提及样本；"
+            f"少于 {settings.min_samples} 条的模型只标样本不足，不给比例"
+        ),
+    }

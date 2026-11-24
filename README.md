@@ -80,10 +80,11 @@ python backend/run.py
 | 竞品排名 | **已接** `/competitors/ranking`：提及数、占比、平均位次、情感分布，带对比条 |
 | 竞品统计 | **已接** `/competitors/cooccurrence`：共现矩阵（含本方品牌），矩阵对称性有断言 |
 | 视频·图文引用 | **已接** `/citations?mediaType=`：7 个类目可切，服务端过滤后分页 |
-| 情感倾向 | 待做：总量已在看板与指标明细里，按模型拆分还要补聚合 |
-| 采集健康 | 待做：没有采集调度，只能算「计划 vs 已导入」 |
+| 情感倾向 | **已接** `/metrics/sentiment-by-model`：按模型拆正/中/负，样本不足的模型只标「样本不足」不给比例；合并后与看板口径逐位一致 |
+| 采集健康 | **已接** `/collection-health`：应采 / 已采 / 缺口 / 达成率，按模型与按天两张表；没配采样计划时返回 `configured=false` 并说明原因，不画空图 |
 
-没接的 tab 显示「本批只搭好容器，还没有接数据」并写明缺什么，**不画空图、不写死数字**。
+10 个 tab 全部接真实数据，没有占位或写死数字。新增的三个聚合接口（竞品排名、竞品共现、情感按模型）
+与既有口径做了交叉校验：情感按模型合并后与看板总览逐字段相等，采集健康的「已采」等于总览 `valid_total`。
 
 侧栏由 `backend/src/geo/api/nav.py` 在服务端统一注入，13 个页面只有一份导航定义；导出按钮点击时用当前筛选条件拼真实下载地址，没有 `href="#"` 假入口。
 
@@ -246,18 +247,18 @@ python scripts/smoke.py                                        # 86 条真实 HT
 # 后三个不看登录态：启动服务时显式关掉鉴权
 GEO_AUTH_REQUIRED=0 python run.py --no-browser &
 node scripts/pagecheck.mjs                                    # 77 条页面字段契约 + 侧栏结构 + 样式契约
-node scripts/browsercheck.mjs                                 # 56 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
+node scripts/browsercheck.mjs                                 # 64 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 ```
 
-合计 375 条，全部通过。
+合计 395 条，全部通过。
 
 用**系统 Python** 跑（`start.bat` 用的也是它）：`backend/.venv` 是历史残留，里面只有 pip，
 `starlette` 装在系统环境。空 venv 里跑单测不会报错，HTTP 层那 10 条会自动跳过并说明原因。
 
 `smoke.py` 自建临时库、在**自动挑选的空闲端口**启动 uvicorn、逐个请求断言后关闭进程，不碰演示数据，也不会误连到正在运行的开发服务（显式指定 `GEO_SMOKE_PORT` 且端口被占用时直接报错）。
 
-`pagecheck.mjs` 按页面请求顺序逐字段校验（77 条，含 13 页单侧栏/单高亮/无死链、详情接口 `data_range` 类型，以及 13 页必须引入统一样式表、不得隐藏侧栏的样式契约）。`browsercheck.mjs` 调系统 Chrome/Edge 的 `--dump-dom`，验证 **JS 真的在浏览器里跑完**：20 个 URL 无报错、无「加载中」残留，关键表格/图表与**明细翻页条**确实渲染出来（问题监控按 tab 拆成 8 个 URL 分别断言）。这一层不装 Playwright、不加依赖 —— HTTP 200 和 `node --check` 都拦不住「页面读了接口里不存在的字段」。找不到浏览器时会明确打印 SKIP，不假装通过。`pagercheck.mjs` 在桩 DOM 里加载真实 `app.js` 模拟点击翻页（22 条），验证 10 行/页、边界禁用、换查询回第 1 页、页码直达跳转。另对每个 `<script>` 块跑 `node --check`。测试库为 `%TEMP%\geo_test_suite.db`。
+`pagecheck.mjs` 按页面请求顺序逐字段校验（77 条，含 13 页单侧栏/单高亮/无死链、详情接口 `data_range` 类型，以及 13 页必须引入统一样式表、不得隐藏侧栏的样式契约）。`browsercheck.mjs` 调系统 Chrome/Edge 的 `--dump-dom`，验证 **JS 真的在浏览器里跑完**：22 个 URL 无报错、无「加载中」残留，关键表格/图表与**明细翻页条**确实渲染出来（问题监控按 tab 拆成 10 个 URL 分别断言）。这一层不装 Playwright、不加依赖 —— HTTP 200 和 `node --check` 都拦不住「页面读了接口里不存在的字段」。找不到浏览器时会明确打印 SKIP，不假装通过。`pagercheck.mjs` 在桩 DOM 里加载真实 `app.js` 模拟点击翻页（22 条），验证 10 行/页、边界禁用、换查询回第 1 页、页码直达跳转。另对每个 `<script>` 块跑 `node --check`。测试库为 `%TEMP%\geo_test_suite.db`。
 
 关键断言都做过**变异自检**（把实现改错，确认检查会变红）：迁移 checksum、导入幂等、dry-run 回滚、竞品识别四处均已验证「不是摆设」。
 

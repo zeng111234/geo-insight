@@ -53,6 +53,7 @@ const PAGES = [
   "/monitor", "/monitor?tab=answers", "/monitor?tab=metrics",
   "/monitor?tab=trend", "/monitor?tab=sources",
   "/monitor?tab=competitors", "/monitor?tab=competitorStats", "/monitor?tab=media",
+  "/monitor?tab=sentiment", "/monitor?tab=health",
   "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources"
 ];
 
@@ -98,6 +99,16 @@ const EXTRA = {
     ["类型切换", /class="metric-bar"[\s\S]{0,400}data-media="news"/],
     ["引用明细表", /<th>页面<\/th>/],
     ["明细翻页条", /class="pager"/],
+  ],
+  "/monitor?tab=sentiment": [
+    ["按模型情感表", /<th>模型<\/th>[\s\S]{0,300}<th class="num">负面<\/th>/],
+    ["情感堆叠条", /class="sentiment"[\s\S]{0,120}class="pos"/],
+    ["情感口径", /分母 = 各模型下本方品牌的提及样本/],
+  ],
+  "/monitor?tab=health": [
+    ["应采/已采指标", /<div class="k">应采<\/div>[\s\S]{0,200}<div class="k">已采<\/div>/],
+    ["按模型达成率", /<th>模型<\/th>[\s\S]{0,300}<th class="num">达成率<\/th>/],
+    ["按天明细", /<div class="rule"[^>]*>按天<\/div>[\s\S]{0,200}<th>日期<\/th>/],
   ],
   "/insight": [
     ["结论列表", /<ul class="concl">/],

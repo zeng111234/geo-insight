@@ -85,6 +85,9 @@
   .bar-row .fill { display: block; height: 100%; background: var(--accent); }
   .bar-row .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .spark { width: 100%; height: 168px; display: block; }
+  .sent-table .sentiment { margin-top: 0; }
+  .note-line { margin-top: 12px; font-size: 11px; color: var(--muted); }
+  .note-line code { font-size: 10.5px; background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }
   .matrix th, .matrix td { padding: 5px 7px; font-size: 11px; white-space: nowrap; min-width: 46px; }
   .matrix td.n { text-align: center; font-variant-numeric: tabular-nums; }
   .matrix td.diag { background: var(--subtle); color: var(--muted); text-align: center; }
@@ -624,11 +627,124 @@
       "</tbody></table></div>" + G.pagerNav("mon-media", st.page, pages, total) + "</div>";
   }
 
+  // ---- 情感倾向：按模型拆。样本不够的模型不给比例，避免拿 2 条样本比高低 ----
+  async function renderSentimentTab() {
+    var d = await G.get("/trackers/" + state.trackerId + "/metrics/sentiment-by-model?" + G.dates());
+    var items = d.items || [];
+    if (!items.length) {
+      $("tabBody").innerHTML = '<div class="tab-pad"><div class="notice warn">' +
+        "当前周期没有本方品牌的提及，情感无从统计。情感只在被提及的答案上判定，" +
+        "未提及的样本不参与分母。</div></div>";
+      return;
+    }
+
+    var t = d.total || {};
+    var min = d.min_samples || 3;
+    var kpi = function (label, value, sub) {
+      return '<div class="kpi"><div class="k">' + esc(label) + "</div>" +
+        '<div class="v small">' + esc(value) + "</div>" +
+        (sub ? '<div class="s">' + esc(sub) + "</div>" : "") + "</div>";
+    };
+    var bar = function (it) {
+      return '<div class="sentiment"><span class="pos" style="width:' + (it.pos * 100) + '%"></span>' +
+        '<span class="neu" style="width:' + (it.neu * 100) + '%"></span>' +
+        '<span class="neg" style="width:' + (it.neg * 100) + '%"></span></div>';
+    };
+    var rows = items.map(function (it) {
+      var ok = it.status === "ok";
+      return "<tr><td>" + esc(it.model_key) + "</td>" +
+        '<td class="num">' + G.num(it.mentions) + "</td>" +
+        '<td class="num">' + fmtNum(it.avg_position) + "</td>" +
+        '<td class="num">' + (ok ? fmtPct(it.pos) : "—") + "</td>" +
+        '<td class="num">' + (ok ? fmtPct(it.neu) : "—") + "</td>" +
+        '<td class="num">' + (ok ? fmtPct(it.neg) : "—") + "</td>" +
+        '<td style="width:220px">' + (ok
+          ? bar(it)
+          : '<span class="muted">样本不足（' + G.num(it.base) + " 条，需 ≥" + min + "）</span>") +
+        "</td></tr>";
+    }).join("");
+
+    $("tabBody").innerHTML = '<div class="tab-pad">' +
+      '<div class="kpis" style="padding:0 0 12px">' +
+      kpi("总体正面", fmtPct(t.pos), "分母 " + G.num(t.base) + " 条提及") +
+      kpi("总体中性", fmtPct(t.neu), "三个模型合并计算") +
+      kpi("总体负面", fmtPct(t.neg), "样本不足的模型不计入") +
+      kpi("覆盖模型", items.length + " 个", "按模型分别判定样本是否足够") +
+      "</div>" +
+      '<div class="rule">' + esc(d.rule || "") + "</div>" +
+      '<div class="table-wrap"><table class="sent-table"><thead><tr>' +
+      '<th>模型</th><th class="num">提及</th><th class="num">平均位次</th>' +
+      '<th class="num">正面</th><th class="num">中性</th><th class="num">负面</th><th>分布</th>' +
+      "</tr></thead><tbody>" + rows + "</tbody></table></div></div>";
+  }
+
+  // ---- 采集健康：计划应采 vs 实际已采。数据和「缺口清单」是同一套口径 ----
+  async function renderHealthTab() {
+    var d = await G.get("/trackers/" + state.trackerId + "/collection-health?" + G.dates());
+    if (!d.configured) {
+      $("tabBody").innerHTML = '<div class="tab-pad"><div class="notice warn">' +
+        esc(d.message || "采样计划还没配置，无从计算应采数") +
+        '<br />去 <a class="plain" href="/settings">设置</a> 配好采样计划与问题后，这里才有可比较的分母。</div></div>';
+      return;
+    }
+
+    var tot = d.totals || {};
+    var plan = d.plan || {};
+    var kpi = function (label, value, sub) {
+      return '<div class="kpi"><div class="k">' + esc(label) + "</div>" +
+        '<div class="v">' + esc(value) + "</div>" +
+        (sub ? '<div class="s">' + esc(sub) + "</div>" : "") + "</div>";
+    };
+    var rateBar = function (v) {
+      return v === null || v === undefined
+        ? "—"
+        : '<span class="cmp-bar"><span style="width:' + (v * 100).toFixed(1) + '%"></span></span>';
+    };
+    var modelRows = (d.by_model || []).map(function (m) {
+      return "<tr><td>" + esc(m.model) + "</td>" +
+        '<td class="num">' + G.num(m.expected) + "</td>" +
+        '<td class="num">' + G.num(m.actual) + "</td>" +
+        '<td class="num">' + G.num(m.missing) + "</td>" +
+        '<td class="num">' + fmtPct(m.rate) + "</td>" +
+        '<td style="width:180px">' + rateBar(m.rate) + "</td></tr>";
+    }).join("");
+    var dayRows = (d.by_day || []).map(function (m) {
+      return "<tr><td>" + esc(m.date) + "</td>" +
+        '<td class="num">' + G.num(m.expected) + "</td>" +
+        '<td class="num">' + G.num(m.actual) + "</td>" +
+        '<td class="num">' + G.num(m.missing) + "</td>" +
+        '<td class="num">' + fmtPct(m.rate) + "</td></tr>";
+    }).join("");
+
+    var source = d.last_import_at
+      ? "本周期最后一次导入：" + String(d.last_import_at).slice(0, 16).replace("T", " ")
+      : "本周期没有导入批次（数据可能来自种子或更早的导入）";
+
+    $("tabBody").innerHTML = '<div class="tab-pad">' +
+      '<div class="kpis" style="padding:0 0 12px">' +
+      kpi("应采", G.num(tot.expected), "计划 × 问题 × 模型 × 天数") +
+      kpi("已采", G.num(tot.actual), "超出计划的部分不计入") +
+      kpi("缺口", G.num(tot.missing), "可导出成待采清单") +
+      kpi("达成率", fmtPct(tot.rate), "已采 ÷ 应采") +
+      "</div>" +
+      '<div class="rule">计划：核心 ' + G.num(plan.core_times) + " 次/天 · 长尾 " +
+      G.num(plan.long_tail_times) + " 次/天 · " + G.num(plan.question_count) +
+      " 个启用问题 · " + (d.by_model || []).length + " 个模型 · 通道 " + esc(plan.channel || "—") + "</div>" +
+      '<div class="table-wrap"><table><thead><tr><th>模型</th><th class="num">应采</th>' +
+      '<th class="num">已采</th><th class="num">缺口</th><th class="num">达成率</th><th>对比</th>' +
+      "</tr></thead><tbody>" + modelRows + "</tbody></table></div>" +
+      '<div class="rule" style="margin-top:14px">按天</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>日期</th><th class="num">应采</th>' +
+      '<th class="num">已采</th><th class="num">缺口</th><th class="num">达成率</th>' +
+      "</tr></thead><tbody>" + dayRows + "</tbody></table></div>" +
+      '<div class="note-line">' + esc(source) +
+      " · 没有自动采集调度，缺口需人工补采：<code>python scripts/sample_gaps.py --export gaps.csv</code>" +
+      "</div></div>";
+  }
+
   // 还没接数据的 tab：写清缺什么，不画假图。
-  var TODO_TEXT = {
-    sentiment: ["情感倾向", "按模型拆分的情感分布。总量已在指标看板与指标明细里，拆分要补聚合。"],
-    health: ["采集健康", "计划应采 / 实际已采 / 缺口。目前只有导入通道，没有采集调度，只能展示差额。"]
-  };
+  // 十个 tab 都已接数据；这里只兜住 URL 里出现的未知 tab（?tab=foo）。
+  var TODO_TEXT = {};
   function renderTodo(key) {
     var info = TODO_TEXT[key] || [key, ""];
     $("tabBody").innerHTML = '<div class="todo"><div class="notice warn">' +
@@ -643,8 +759,10 @@
     trend: renderTrendTab,
     competitors: renderCompetitorsTab,
     sources: renderSourcesTab,
+    sentiment: renderSentimentTab,
     competitorStats: renderCompetitorStatsTab,
-    media: renderMediaTab
+    media: renderMediaTab,
+    health: renderHealthTab
   };
 
   async function renderTab() {

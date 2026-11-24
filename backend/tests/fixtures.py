@@ -129,3 +129,36 @@ def add_answer(
             ),
         },
     )
+
+
+def add_mention(
+    conn: sqlite3.Connection,
+    answer_id: str,
+    *,
+    sentiment: str = "pos",
+    position: int | None = None,
+    subject_type: str = "own",
+    brand_id: str = BRAND,
+    alias: str = "辽宁辽征律师事务所",
+) -> str:
+    """写一条提及。UNIQUE(answer_id, brand_id)，同一答案同一品牌只能有一条。"""
+    new_id = f"m{abs(hash((answer_id, brand_id))) % 10**12:012d}"
+    conn.execute(
+        """INSERT INTO mention(id, answer_id, brand_id, subject_type, matched_alias,
+                               match_type, position, position_type, sentiment,
+                               sentiment_confidence, snippet)
+           VALUES (?, ?, ?, ?, ?, 'exact', ?, ?, ?, 0.9, ?)""",
+        (
+            new_id,
+            answer_id,
+            brand_id,
+            subject_type,
+            alias,
+            position,
+            "list_index" if position is not None else None,
+            sentiment,
+            f"{alias} 出现在答案中",
+        ),
+    )
+    conn.commit()
+    return new_id

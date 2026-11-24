@@ -37,6 +37,7 @@ from geo.services import (
     content_service,
     metric_service,
     report_service,
+    sampling_service,
 )
 from geo.settings import settings
 
@@ -247,6 +248,40 @@ async def list_trackers(request: Request):
         for item in items:
             item["question_summary"] = repo.question_summary(conn, item["id"])
         return JSONResponse({"items": items, "page": {"page": 1, "limit": len(items), "total": len(items)}})
+    finally:
+        conn.close()
+
+
+async def collection_health(request: Request):
+    """采集健康：计划应采 vs 实际已采。没配采样计划时返回 configured=false。"""
+    period = _period(request)
+    if isinstance(period, JSONResponse):
+        return period
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        if not repo.get_tracker(conn, tracker_id, _tenant(request)):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        return JSONResponse(
+            sampling_service.collection_health(conn, tracker_id, period[0], period[1])
+        )
+    finally:
+        conn.close()
+
+
+async def metrics_sentiment_by_model(request: Request):
+    """情感倾向按模型拆分。"""
+    period = _period(request)
+    if isinstance(period, JSONResponse):
+        return period
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        if not repo.get_tracker(conn, tracker_id, _tenant(request)):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        return JSONResponse(
+            metric_service.build_sentiment_by_model(conn, tracker_id, period[0], period[1])
+        )
     finally:
         conn.close()
 
@@ -1059,6 +1094,13 @@ def create_app() -> Starlette:
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/questions", questions, methods=["GET", "POST"]),
         Route(f"{settings.api_prefix}/questions/{{question_id}}", question_tier, methods=["PATCH"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/sampling-plan", sampling_plan),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/collection-health", collection_health
+        ),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/sentiment-by-model",
+            metrics_sentiment_by_model,
+        ),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/overview", metrics_overview),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/trend", metrics_trend),
         Route(

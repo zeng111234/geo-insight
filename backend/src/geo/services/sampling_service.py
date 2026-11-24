@@ -137,3 +137,66 @@ def gap_tickets(gaps: dict, default_time: str = "09:00:00") -> list[dict]:
                 }
             )
     return tickets
+
+
+def collection_health(conn: sqlite3.Connection, tracker_id: str, start: str, end: str) -> dict:
+    """采集健康：计划应采 vs 实际已采，按模型和按天汇总。
+
+    和「缺口清单」是同一套口径的两面：
+    - 缺口清单回答「今天还差哪几条」，逐条列出来派活；
+    - 这里回答「整体产能怎么样」，用来判断采样计划是不是定得离谱。
+
+    没有采样计划或没有问题时不抛错，返回 ``configured=False`` + 说明，
+    因为「还没配」本身就是要展示的健康状态之一。
+    """
+    try:
+        gaps = compute_gaps(conn, tracker_id, start, end)
+    except ValueError as exc:
+        return {
+            "tracker_id": tracker_id,
+            "period": {"from": start, "to": end},
+            "configured": False,
+            "message": str(exc),
+            "totals": None,
+            "by_model": [],
+            "by_day": [],
+            "plan": None,
+        }
+
+    by_model: dict[str, dict] = {}
+    by_day: dict[str, dict] = {}
+    for row in gaps["rows"]:
+        for bucket, key in ((by_model, row["model"]), (by_day, row["date"])):
+            cell = bucket.setdefault(
+                key, {"expected": 0, "actual": 0, "missing": 0}
+            )
+            cell["expected"] += row["expected"]
+            cell["actual"] += min(row["actual"], row["expected"])
+            cell["missing"] += row["missing"]
+
+    def with_rate(cell: dict) -> dict:
+        cell["rate"] = (
+            round(cell["actual"] / cell["expected"], 4) if cell["expected"] else None
+        )
+        return cell
+
+    models = [{"model": k, **with_rate(v)} for k, v in sorted(by_model.items())]
+    days = [{"date": k, **with_rate(v)} for k, v in sorted(by_day.items())]
+    totals = {
+        "expected": gaps["totals"]["expected"],
+        "actual": gaps["totals"]["actual"],
+        "missing": gaps["totals"]["missing"],
+    }
+    with_rate(totals)
+
+    return {
+        "tracker_id": tracker_id,
+        "period": {"from": start, "to": end},
+        "configured": True,
+        "plan": {**gaps["plan"], "question_count": gaps["question_count"]},
+        "totals": totals,
+        "by_model": models,
+        "by_day": days,
+        "last_import_at": repo.latest_import_at(conn, tracker_id, start, end),
+        "message": None,
+    }
