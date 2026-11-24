@@ -50,7 +50,8 @@ try {
 
 const PAGES = [
   "/", "/settings", "/reports", "/report/" + reportId, "/answer/" + answerId, "/studio",
-  "/monitor", "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources"
+  "/monitor", "/monitor?tab=answers",
+  "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources"
 ];
 
 // 页面专属的关键渲染结果：容器后面必须出现真实表格/图表，而不是占位或报错。
@@ -60,7 +61,17 @@ const EXTRA = {
     ["每日摘要表", /<div class="body" id="trendTable"[^>]*>[\s\S]{0,240}<table/],
     ["明细翻页条", /class="pager"/],
   ],
-  "/monitor": [["明细翻页条", /class="pager"/]],
+  // 问题监控是工作台：默认 tab 是指标看板，分页条在问答明细 tab 上，
+  // 所以拆成两个 URL 各查各的，而不是笼统要求"这页必须有分页"。
+  "/monitor": [
+    ["标签页导航", /id="tabs"[^>]*>[\s\S]{0,600}data-tab="dashboard"/],
+    ["指标看板卡", /class="kpi[\s\S]{0,300}提问次数/],
+    ["监控列表项", /class="titem[\s\S]{0,200}data-tracker=/],
+  ],
+  "/monitor?tab=answers": [
+    ["问题下拉", /id="qSelect"/],
+    ["明细翻页条", /class="pager"/],
+  ],
   "/insight": [
     ["结论列表", /<ul class="concl">/],
     ["趋势图", /<svg class="spark"/],

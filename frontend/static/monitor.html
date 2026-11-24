@@ -8,45 +8,96 @@
 <script src="/static/app.js"></script>
 <title>GEO Insight · 问题监控</title>
 <style>
-  .mon-grid { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; align-items: stretch; }
+  /* 让工作台撑满可视高度：内容少时面板也要到底，否则下方会露出大片页面底色 */
+  .content { display: flex; flex-direction: column; }
+  .mon-grid { display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 12px;
+    align-items: stretch; flex: 1 1 auto; min-height: 0; }
   .mon-grid > .panel { display: flex; flex-direction: column; min-width: 0; }
-  .mon-grid #questions { flex: 1; overflow-y: auto; min-height: 0; }
   @media (max-width: 1100px) { .mon-grid { grid-template-columns: 1fr; } }
-  .qitem { padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
-  .qitem:last-child { border-bottom: none; }
-  .qitem:hover { background: var(--subtle); }
-  .qitem.on { background: var(--accent-weak); border-left: 3px solid var(--accent); padding-left: 9px; }
-  .qitem .t { font-size: 12.5px; line-height: 1.5; color: var(--text); margin-bottom: 5px; }
-  .qitem .m { font-size: 11px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+
+  .mon-list { overflow: hidden; }
+  .mon-list .search { padding: 0 10px 10px; }
+  .mon-list .search input { width: 100%; }
+  #trackerList { flex: 1; overflow-y: auto; min-height: 0; }
+  .titem { padding: 9px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .titem:last-child { border-bottom: none; }
+  .titem:hover { background: var(--subtle); }
+  .titem.on { background: var(--accent-weak); border-left: 3px solid var(--accent); padding-left: 9px; }
+  .titem .n { font-size: 12.5px; color: var(--text); margin-bottom: 3px; }
+  .titem .m { font-size: 10.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+
+  .mon-head { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .mon-head .line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .mon-head h2 { margin: 0; font-size: 15px; }
+  .mon-head .meta { font-size: 11px; color: var(--muted); margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .mon-head .acts { display: flex; gap: 6px; margin-left: auto; }
+
+  .mon-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  .mon-tabs button { border: 1px solid transparent; background: transparent; border-radius: 999px;
+    padding: 5px 11px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+  .mon-tabs button:hover { background: var(--subtle); color: var(--text); }
+  .mon-tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mon-body { flex: 1; min-height: 0; overflow-y: auto; }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; padding: 14px; }
+  .kpi { border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; background: var(--panel); }
+  .kpi .k { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
+  .kpi .v { font-size: 25px; line-height: 1.1; font-weight: 600; color: var(--text-strong); }
+  .kpi .v.small { font-size: 15px; }
+  .kpi .s { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
+  .kpi .rows { font-size: 11.5px; color: var(--text-body); display: grid; gap: 3px; }
+  .kpi .rows i { font-style: normal; color: var(--muted); display: inline-block; width: 42px; }
+  .kpi .rows b { font-weight: 500; }
+  .kpi.lit { background: var(--red-tint); border-color: var(--red-line); }
+
+  .ans-toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .ans-toolbar select { max-width: 420px; }
   .answer { border-bottom: 1px solid var(--border); padding: 12px 14px; }
   .answer:last-child { border-bottom: none; }
   .answer .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 7px; }
   .answer .text { font-size: 12.5px; line-height: 1.7; color: var(--text-body); white-space: pre-wrap; }
   .answer .cite { font-size: 11px; color: var(--muted); margin-top: 7px; }
+  .todo { padding: 22px 16px; }
 </style>
 </head>
 <body>
 <div class="shell">
+  <!-- 第一个 aside 必须是侧栏占位：服务端会把整段替换成统一导航（见 api/nav.py 的 _SIDE_RE） -->
+  <aside class="side"></aside>
   <main>
     <header class="top">
       <h1>问题监控</h1>
-      <span class="sub">按问题查看每个模型的回答、提及位次与引用来源</span>
+      <span class="sub">选一个监控对象，看它的指标、问答与证据</span>
       <span class="spacer"></span>
-      <select id="tracker" aria-label="监控对象"></select>
+      <!-- 隐藏的原生 select：app.js 的 tracker()/dates() 约定读这几个 id，其它页面同理 -->
+      <select id="tracker" hidden aria-hidden="true"></select>
       <input id="from" type="date" value="2026-11-01" aria-label="开始日期" />
       <input id="to" type="date" value="2026-11-30" aria-label="结束日期" />
       <button id="load" class="primary">查询</button>
     </header>
     <div class="content">
       <div class="mon-grid">
-        <div class="panel">
-          <h2>问题集 <span class="badge" id="qMeta">—</span></h2>
-          <div id="questions"><div class="empty">加载中…</div></div>
+        <div class="panel mon-list">
+          <h2>监控列表 <span class="badge" id="listMeta">—</span></h2>
+          <div class="search"><input id="listSearch" type="search" placeholder="搜索名称或行业" /></div>
+          <div id="trackerList"><div class="empty">加载中…</div></div>
         </div>
-        <div class="panel">
-          <h2>问答明细 <span class="badge" id="aMeta">—</span></h2>
-          <div class="body" id="answers"><div class="empty">先在左侧选择一个问题</div></div>
-        </div>
+
+        <section class="panel mon-main">
+          <div class="mon-head">
+            <div class="line1">
+              <h2 id="objName">—</h2>
+              <span class="tag" id="objStatus">—</span>
+              <div class="acts">
+                <button id="refreshBtn" type="button">刷新</button>
+                <a class="btn" href="/settings">问题设置</a>
+              </div>
+            </div>
+            <div class="meta" id="objMeta"></div>
+          </div>
+          <nav class="mon-tabs" id="tabs" role="tablist"></nav>
+          <div class="mon-body" id="tabBody"><div class="empty">加载中…</div></div>
+        </section>
       </div>
     </div>
   </main>
@@ -54,95 +105,310 @@
 <script>
 (function () {
   var G = window.GEO, $ = G.$, esc = G.esc;
-  var state = { questions: [], answers: [], answerTotal: 0, current: null };
 
-  function renderQuestions() {
-    var box = $("questions");
-    if (!state.questions.length) { box.innerHTML = G.empty("该监控对象还没有问题"); return; }
-    box.innerHTML = state.questions.map(function (q) {
-      return '<div class="qitem' + (q.id === state.current ? " on" : "") + '" data-id="' + esc(q.id) + '">' +
-        '<div class="t">' + esc(q.text) + "</div>" +
-        '<div class="m"><span class="tag ' + (q.tier === "core" ? "core" : "") + '">' +
-          (q.tier === "core" ? "核心" : "长尾") + "</span>" +
-        "<span>样本 " + G.num(q.sample_total) + "</span>" +
-        "<span>每日 " + G.num(q.daily_samples) + " 次</span></div></div>";
-    }).join("");
-    $("qMeta").textContent = state.questions.length + " 个问题";
+  // 十个 tab 与参考系统同名同序。加 tab 时同步改这里和 RENDER。
+  var TABS = [
+    ["dashboard", "指标看板"],
+    ["answers", "问答明细"],
+    ["metrics", "指标明细"],
+    ["trend", "趋势分析"],
+    ["competitors", "竞品排名"],
+    ["sources", "信源分析"],
+    ["sentiment", "情感倾向"],
+    ["competitorStats", "竞品统计"],
+    ["media", "视频/图文引用"],
+    ["health", "采集健康"]
+  ];
+
+  var state = {
+    trackers: [],
+    trackerId: "",
+    tab: "dashboard",
+    questions: [],
+    questionId: "",
+    answers: [],
+    answerTotal: 0,
+    answerPages: 1
+  };
+
+  var STATUS_TEXT = { active: "监控中", draft: "草稿", paused: "已暂停", archived: "已归档" };
+  var SENTI_TEXT = { pos: "正面", neu: "中性", neg: "负面" };
+  var fmtPct = function (v) { return v === null || v === undefined ? "—" : (v * 100).toFixed(1) + "%"; };
+  var fmtNum = function (v, d) { return v === null || v === undefined ? "—" : Number(v).toFixed(d === undefined ? 2 : d); };
+  var metric = function (m, kind) {
+    if (!m) return { text: "—", sub: "" };
+    if (m.status === "insufficient_samples") return { text: "样本不足", sub: "分母 " + (m.sample_base || 0) + " 条", warn: true };
+    return {
+      text: kind === "num" ? fmtNum(m.value) : fmtPct(m.value),
+      sub: "分母 " + (m.sample_base || 0) + " 条"
+    };
+  };
+
+  // ---- 路由：tab 与对象都进 URL，刷新和前进后退都能回到原处 ----
+  function validTab(id) { return TABS.some(function (t) { return t[0] === id; }); }
+  function readQuery() {
+    var q = new URLSearchParams(location.search);
+    var tab = q.get("tab");
+    return { tab: validTab(tab) ? tab : "dashboard", tracker: q.get("tracker") || "" };
+  }
+  function syncUrl(push) {
+    var url = new URL(location.href);
+    url.searchParams.set("tab", state.tab);
+    if (state.trackerId) url.searchParams.set("tracker", state.trackerId);
+    if (push) history.pushState({ tab: state.tab }, "", url);
+    else history.replaceState({ tab: state.tab }, "", url);
   }
 
-  function renderAnswers() {
-    var box = $("answers");
-    var list = state.answers;
-    $("aMeta").textContent = G.num(state.answerTotal) + " 条答案";
-    if (!list.length) { box.innerHTML = G.empty("该问题在当前周期没有有效答案"); return; }
-    var nav = G.pagerNav("answers", G.pagerInit("answers", loadAnswers).page,
-      state.answerPages || 1, state.answerTotal);
-    box.innerHTML = list.map(function (a) {
+  // ---- 左栏 ----
+  function renderTrackerList() {
+    var kw = ($("listSearch").value || "").trim().toLowerCase();
+    var items = state.trackers.filter(function (t) {
+      if (!kw) return true;
+      return (t.name + " " + (t.industry || "") + " " + (t.region || "")).toLowerCase().indexOf(kw) >= 0;
+    });
+    $("listMeta").textContent = items.length + " / " + state.trackers.length;
+    if (!items.length) { $("trackerList").innerHTML = G.empty("没有匹配的监控对象"); return; }
+    $("trackerList").innerHTML = items.map(function (t) {
+      var qs = t.question_summary || {};
+      return '<div class="titem' + (t.id === state.trackerId ? " on" : "") + '" data-tracker="' + esc(t.id) + '">' +
+        '<div class="n">' + esc(t.name) + "</div>" +
+        '<div class="m"><span class="tag ' + (t.status === "active" ? "ok" : "") + '">' +
+          esc(STATUS_TEXT[t.status] || t.status) + "</span>" +
+          "<span>" + esc(t.industry || "未填行业") + "</span>" +
+          "<span>" + G.num(qs.total) + " 个问题</span></div></div>";
+    }).join("");
+  }
+
+  function renderHead() {
+    var t = state.trackers.filter(function (x) { return x.id === state.trackerId; })[0];
+    if (!t) { $("objName").textContent = "—"; $("objMeta").textContent = ""; return; }
+    var qs = t.question_summary || {};
+    $("objName").textContent = t.brand_name || t.name;
+    var st = $("objStatus");
+    st.textContent = STATUS_TEXT[t.status] || t.status;
+    st.className = "tag " + (t.status === "active" ? "ok" : "");
+    $("objMeta").innerHTML = [
+      t.name,
+      t.industry,
+      t.region,
+      "创建于 " + String(t.created_at || "").slice(0, 10),
+      qs.total + " 个问题（核心 " + (qs.core || 0) + " / 长尾 " + (qs.long_tail || 0) + "）"
+    ].filter(Boolean).map(esc).map(function (v) { return "<span>" + v + "</span>"; }).join("");
+  }
+
+  function renderTabs() {
+    $("tabs").innerHTML = TABS.map(function (t) {
+      return '<button type="button" role="tab" data-tab="' + t[0] + '"' +
+        (t[0] === state.tab ? ' class="on" aria-selected="true"' : ' aria-selected="false"') +
+        ">" + esc(t[1]) + "</button>";
+    }).join("");
+  }
+
+  // ---- 各 tab 的渲染 ----
+  async function renderDashboard() {
+    var d = await G.get("/trackers/" + state.trackerId + "/metrics/overview?" + G.dates());
+    var c = d.cards || {};
+    var mention = metric(c.mention_rate);
+    var rank = metric(c.avg_rank, "num");
+    var senti = c.sentiment || {};
+    var sentiWarn = senti.status === "insufficient_samples";
+
+    var kpi = function (label, text, sub, lit, small) {
+      return '<div class="kpi' + (lit ? " lit" : "") + '"><div class="k">' + esc(label) + "</div>" +
+        '<div class="v' + (small ? " small" : "") + '">' + esc(text) + "</div>" +
+        (sub ? '<div class="s">' + esc(sub) + "</div>" : "") + "</div>";
+    };
+
+    var exposure = '<div class="kpi lit"><div class="k">高位曝光</div><div class="rows">' +
+      [["Top1", c.top1_rate], ["Top3", c.top3_rate], ["Top10", c.top10_rate]].map(function (p) {
+        var m = p[1] || {};
+        var text = m.status === "insufficient_samples" ? "样本不足" : fmtPct(m.value);
+        return "<div><i>" + p[0] + "</i><b>" + esc(text) + "</b></div>";
+      }).join("") + "</div></div>";
+
+    var sentiment = '<div class="kpi"><div class="k">情感倾向</div>' +
+      (sentiWarn
+        ? '<div class="v small">样本不足</div>'
+        : '<div class="v small">正 ' + fmtPct(senti.pos) + " · 中 " + fmtPct(senti.neu) + " · 负 " + fmtPct(senti.neg) + "</div>" +
+          '<div class="sentiment"><span class="pos" style="width:' + ((senti.pos || 0) * 100) + '%"></span>' +
+          '<span class="neu" style="width:' + ((senti.neu || 0) * 100) + '%"></span>' +
+          '<span class="neg" style="width:' + ((senti.neg || 0) * 100) + '%"></span></div>') +
+      '<div class="s">分母为提及样本 ' + G.num(senti.base) + " 条</div></div>";
+
+    $("tabBody").innerHTML = '<div class="kpis">' +
+      kpi("提问次数", G.num(d.valid_total), "周期内有效回答 " + G.num(d.valid_total) + " 条") +
+      kpi("提及率", mention.text, mention.sub) +
+      kpi("平均排名", rank.text, rank.sub) +
+      exposure + sentiment +
+      "</div>" +
+      '<div class="notice" style="margin:0 14px 14px">' +
+      "口径：提及与排名按本品牌在答案中的出现位置统计；情感只统计提及到本品牌的样本。" +
+      "无列表样本 " + G.num(d.no_list_samples) + " 条（答案没有给出任何推荐列表）。</div>";
+  }
+
+  async function loadQuestions() {
+    var d = await G.get("/trackers/" + state.trackerId + "/questions");
+    state.questions = d.items || [];
+    if (!state.questions.some(function (q) { return q.id === state.questionId; })) {
+      state.questionId = state.questions.length ? state.questions[0].id : "";
+    }
+  }
+
+  async function renderAnswers() {
+    if (!state.questions.length) await loadQuestions();
+    var box = $("tabBody");
+    var opts = state.questions.map(function (q) {
+      return '<option value="' + esc(q.id) + '"' + (q.id === state.questionId ? " selected" : "") + ">" +
+        esc(q.text) + (q.tier === "core" ? "（核心）" : "（长尾）") + "</option>";
+    }).join("");
+    box.innerHTML = '<div class="ans-toolbar"><span class="muted">监控问题</span>' +
+      '<select id="qSelect" aria-label="监控问题">' + (opts || '<option value="">没有问题</option>') + "</select>" +
+      '<span class="spacer"></span><span class="muted" id="ansMeta">—</span></div>' +
+      '<div id="ansList"><div class="empty">加载中…</div></div>';
+    $("qSelect").addEventListener("change", function () {
+      state.questionId = this.value;
+      G.pagerReset("mon-answers");
+      loadAnswerPage();
+    });
+    await loadAnswerPage();
+  }
+
+  var PAGE_SIZE = 10;
+  async function loadAnswerPage() {
+    var listBox = $("ansList");
+    if (!listBox) return;
+    if (!state.trackerId || !state.questionId) {
+      listBox.innerHTML = G.empty("该监控对象还没有问题");
+      return;
+    }
+    var st = G.pagerInit("mon-answers", loadAnswerPage);
+    listBox.innerHTML = '<div class="empty">加载中…</div>';
+    var d = await G.get("/trackers/" + state.trackerId + "/answers?" + G.dates() +
+      "&questionId=" + encodeURIComponent(state.questionId) + "&limit=" + PAGE_SIZE + "&page=" + st.page);
+    var total = (d.page && d.page.total) || 0;
+    var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (st.page > pages) { st.page = pages; return loadAnswerPage(); }
+    state.answers = d.items || [];
+    state.answerTotal = total;
+    state.answerPages = pages;
+    var meta = $("ansMeta");
+    if (meta) meta.textContent = total + " 条答案";
+
+    if (!state.answers.length) { listBox.innerHTML = G.empty("该问题在当前周期没有有效答案"); return; }
+    listBox.innerHTML = state.answers.map(function (a) {
       var own = (a.mentions || []).filter(function (m) { return m.subject_type === "own"; })[0];
       var cites = (a.citations || []).length;
       return '<div class="answer"><div class="head">' +
         '<span class="tag">' + esc(a.model_key) + "</span>" +
-        '<span class="muted">' + esc(a.collected_at.slice(0, 16).replace("T", " ")) + "</span>" +
-        (own ? '<span class="tag ok">本品牌 · 第 ' + G.num(own.position) + " 位</span>"
-             : '<span class="tag">未提及</span>') +
-        (own && own.sentiment ? '<span class="tag">' + esc({pos:"正面",neu:"中性",neg:"负面"}[own.sentiment] || own.sentiment) + "</span>" : "") +
+        '<span class="muted">' + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</span>" +
+        (own ? '<span class="tag ok">本品牌 · 第 ' + G.num(own.position) + " 位</span>" : '<span class="tag">未提及</span>') +
+        (own && own.sentiment ? '<span class="tag">' + esc(SENTI_TEXT[own.sentiment] || own.sentiment) + "</span>" : "") +
         '<span class="spacer"></span><a class="plain" href="/answer/' + esc(a.id) + '">证据详情 →</a></div>' +
         '<div class="text">' + esc((a.text || "").slice(0, 320)) + ((a.text || "").length > 320 ? "…" : "") + "</div>" +
         '<div class="cite">引用 ' + cites + " 条 · 通道 " + esc(a.channel) + "</div></div>";
-    }).join("") + nav;
+    }).join("") + G.pagerNav("mon-answers", st.page, pages, total);
   }
 
-  // 按问题在服务端过滤并分页：全量拉取 + 前端过滤只能看到最后 100 条里的残片，
-  // 而 196 条答案必须真能翻页翻到，所以每页都带 page 参数去服务端取。
-  var ANSWER_PAGE_SIZE = 10;
+  // 还没接数据的 tab：写清缺什么，不画假图。
+  var TODO_TEXT = {
+    metrics: ["指标明细", "逐条指标的构成样本（分母里到底有哪几条）。接口已有 /metrics/{metric}/samples，本批未接。"],
+    trend: ["趋势分析", "按日趋势与环比。接口已有 /metrics/trend，本批未接。"],
+    competitors: ["竞品排名", "竞品在答案里的出现次数与平均位次。需要新增按 competitor 聚合的接口。"],
+    sources: ["信源分析", "引用域名排行与被引页面。接口已有 /citations/summary，本批未接。"],
+    sentiment: ["情感倾向", "按模型拆分的情感分布。总量已有，拆分要补聚合。"],
+    competitorStats: ["竞品统计", "竞品共现矩阵。需要新增聚合接口。"],
+    media: ["视频/图文引用", "按 media_type 过滤的引用列表。字段已有值，本批未接。"],
+    health: ["采集健康", "计划应采 / 实际已采 / 缺口。目前只有导入通道，没有采集调度，只能展示差额。"]
+  };
+  function renderTodo(key) {
+    var info = TODO_TEXT[key] || [key, ""];
+    $("tabBody").innerHTML = '<div class="todo"><div class="notice warn">' +
+      esc(info[0]) + "：本批只搭好容器，还没有接数据。" +
+      (info[1] ? "<br />" + esc(info[1]) : "") + "</div></div>";
+  }
 
-  async function loadAnswers() {
-    var t = G.tracker();
-    if (!t || !state.current) {
-      state.answers = []; state.answerTotal = 0;
-      renderAnswers();
+  var RENDER = {
+    dashboard: renderDashboard,
+    answers: renderAnswers
+  };
+
+  async function renderTab() {
+    if (!state.trackerId) { $("tabBody").innerHTML = G.empty("先选择一个监控对象"); return; }
+    $("tabBody").innerHTML = '<div class="empty">加载中…</div>';
+    try {
+      if (RENDER[state.tab]) await RENDER[state.tab]();
+      else renderTodo(state.tab);
+    } catch (e) {
+      G.fail(e, ["tabBody"]);
+    }
+  }
+
+  // ---- 事件 ----
+  $("tabs").addEventListener("click", function (e) {
+    var btn = e.target.closest("[data-tab]");
+    if (!btn || btn.dataset.tab === state.tab) return;
+    state.tab = btn.dataset.tab;
+    syncUrl(true);
+    renderTabs();
+    renderTab();
+  });
+
+  $("trackerList").addEventListener("click", function (e) {
+    var el = e.target.closest("[data-tracker]");
+    if (!el || el.dataset.tracker === state.trackerId) return;
+    state.trackerId = el.dataset.tracker;
+    $("tracker").value = state.trackerId;
+    state.questionId = "";
+    state.questions = [];
+    G.pagerReset("mon-answers");
+    syncUrl(true);
+    renderTrackerList();
+    renderHead();
+    renderTab();
+  });
+
+  $("listSearch").addEventListener("input", renderTrackerList);
+  $("refreshBtn").addEventListener("click", function () { renderTab(); });
+  $("load").addEventListener("click", function () { renderTab(); });
+
+  window.addEventListener("popstate", function () {
+    var q = readQuery();
+    state.tab = q.tab;
+    if (q.tracker && q.tracker !== state.trackerId) {
+      state.trackerId = q.tracker;
+      $("tracker").value = state.trackerId;
+      state.questionId = "";
+      state.questions = [];
+    }
+    renderTrackerList();
+    renderHead();
+    renderTabs();
+    renderTab();
+  });
+
+  (async function init() {
+    var q = readQuery();
+    state.tab = q.tab;
+    await G.fillTrackers();
+    try {
+      var d = await G.get("/trackers");
+      state.trackers = d.items || [];
+    } catch (e) {
+      $("trackerList").innerHTML = '<div class="notice error">读取监控列表失败：' + esc(e.message) + "</div>";
       return;
     }
-    var st = G.pagerInit("answers", loadAnswers);
-    $("answers").innerHTML = '<div class="empty">加载中…</div>';
-    try {
-      var d = await G.get("/trackers/" + t + "/answers?" + G.dates() +
-        "&questionId=" + encodeURIComponent(state.current) +
-        "&limit=" + ANSWER_PAGE_SIZE + "&page=" + st.page);
-      var total = (d.page && d.page.total) || 0;
-      var pages = Math.max(1, Math.ceil(total / ANSWER_PAGE_SIZE));
-      if (st.page > pages) { st.page = pages; return loadAnswers(); }
-      state.answers = d.items || [];
-      state.answerTotal = total;
-      state.answerPages = pages;
-      renderAnswers();
-    } catch (e) { G.fail(e, ["answers"]); }
-  }
-
-  async function load() {
-    var t = G.tracker(); if (!t) return;
-    G.pagerReset("answers");
-    $("questions").innerHTML = '<div class="empty">加载中…</div>';
-    try {
-      var qs = await G.get("/trackers/" + t + "/questions");
-      state.questions = qs.items || [];
-      if (!state.current || !state.questions.some(function (x) { return x.id === state.current; })) {
-        state.current = state.questions.length ? state.questions[0].id : null;
-      }
-      renderQuestions();
-      await loadAnswers();
-    } catch (e) { G.fail(e, ["questions", "answers"]); }
-  }
-
-  $("questions").addEventListener("click", function (e) {
-    var el = e.target.closest("[data-id]");
-    if (!el) return;
-    state.current = el.dataset.id;
-    G.pagerReset("answers");
-    renderQuestions(); loadAnswers();
-  });
-  $("load").addEventListener("click", load);
-  (async function () { await G.fillTrackers(); await load(); })();
+    var wanted = q.tracker && state.trackers.some(function (t) { return t.id === q.tracker; })
+      ? q.tracker
+      : (state.trackers[0] ? state.trackers[0].id : "");
+    state.trackerId = wanted;
+    if (wanted) $("tracker").value = wanted;
+    renderTrackerList();
+    renderHead();
+    renderTabs();
+    syncUrl(false);
+    if (!wanted) { $("tabBody").innerHTML = G.empty("还没有监控对象"); return; }
+    await renderTab();
+  })();
 })();
 </script>
 </body>
