@@ -107,6 +107,11 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=int(_sandbox_port or os.getenv("GEO_PORT", "8123")))
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--reset", action="store_true", help="重建演示数据")
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="开发热重载：改代码自动重启（团队实例别用，稳定版要的是确定性）",
+    )
     args = parser.parse_args()
 
     url = f"http://{args.host}:{args.port}"
@@ -134,7 +139,13 @@ def main() -> int:
 
     import uvicorn
 
-    uvicorn.run("geo.api.app:app", host=args.host, port=args.port, log_level="warning")
+    uvicorn.run(
+        "geo.api.app:app",
+        host=args.host,
+        port=args.port,
+        log_level="warning",
+        reload=args.reload,
+    )
     return 0
 
 
