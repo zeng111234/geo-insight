@@ -72,6 +72,21 @@ def question_summary(conn: sqlite3.Connection, tracker_id: str) -> dict:
     return {"total": row["total"] or 0, "core": row["core"] or 0, "long_tail": row["long_tail"] or 0}
 
 
+def active_question_texts(conn: sqlite3.Connection, tracker_id: str, limit: int = 50) -> list[str]:
+    """按创建顺序取活跃问题文本，供采集脚本遍历。"""
+    rows = conn.execute(
+        """
+        SELECT q.text
+        FROM question q JOIN question_set qs ON qs.id = q.question_set_id
+        WHERE qs.tracker_id = ? AND q.status = 'active'
+        ORDER BY q.created_at, q.id
+        LIMIT ?
+        """,
+        (tracker_id, limit),
+    ).fetchall()
+    return [r["text"] for r in rows]
+
+
 def overview_counts(
     conn: sqlite3.Connection,
     tracker_id: str,
