@@ -18,9 +18,9 @@
 
 **Language/Version**: Python 3.13（代码兼容 3.10+）
 
-**Primary Dependencies**: Starlette + uvicorn + PyJWT（均为环境内已有依赖）；标准库 `sqlite3`、`csv`、`hashlib`、`unittest`
+**Primary Dependencies**: Starlette + uvicorn（唯一两个运行期依赖）；标准库 `sqlite3`、`csv`、`hashlib`、`unittest`
 
-**Storage**: SQLite 单文件 `backend/geo.db`，`schema.sql` 建表；唯一约束承担幂等职责
+**Storage**: SQLite 单文件 `backend/geo.db`，结构由 `backend/migrations/` 的迁移链管理（版本表 + checksum + 老库认领）；唯一约束承担幂等职责
 
 **Frontend**: 原生 HTML/CSS/JS，零构建、零依赖；页面由后端同源托管
 
@@ -96,12 +96,15 @@ backend/
 │   │   ├── metric_service.py
 │   │   ├── config_service.py
 │   │   ├── report_service.py
+│   │   ├── import_service.py       # CSV/JSONL 导入
+│   │   ├── collect_service.py      # 采集一条并落库
 │   │   └── content_service.py      # 002 内容工作室
-│   ├── schema.sql
+│   ├── migrate.py                  # 迁移链
 │   └── seed.py
+├── migrations/                     # 001 基线 / 002 导入结构 / 003 品牌类型
 ├── tests/
 │   ├── unit/test_metrics.py
-│   └── integration/{test_service,test_config,test_report,test_content}.py
+│   └── integration/{test_service,test_config,test_report,test_content,test_import}.py
 └── scripts/smoke.py          # 真实 HTTP 冒烟（65 条断言）
 
 frontend/static/

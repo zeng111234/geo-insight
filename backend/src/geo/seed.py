@@ -225,6 +225,8 @@ def seed() -> dict:
             "mention",
             "answer_block",
             "answer",
+            # 必须在 answer 之后：answer.import_batch_id 指向它
+            "import_batch",
             "run_item",
             "run",
             "sampling_plan",

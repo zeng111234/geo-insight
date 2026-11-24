@@ -55,6 +55,44 @@ python backend/run.py --no-browser    # 不自动开浏览器
 
 `--reset` 会重建全部演示数据，**包括 5 份报告**（含一份不可比、一份 +23.3pp 可比），所以重置后报告中心不会是空的。
 
+## 数据接入
+
+演示数据由 `seed.py` 生成。要换成真实数据，有两条路，都走同一套写入与同一套幂等规则。
+
+**① 批量导入（现在就能用）**
+
+```bash
+cd backend
+python scripts/import_answers.py --file data/import-sample.csv --dry-run   # 先演练，不落库
+python scripts/import_answers.py --file data/import-sample.csv
+python scripts/import_answers.py --file data/import-sample.jsonl --create-questions
+```
+
+- 表头支持中英文（`问题/答案/模型/采集时间` 与 `question/answer/model/collected_at` 等价），
+  `mentions` / `citations` 用 JSON 数组字符串。
+- **幂等**：同一份文件导两次，第二次全部计入「跳过重复」，不会翻倍。判断依据是
+  (监控对象, 问题, 模型, 渠道, 采集时间, 答案原文) 这组观测身份，刻意不含提及/引用——
+  否则改一个错别字就会变成两条重复观测，把指标算歪。
+- **坏行不拖累整批**：默认坏行跳过并写入 `backend/import_reports/*.csv`（UTF-8 BOM，Excel 直接打开），
+  报告里有行号、字段、错误码、原始行。要严格模式就用 `--on-error abort`，整批不落库。
+- 退出码：0 全部成功、2 有失败行但其余已入库、1 无法开始，可直接接进脚本。
+
+**② 采集器（接口已就位，等平台权限）**
+
+`collectors/` 定义 `Collector` 协议（`available / supports / collect`），注册表显式登记，不做目录扫描。
+目前只有一个离线实现 `csv_bank`：从本地答案库按 (问题, 模型) 取答案，用来把「采集 → 落库 → 出指标」
+这条链路先跑通。拿到平台 API 后新增一个 `kind="api"` 的实现即可，写入与指标层不用动。
+
+```bash
+cd backend
+python scripts/collect.py --list
+GEO_COLLECTOR_CSV=data/import-sample.jsonl python scripts/collect.py \
+  --question "沈阳哪一家律所最专业" --model doubao
+```
+
+**说明**：采集器只负责拿回原文，不做提及识别；`mention` 目前仍由 seed 或导入时的 `mentions` 字段写入。
+自动识别提及是下一步的事，不假装已经做了。
+
 ## 接口
 
 契约权威源：`specs/001-geo-insight-platform/contracts/openapi.yaml`（OpenAPI 3.1，21 路径），根目录 `contracts/openapi.yaml` 是同步副本。
@@ -106,23 +144,27 @@ curl "$B/articles/55555555-5555-5555-5555-555555555551/impact"
 
 ```bash
 cd backend
-python -m unittest discover -s tests -t . -p "test_*.py" -v   # 36 条
+python -m unittest discover -s tests -t . -p "test_*.py" -v   # 74 条
 python scripts/smoke.py                                        # 80 条真实 HTTP 断言（自动选空闲端口）
-node scripts/pagecheck.mjs                                    # 70 条页面字段契约 + 侧栏结构 + 样式契约（需服务在跑）
+node scripts/pagecheck.mjs                                    # 77 条页面字段契约 + 侧栏结构 + 样式契约（需服务在跑）
 node scripts/browsercheck.mjs                                 # 32 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
-node scripts/pagercheck.mjs                                   # 20 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
+node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 ```
+
+合计 285 条，全部通过。
 
 `smoke.py` 自建临时库、在**自动挑选的空闲端口**启动 uvicorn、逐个请求断言后关闭进程，不碰演示数据，也不会误连到正在运行的开发服务（显式指定 `GEO_SMOKE_PORT` 且端口被占用时直接报错）。
 
-`pagecheck.mjs` 按页面请求顺序逐字段校验（70 条，含 13 页单侧栏/单高亮/无死链、详情接口 `data_range` 类型，以及 13 页必须引入统一样式表、不得隐藏侧栏的样式契约）。`browsercheck.mjs` 调系统 Chrome/Edge 的 `--dump-dom`，验证 **JS 真的在浏览器里跑完**：13 页无报错、无「加载中」残留，关键表格/图表与**明细翻页条**确实渲染出来。这一层不装 Playwright、不加依赖 —— HTTP 200 和 `node --check` 都拦不住「页面读了接口里不存在的字段」。找不到浏览器时会明确打印 SKIP，不假装通过。`pagercheck.mjs` 在桩 DOM 里加载真实 `app.js` 模拟点击翻页（20 条），验证 10 行/页、边界禁用、换查询回第 1 页、页码直达跳转。另对每个 `<script>` 块跑 `node --check`。测试库为 `%TEMP%\geo_test_suite.db`。
+`pagecheck.mjs` 按页面请求顺序逐字段校验（77 条，含 13 页单侧栏/单高亮/无死链、详情接口 `data_range` 类型，以及 13 页必须引入统一样式表、不得隐藏侧栏的样式契约）。`browsercheck.mjs` 调系统 Chrome/Edge 的 `--dump-dom`，验证 **JS 真的在浏览器里跑完**：13 页无报错、无「加载中」残留，关键表格/图表与**明细翻页条**确实渲染出来。这一层不装 Playwright、不加依赖 —— HTTP 200 和 `node --check` 都拦不住「页面读了接口里不存在的字段」。找不到浏览器时会明确打印 SKIP，不假装通过。`pagercheck.mjs` 在桩 DOM 里加载真实 `app.js` 模拟点击翻页（22 条），验证 10 行/页、边界禁用、换查询回第 1 页、页码直达跳转。另对每个 `<script>` 块跑 `node --check`。测试库为 `%TEMP%\geo_test_suite.db`。
+
+关键断言都做过**变异自检**（把实现改错，确认检查会变红）：迁移 checksum、导入幂等、dry-run 回滚、竞品识别四处均已验证「不是摆设」。
 
 ## 实现范围与偏差
 
 | 计划 | 实际 | 影响 |
 |---|---|---|
 | FastAPI | Starlette 原生路由 | 状态码与响应体对齐 `openapi.yaml`；无自动文档生成 |
-| SQLAlchemy + Alembic | 标准库 `sqlite3` + `schema.sql` | 表与唯一约束对齐 `data-model.md`；无迁移版本链 |
+| SQLAlchemy + Alembic | 标准库 `sqlite3` + 自建迁移链（`backend/migrations/`） | 表与唯一约束对齐 `data-model.md`；版本表 + checksum 校验 + 老库基线认领，够用且零依赖 |
 | PostgreSQL + ClickHouse | SQLite 单库 | 指标实时从明细聚合；十万级样本会变慢 |
 | pytest / Schemathesis | `unittest` + smoke + Node 字段契约 | 无自动化契约 fuzz |
 | Next.js 前端 | 12 个零依赖静态页（决策 004） | 无组件化与类型检查，靠脚本闸门兜底 |
@@ -135,17 +177,21 @@ node scripts/pagercheck.mjs                                   # 20 条分页组�
 ```text
 backend/
   run.py                     # 一键启动（seed 判断 + 端口检查 + 开浏览器 + uvicorn）
+  migrations/                # 001 基线 / 002 导入结构 / 003 品牌类型，按版本号顺序应用
+  data/                      # 导入示例（CSV 中文表头、JSONL 带提及与引用）
   src/geo/
     domain/metrics.py        # 口径纯函数
     domain/methodology.py    # 口径说明（页面与报告共用）
     domain/enums.py
-    services/                # metric / config / report / content
-    repositories/            # sqlite / config / report
+    migrate.py               # 迁移链：版本表、checksum、老库认领
+    collectors/              # 采集器协议 + 注册表 + 离线兜底实现
+    services/                # metric / config / report / content / import / collect
+    repositories/            # sqlite / config / report / import
     api/app.py               # 路由 + 同源托管 13 个页面
     api/nav.py               # 服务端统一侧栏（唯一导航定义）
-    seed.py, schema.sql
-  tests/unit, tests/integration
-  scripts/smoke.py, scripts/pagecheck.mjs, scripts/browsercheck.mjs, scripts/pagercheck.mjs
+    seed.py
+  tests/unit, tests/integration, tests/fixtures.py
+  scripts/                   # smoke / pagecheck / browsercheck / pagercheck / import_answers / collect
 frontend/static/             # 13 个页面 + theme.css + app.css + app.js
 start.bat                    # Windows 双击启动
 specs/001-geo-insight-platform/  # spec / plan / data-model / contracts / tasks / quickstart
@@ -155,8 +201,11 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
 
 ## 尚未实现（按用户要求暂缓）
 
-- **真实采集**：登录态、风控、DOM 稳定性全部未验证；`mention` 目前由 seed 写入，没有真实提及解析器
+- **真实平台采集**：登录态、风控、DOM 稳定性全部未验证。采集器协议与离线实现已就位（见「数据接入」），
+  但没有接任何平台 API；`mention` 也没有自动提及解析器，靠 seed 或导入时的 `mentions` 字段写入
 - **鉴权与租户隔离**：首版租户由默认配置派生，不能给外部用户直接使用
 - 渠道真实登录与发帖（002 T019/T020）；按周聚合；片段级情感聚合；合规命中审计落库
 - 契约 fuzz（Schemathesis）、交互 E2E（表单提交等完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖，但**其余交互（表单提交、下钻抽屉、打印）仍未模拟用户操作**
+- **导入后的修正**：同一条观测被导入后不能靠重新导入覆盖提及/引用（会被判为重复），
+  目前要先手工删行再导入；按批次回滚（`--delete-batch`）还没做
 - **AI 成稿与积分**：按决策 003 整体取消，不是待办

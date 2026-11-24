@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import socket
+import sqlite3
 import sys
 import threading
 import time
@@ -35,14 +36,28 @@ def port_in_use(host: str, port: int) -> bool:
         return sock.connect_ex((host, port)) == 0
 
 
-def answer_count() -> int:
+def counts() -> tuple[int, int] | None:
+    """返回 (监控对象数, 答案数)；结构还没建出来时返回 None。
+
+    只认 settings.database_path 一个来源：以前这里用硬编码的 "geo.db" 判断文件是否存在，
+    而实际读的是 GEO_DB_PATH 指向的库，两者不一致时启动会抛 "no such table"。
+    """
     from geo import db
 
     conn = db.connect()
     try:
-        return int(conn.execute("SELECT COUNT(*) FROM answer").fetchone()[0])
+        trackers = int(conn.execute("SELECT COUNT(*) FROM tracker").fetchone()[0])
+        answers = int(conn.execute("SELECT COUNT(*) FROM answer").fetchone()[0])
+        return trackers, answers
+    except sqlite3.OperationalError:
+        return None
     finally:
         conn.close()
+
+
+def _summary() -> str:
+    current = counts() or (0, 0)
+    return f"{current[0]} 个监控对象，{current[1]} 条答案"
 
 
 def ensure_data(reset: bool) -> str:
@@ -51,14 +66,16 @@ def ensure_data(reset: bool) -> str:
     # seed() 自身会清空演示表再写入，所以 --reset 不需要删文件；
     # 删文件在 Windows 上会因另一个进程持有 geo.db 而失败。
     if reset:
-        return f"已重建演示数据：{seed()}"
+        seed()
+        return f"已重建演示数据：{_summary()}"
 
-    db_file = Path("geo.db")
-    if db_file.exists():
-        count = answer_count()
-        if count:
-            return f"沿用已有数据（{count} 条答案）；要重建请加 --reset"
-    return f"首次启动，已写入演示数据：{seed()}"
+    current = counts()
+    # 判据是"有没有配置过监控对象"，不是"有没有答案"：
+    # 答案可能因为还没导入而暂时为空，那不该把整库重灌一遍。
+    if current and current[0] > 0:
+        return f"沿用已有数据：{_summary()}；要重建请加 --reset"
+    seed()
+    return f"首次启动，已写入演示数据：{_summary()}"
 
 
 def open_when_ready(url: str, timeout: float = 20.0) -> None:
