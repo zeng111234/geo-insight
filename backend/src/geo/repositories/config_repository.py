@@ -10,6 +10,8 @@ import sqlite3
 import uuid
 from datetime import date, timedelta
 
+from geo.repositories.sqlutil import day_of
+
 TIERS = ("core", "long_tail")
 ALIAS_TYPES = ("full", "short", "en", "misspell")
 
@@ -408,7 +410,7 @@ def failure_stats(
     clauses = ["r.tracker_id = ?"]
     params: list = [tracker_id]
     if start and end:
-        clauses.append("date(COALESCE(ri.attempted_at, r.scheduled_for)) BETWEEN ? AND ?")
+        clauses.append(f"{day_of('COALESCE(ri.attempted_at, r.scheduled_for)')} BETWEEN ? AND ?")
         params.extend([start, end])
     row = conn.execute(
         f"""

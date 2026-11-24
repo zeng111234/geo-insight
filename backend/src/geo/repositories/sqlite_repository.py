@@ -9,6 +9,8 @@ import sqlite3
 import uuid
 from typing import Any
 
+from geo.repositories.sqlutil import day_of
+
 
 def _filters(
     tracker_id: str,
@@ -21,7 +23,7 @@ def _filters(
     clauses = [
         f"{alias}.tracker_id = ?",
         f"{alias}.is_valid = 1",
-        f"date({alias}.collected_at) BETWEEN ? AND ?",
+        f"{day_of(alias + '.collected_at')} BETWEEN ? AND ?",
     ]
     params: list[Any] = [tracker_id, start, end]
     if model:
@@ -85,6 +87,53 @@ def active_question_texts(conn: sqlite3.Connection, tracker_id: str, limit: int 
         (tracker_id, limit),
     ).fetchall()
     return [r["text"] for r in rows]
+
+
+def sampling_plan_of(conn: sqlite3.Connection, tracker_id: str) -> dict | None:
+    """取当前生效的采样计划。
+
+    首版只支持一个计划：一个监控对象一份，多份时取 effective_from 最新的那份。
+    真要做多计划并存，等有人真的需要再说。
+    """
+    row = conn.execute(
+        """SELECT * FROM sampling_plan WHERE tracker_id = ?
+           ORDER BY effective_from DESC, rowid DESC LIMIT 1""",
+        (tracker_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def active_questions(conn: sqlite3.Connection, tracker_id: str) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT q.id, q.text, q.tier
+        FROM question q JOIN question_set qs ON qs.id = q.question_set_id
+        WHERE qs.tracker_id = ? AND q.status = 'active'
+        ORDER BY q.tier, q.created_at, q.id
+        """,
+        (tracker_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def sample_counts(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> dict[tuple[str, str, str], int]:
+    """(本地日期, question_id, model_key) -> 已有有效样本数。
+
+    渠道不参与分组：人工用网页问、或脚本用接口问，都算"这天采到了"。
+    """
+    rows = conn.execute(
+        f"""
+        SELECT {day_of('collected_at')} AS day, question_id, model_key, COUNT(*) AS n
+        FROM answer
+        WHERE tracker_id = ? AND is_valid = 1
+          AND {day_of('collected_at')} BETWEEN ? AND ?
+        GROUP BY day, question_id, model_key
+        """,
+        (tracker_id, start, end),
+    ).fetchall()
+    return {(r["day"], r["question_id"], r["model_key"]): int(r["n"]) for r in rows}
 
 
 def overview_counts(
@@ -153,7 +202,7 @@ def trend_rows(
     where, params = _filters(tracker_id, start, end, model, channel)
     rows = conn.execute(
         f"""
-        SELECT date(a.collected_at) AS day,
+        SELECT {day_of('a.collected_at')} AS day,
                COUNT(*) AS valid_total,
                COUNT(DISTINCT m.answer_id) AS mention_total
         FROM answer a
@@ -393,13 +442,13 @@ def create_publications(conn: sqlite3.Connection, article_id: str, channels: lis
 
 def window_counts(conn: sqlite3.Connection, tracker_id: str, start: str, end: str) -> dict:
     row = conn.execute(
-        """
+        f"""
         SELECT COUNT(*) AS valid_total,
                SUM(CASE WHEN m.id IS NULL THEN 0 ELSE 1 END) AS mention_total
         FROM answer a
         LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
         WHERE a.tracker_id = ? AND a.is_valid = 1
-          AND date(a.collected_at) BETWEEN ? AND ?
+          AND {day_of('a.collected_at')} BETWEEN ? AND ?
         """,
         (tracker_id, start, end),
     ).fetchone()
@@ -408,7 +457,7 @@ def window_counts(conn: sqlite3.Connection, tracker_id: str, start: str, end: st
 
 def data_date_range(conn: sqlite3.Connection, tracker_id: str) -> tuple[str | None, str | None]:
     row = conn.execute(
-        "SELECT MIN(date(collected_at)) AS first_day, MAX(date(collected_at)) AS last_day FROM answer WHERE tracker_id = ?",
+        f"SELECT MIN({day_of('collected_at')}) AS first_day, MAX({day_of('collected_at')}) AS last_day FROM answer WHERE tracker_id = ?",
         (tracker_id,),
     ).fetchone()
     return (row["first_day"], row["last_day"]) if row else (None, None)
@@ -431,7 +480,7 @@ def metric_sample_rows(
     rows = conn.execute(
         f"""
         SELECT a.id AS answer_id, a.question_id, q.text AS question_text, q.tier,
-               a.model_key, a.channel, date(a.collected_at) AS day, a.collected_at,
+               a.model_key, a.channel, {day_of('a.collected_at')} AS day, a.collected_at,
                m.id AS mention_id, m.position, m.sentiment, m.snippet
         FROM answer a
         JOIN question q ON q.id = a.question_id
@@ -453,7 +502,7 @@ def coverage_rows(
     channel: str | None,
 ) -> list[dict]:
     """以问题为分母：没有样本的问题也必须在列表里，否则覆盖率会被高估。"""
-    on_clause = "a.question_id = q.id AND a.is_valid = 1 AND date(a.collected_at) BETWEEN ? AND ?"
+    on_clause = f"a.question_id = q.id AND a.is_valid = 1 AND {day_of('a.collected_at')} BETWEEN ? AND ?"
     params: list[Any] = [start, end]
     if model:
         on_clause += " AND a.model_key = ?"
@@ -525,7 +574,7 @@ def export_answer_rows(
     where, params = _filters(tracker_id, start, end, None, None)
     rows = conn.execute(
         f"""
-        SELECT a.id AS answer_id, date(a.collected_at) AS day, a.collected_at,
+        SELECT a.id AS answer_id, {day_of('a.collected_at')} AS day, a.collected_at,
                a.question_id, q.text AS question_text, q.tier,
                a.model_key, a.channel, a.is_valid, a.text,
                CASE WHEN m.id IS NULL THEN 0 ELSE 1 END AS mentioned,
@@ -546,8 +595,8 @@ def models_in_period(
     conn: sqlite3.Connection, tracker_id: str, start: str, end: str
 ) -> list[str]:
     rows = conn.execute(
-        """SELECT DISTINCT model_key FROM answer
-           WHERE tracker_id = ? AND is_valid = 1 AND date(collected_at) BETWEEN ? AND ?
+        f"""SELECT DISTINCT model_key FROM answer
+           WHERE tracker_id = ? AND is_valid = 1 AND {day_of('collected_at')} BETWEEN ? AND ?
            ORDER BY model_key""",
         (tracker_id, start, end),
     ).fetchall()
@@ -580,7 +629,7 @@ def url_dedup_citations(
         f"""
         SELECT c.url, c.domain, c.media_name, c.media_type,
                COUNT(*) AS times,
-               MIN(date(a.collected_at)) AS first_seen
+               MIN({day_of('a.collected_at')}) AS first_seen
         FROM citation c JOIN answer a ON a.id = c.answer_id
         WHERE {where}
         GROUP BY c.url

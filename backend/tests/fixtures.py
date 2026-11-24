@@ -12,6 +12,8 @@ import sqlite3
 from pathlib import Path
 
 from geo import migrate
+from geo.repositories import import_repository as import_repo
+from geo.services.import_service import sha
 
 TENANT = "00000000-0000-0000-0000-000000000001"
 BRAND = "b0000000-0000-0000-0000-000000000001"
@@ -63,3 +65,67 @@ def build_minimal_db(path: str | Path) -> sqlite3.Connection:
     )
     conn.commit()
     return conn
+
+
+def add_plan(
+    conn: sqlite3.Connection,
+    *,
+    model_keys: str = '["doubao"]',
+    core_times: int = 3,
+    long_tail_times: int = 1,
+    channel: str = "api",
+) -> str:
+    plan_id = "p0000000-0000-0000-0000-000000000001"
+    conn.execute(
+        """INSERT INTO sampling_plan(id, tracker_id, channel, model_keys, core_times,
+                                     long_tail_times, timezone, effective_from)
+           VALUES (?, ?, ?, ?, ?, ?, 'Asia/Shanghai', '2026-11-01')""",
+        (plan_id, TRACKER, channel, model_keys, core_times, long_tail_times),
+    )
+    conn.commit()
+    return plan_id
+
+
+def add_question(
+    conn: sqlite3.Connection, text: str, tier: str = "long_tail", question_id: str | None = None
+) -> str:
+    new_id = question_id or f"q{abs(hash(text)) % 10**12:012d}"
+    conn.execute(
+        """INSERT INTO question(id, tenant_id, question_set_id, text, normalized_text, tier, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (new_id, TENANT, QUESTION_SET, text, text, tier, NOW),
+    )
+    conn.commit()
+    return new_id
+
+
+def add_answer(
+    conn: sqlite3.Connection,
+    collected_at: str,
+    *,
+    model_key: str = "doubao",
+    question_id: str = QUESTION,
+    text: str | None = None,
+    channel: str = "api",
+) -> str:
+    """直接写一条有效答案，绕过导入通道的解析——测试要精确控制时间与条数。"""
+    body = text or f"{collected_at} / {model_key} 的答案"
+    return import_repo.insert_answer(
+        conn,
+        {
+            "tenant_id": TENANT,
+            "tracker_id": TRACKER,
+            "question_id": question_id,
+            "model_key": model_key,
+            "model_version": None,
+            "channel": channel,
+            "raw_uri": "test://fixture",
+            "text": body,
+            "text_hash": sha(body),
+            "collected_at": collected_at,
+            "batch_id": None,
+            "row_hash": sha(
+                "|".join([TRACKER, question_id, model_key, channel, collected_at, body])
+            ),
+        },
+    )

@@ -111,6 +111,26 @@ GEO_COLLECTOR_CSV=data/import-sample.jsonl python scripts/collect.py \
 **说明**：采集器只负责拿回原文，不做提及识别；`mention` 目前仍由 seed 或导入时的 `mentions` 字段写入。
 自动识别提及是下一步的事，不假装已经做了。
 
+**③ 缺样本清单（人工采集的日常闭环）**
+
+没有平台 API 权限时，最现实的日常动作是：算缺口 → 人工去各平台问 → 导回结果。三步都不碰数据库：
+
+```bash
+cd backend
+python scripts/sample_gaps.py                                  # 今天的缺口
+python scripts/sample_gaps.py --from 2026-11-18 --to 2026-11-24  # 补历史
+python scripts/sample_gaps.py --date 2026-11-20 --export gaps.csv
+# 人工在 Excel 里填「答案」列 → 导入 → 缺口自动缩小
+python scripts/import_answers.py --file gaps.csv
+```
+
+- 应有条数取自采样计划：核心问题 `core_times` 次/天，长尾 `long_tail_times` 次/天，每个模型各算一份。
+- 已有条数按「北京时间自然日 × 问题 × 模型」统计，**不区分渠道**（人工用网页问也算采到）。
+- 采多了不算负缺口；总数里的「已有」按应有封顶，不会出现「已有 5 / 应有 3」。
+- 导出的 CSV 用中文表头，且列名就是导入通道认的那几个，填完直接导回来；采集时间已预填当天 09:00，按实际改。
+- **核销是实时差分，不是状态机**：没有「待办表」要维护，重算一次就是最新缺口。撤销导入批次后缺口会重新出现，这也是对的——数据没了就该重采。
+- `--fail-on-gap` 让存在缺口时返回 2，方便挂定时任务报警。
+
 ## 接口
 
 契约权威源：`specs/001-geo-insight-platform/contracts/openapi.yaml`（OpenAPI 3.1，21 路径），根目录 `contracts/openapi.yaml` 是同步副本。
@@ -162,14 +182,14 @@ curl "$B/articles/55555555-5555-5555-5555-555555555551/impact"
 
 ```bash
 cd backend
-python -m unittest discover -s tests -t . -p "test_*.py" -v   # 84 条
+python -m unittest discover -s tests -t . -p "test_*.py" -v   # 97 条
 python scripts/smoke.py                                        # 80 条真实 HTTP 断言（自动选空闲端口）
 node scripts/pagecheck.mjs                                    # 77 条页面字段契约 + 侧栏结构 + 样式契约（需服务在跑）
 node scripts/browsercheck.mjs                                 # 32 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 ```
 
-合计 295 条，全部通过。
+合计 308 条，全部通过。
 
 `smoke.py` 自建临时库、在**自动挑选的空闲端口**启动 uvicorn、逐个请求断言后关闭进程，不碰演示数据，也不会误连到正在运行的开发服务（显式指定 `GEO_SMOKE_PORT` 且端口被占用时直接报错）。
 
@@ -209,7 +229,7 @@ backend/
     api/nav.py               # 服务端统一侧栏（唯一导航定义）
     seed.py
   tests/unit, tests/integration, tests/fixtures.py
-  scripts/                   # smoke / pagecheck / browsercheck / pagercheck / import_answers / collect
+  scripts/                   # smoke / 三个页面检查 / import_answers / sample_gaps / collect
 frontend/static/             # 13 个页面 + theme.css + app.css + app.js
 start.bat                    # Windows 双击启动
 specs/001-geo-insight-platform/  # spec / plan / data-model / contracts / tasks / quickstart
