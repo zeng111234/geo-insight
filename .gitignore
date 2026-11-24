@@ -32,3 +32,7 @@ backend/data/team.local.bat
 
 # Reasonix 会话状态
 .reasonix/
+
+# ZCode 会话状态与发布 draft 运行产物(可再生)
+.zcode/
+backend/data/publish_drafts/
