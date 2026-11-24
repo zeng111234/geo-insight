@@ -206,6 +206,47 @@ python scripts/audit_log.py --json
 - 只记删改，不记读——记全量读会把真正要查的那条淹掉。
 - 两个删除接口都校验对象归属当前租户：知道 id 也删不了别人的数据。
 
+**⑤ 渠道发布（已接入系统，决策 011；七渠道齐备）**
+
+七个渠道全部有真实发布器（`src/geo/publishers/`），浏览器登录态持久化在
+`backend/src/.browser-profiles/<渠道>/`（已 gitignore，绝不入库）。**渠道连接、登录态检测
+与发布已接进系统**：`/studio` 发布通道面板点「连接」弹浏览器扫码、「检测」开无头浏览器
+验证（约 10-15 秒）、勾选后「一键发布」走真实浏览器自动化；发布记录状态（published /
+draft_saved / blocked / failed / unknown）与失败原因如实落库可查。CLI 形态保留供校准：
+
+```bash
+cd backend
+python scripts/sohu_publish.py login                # 搜狐号:扫码,存会话
+python scripts/sohu_publish.py publish draft.json
+python scripts/zhihu_publish.py login               # 知乎:创作中心(www.zhihu.com/creator)
+python scripts/zhihu_publish.py publish draft.json
+python scripts/wechat_publish.py login              # 公众号:mp.weixin.qq.com 扫码
+python scripts/wechat_publish.py publish draft.json   # 默认只存草稿箱
+python scripts/baijiahao_check.py --init            # 百家号:开放平台 API(需后台密钥)
+```
+
+- draft.json 通用字段 `title` / `content_html`；各渠道标题字数限制不同（百家号 8-40、搜狐 5-72、知乎 2-100、公众号 ≤64），长度不对在**开浏览器之前**就拒绝。
+- **账密可选**：`backend/data/channels.local.json`（已 gitignore，与百家号密钥同一安全等级）写
+  `{"sohu": {"username": "...", "password": "..."}}`，`login` 时自动填表提交；弹验证码/滑块/短信
+  一律转人工在窗口里完成，**工具不做任何绕过**（范围守卫）。没配置就走扫码。
+- 2026-11-24 实测（登录态逐页探测）：搜狐整体改版——老发文地址 `mp/post/createArticle` 已 404，
+  新后台在 `mpfe/v4`，编辑器 URL 直连会被弹回，必须从内容管理页点「发布内容」按钮进
+  （SPA 路由）；未登录不再跳 404 而是静默弹回门户页，`check` 以「停在后台 URL」为判据。
+  **未实名认证的账号发不了文章**（点「发布内容」只进发动态），`publish` 会返回
+  `blocked` 而不是硬闯；完成实名后需要用 `--show` 校准一次发布按钮/频道选择器。
+- 知乎/公众号的编辑器选择器按公开资料编写（登录墙后无法离线核实），**首次发布加 `--show` 人工盯一遍**，确认流程没改版再转无头。
+- 公众号默认「保存为草稿」：群发要点发表、再由管理员在手机上安全验证，这一步平台设计上必须人来，工具不做任何绕过。
+- 发布结果如实报 `published / draft_saved / rejected / not_logged_in / unknown`，`unknown` 一律人工到后台确认——宁可不报成功，不伪造成功。
+- 渠道状态是**真实登录态**（六态：connected / disconnected / expired / connecting /
+  needs_config / not_implemented），检测/登录结果带附注落库，页面加载只读库不开浏览器。
+- 同一渠道的登录/检测/发布互斥（浏览器 profile 只有一份），并发请求回 409；
+  `GEO_PUBLISH_WORKER=0` 时发布走纯入队、connect 不派登录子进程（冒烟/自动化测试用）。
+- **第二批（2026-11-24）**：抖音（图文通道，draft 需 `images`，纯文字文章要先配封面图）、
+  今日头条、小红书（笔记形态，同样需图）发布器就位并注册进系统。
+  **注意网络现状**：本机对 toutiao.com / xiaohongshu.com 全域 TLS 被重置（抖音/搜狐/知乎/
+  公众号正常，换 IP 无效），两渠道的登录与发布要等网络恢复才能校准——check 会把连接错误
+  如实落附注，不装有效。
+
 ## 接口
 
 契约权威源：`specs/001-geo-insight-platform/contracts/openapi.yaml`（OpenAPI 3.1，21 路径），根目录 `contracts/openapi.yaml` 是同步副本。
@@ -324,7 +365,11 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
   但没有接任何平台 API；`mention` 也没有自动提及解析器，靠 seed 或导入时的 `mentions` 字段写入
 - **多用户与角色**：只有一个预置账号，没有注册、改密、角色区分（`app_user.role` 已在表里但没启用）；
   session 存在进程内，重启即失效，多进程部署会互相看不见
-- 渠道真实登录与发帖（002 T019/T020）；按周聚合；片段级情感聚合；合规命中审计落库
+- **渠道发布的收尾**（002 T019/T020 已随决策 011 完成，七渠道齐备）：页面/接口集成已上线，
+  剩余为——知乎/公众号选择器未经实测校准（登录墙后，首跑用 `--show`）；搜狐待实名认证后
+  校准发布按钮/频道；**本机到 toutiao/xiaohongshu 的 TLS 被重置，两渠道待网络修复后
+  登录校准**（疑与本机代理/安全软件有关）；抖音/小红书发图文需要封面图素材（内容侧问题）。
+  另：片段级情感聚合；合规命中审计落库（按周聚合已随 H2-5 完成，从本清单移除）
 - **审计只覆盖两类删除**（别名、竞品）。导入批次回滚同样是破坏性操作，还没接审计；
   也没有审计的查询接口（只有 `scripts/audit_log.py`）
 - 契约 fuzz（Schemathesis）、交互 E2E（表单提交等完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖；删除确认做过一次 CDP 真实点击验证（临时脚本，未入库），但**其余交互（表单提交、下钻抽屉、打印）仍未模拟用户操作**

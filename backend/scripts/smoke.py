@@ -162,8 +162,21 @@ def main() -> None:
     env["PYTHONPATH"] = str(ROOT / "src")
     # 显式指定密码，不依赖默认值：seed 与 uvicorn 用同一份环境，登录才对得上
     env["GEO_ADMIN_PASSWORD"] = ADMIN_PASSWORD
+    # 发布通道真实化(决策 011):冒烟里不开 worker,发布走「纯入队」,
+    # 否则 uvicorn 子进程会真的去起浏览器自动化
+    env["GEO_PUBLISH_WORKER"] = "0"
 
     subprocess.run([sys.executable, "-m", "geo.seed"], cwd=ROOT, env=env, check=True, capture_output=True)
+    # 冒烟要验发布链路,需要一个 connected 渠道;决策 011 后 seed 不再给假
+    # 「已连接」,这里直接在临时库里把 wechat 摆成 connected(测试布置,不是假 UI 数据)
+    import sqlite3
+
+    with sqlite3.connect(DB) as conn:
+        conn.execute(
+            """UPDATE channel_account SET status = 'connected', login_mode = 'browser',
+                                     last_checked_at = '2026-11-24T12:00:00+08:00'
+               WHERE platform_key = 'wechat'"""
+        )
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "geo.api.app:app", "--port", str(PORT), "--log-level", "warning"],
         cwd=ROOT,
@@ -384,7 +397,31 @@ def main() -> None:
         check("7 channels seeded", status == 200 and len(channels) == 7, {"count": len(channels)})
         connected = [c for c in channels if c["status"] == "connected"]
         disconnected = [c for c in channels if c["status"] != "connected"]
-        check("2 channels connected", len(connected) == 2, connected)
+        # 决策 011:seed 不再有假「已连接」;诚实初始态 = wechat(冒烟布置)+ 3 个浏览器渠道
+        # 之外的 needs_config / not_implemented。字段 last_check_note 必须在(前端显示检测附注)。
+        check("honest channel states (no fake connected)",
+              len(connected) == 1 and connected[0]["platform_key"] == "wechat",
+              [c["platform_key"] + ":" + c["status"] for c in channels])
+        by_key = {c["platform_key"]: c for c in channels}
+        check("baijiahao needs_config", by_key["baijiahao"]["status"] == "needs_config", by_key["baijiahao"])
+        # 决策 011 第二批:三渠道发布器上线,初始态 disconnected(不再是 not_implemented)
+        check("xhs/toutiao/douyin have publishers (disconnected)",
+              all(by_key[k]["status"] == "disconnected" for k in ("xiaohongshu", "toutiao", "douyin")),
+              {k: by_key[k]["status"] for k in ("xiaohongshu", "toutiao", "douyin")})
+        check("channels expose last_check_note", all("last_check_note" in c for c in channels), channels[:1])
+
+        # 决策 011 第二批:7 渠道全部有发布器(不再有 not_implemented)
+        check("all seven channels have publishers",
+              all(c.get("support") in ("browser", "api") for c in channels),
+              [c["platform_key"] for c in channels if c.get("support") not in ("browser", "api")])
+        # 测试模式(worker=0)下 connect 不派登录子进程,如实回 skipped
+        status, body = post(f"/v1/channels/{by_key['xiaohongshu']['id']}/connect", {})
+        check("connect skipped in smoke mode (no login subprocess)",
+              status == 202 and body["status"] == "skipped", body)
+        status, body = post(f"/v1/channels/{by_key['baijiahao']['id']}/connect", {})
+        check("connect baijiahao points to key config",
+              status == 400 and body["code"] == "NEEDS_CONFIG" and "baijiahao.local.json" in body["message"],
+              body)
 
         status, body = get(f"/v1/trackers/{TRACKER}/articles")
         check("8 articles seeded", status == 200 and len(body["items"]) == 8, body)
@@ -407,6 +444,8 @@ def main() -> None:
 
         status, body = post(f"/v1/articles/{ART_DRAFT}/publish", {"channel_ids": [connected[0]["id"]]})
         check("publish queues one channel", status == 202 and len(body["queued"]) == 1, body)
+        check("publish is real integration (worker off in smoke)",
+              body.get("integration") == "real" and body.get("worker") is False, body)
 
         status, body = post(f"/v1/articles/{ART_DRAFT}/publish", {"channel_ids": [connected[0]["id"]]})
         check(

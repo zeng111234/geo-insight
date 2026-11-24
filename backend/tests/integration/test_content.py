@@ -4,8 +4,10 @@ from geo import db, seed
 from geo.repositories import sqlite_repository as repo
 from geo.services import content_service
 
-CONNECTED = seed.CHANNELS[0][0]
-DISCONNECTED = seed.CHANNELS[2][0]
+# 决策 011 后 seed 不再有假「已连接」;按渠道取 id,状态由各测试自己摆
+WECHAT = seed.CHANNELS[0][0]
+ZHIHU = seed.CHANNELS[1][0]
+BAIJIHAO = seed.CHANNELS[2][0]
 
 
 class ContentStudioTest(unittest.TestCase):
@@ -65,21 +67,70 @@ class ContentStudioTest(unittest.TestCase):
 
     def test_publish_is_idempotent_per_channel(self):
         article = seed.ART_REVIEW
-        channel = repo.get_channel(self.conn, CONNECTED)
-        created_first, existing_first = repo.create_publications(
+        channel = repo.get_channel(self.conn, WECHAT)
+        created_first, requeued_first, existing_first = repo.create_publications(
             self.conn, article, [channel], "2026-11-11T10:00:00+08:00"
         )
-        created_second, existing_second = repo.create_publications(
+        created_second, requeued_second, existing_second = repo.create_publications(
             self.conn, article, [channel], "2026-11-11T10:01:00+08:00"
         )
 
         self.assertEqual(len(created_first), 1)
+        self.assertEqual(requeued_first, [])
         self.assertEqual(existing_first, [])
         self.assertEqual(created_second, [])
+        self.assertEqual(requeued_second, [])
         self.assertEqual(existing_second, created_first)
 
-        rows = self.conn.execute("SELECT COUNT(*) FROM publication WHERE article_id = ?", (article,)).fetchone()
+        rows = self.conn.execute(
+            "SELECT COUNT(*) FROM publication WHERE article_id = ? AND channel_id = ?",
+            (article, channel["id"]),
+        ).fetchone()
         self.assertEqual(rows[0], 1)
+
+    def test_failed_publication_is_requeued_not_duplicated(self):
+        """重试语义(决策 011):上一轮 failed 的记录重置回 queued,复用同一行,
+        不产生第二条记录——UNIQUE(article_id, channel_id) 决定了重试只能是重置。"""
+        article = seed.ART_REVIEW
+        channel = repo.get_channel(self.conn, ZHIHU)
+        created, _, _ = repo.create_publications(
+            self.conn, article, [channel], "2026-11-11T10:00:00+08:00"
+        )
+        repo.update_publication_status(self.conn, created[0], "failed", failure_reason="渠道风控")
+
+        again, requeued, existing = repo.create_publications(
+            self.conn, article, [channel], "2026-11-11T10:05:00+08:00"
+        )
+
+        self.assertEqual(again, [])
+        self.assertEqual(requeued, created)
+        self.assertEqual(existing, [])
+        row = self.conn.execute(
+            "SELECT status, failure_reason FROM publication WHERE id = ?", (created[0],)
+        ).fetchone()
+        self.assertEqual(row["status"], "queued")
+        self.assertIsNone(row["failure_reason"])
+        pair_total = self.conn.execute(
+            "SELECT COUNT(*) FROM publication WHERE article_id = ? AND channel_id = ?",
+            (article, channel["id"]),
+        ).fetchone()[0]
+        self.assertEqual(pair_total, 1)
+
+    def test_running_publication_is_never_redispatched(self):
+        """running 中的记录既不算新也不重置——worker 正拿着它跑,不能被第二次
+        派发踩到同一个浏览器 profile。"""
+        article = seed.ART_DRAFT2
+        channel = repo.get_channel(self.conn, WECHAT)
+        created, _, _ = repo.create_publications(
+            self.conn, article, [channel], "2026-11-11T10:00:00+08:00"
+        )
+        repo.update_publication_status(self.conn, created[0], "running")
+
+        again, requeued, existing = repo.create_publications(
+            self.conn, article, [channel], "2026-11-11T10:01:00+08:00"
+        )
+
+        self.assertEqual((again, requeued, existing), ([], [], created))
 
     def test_saving_body_bumps_version(self):
         before = repo.get_article(self.conn, seed.ART_DRAFT)["version"]
@@ -97,8 +148,9 @@ class ContentStudioTest(unittest.TestCase):
         self.assertIn("pending", verdicts)
         self.assertEqual(verdicts[0], "pending", "待核实事实必须排在最前")
 
-    def test_disconnected_channel_is_not_publishable(self):
-        channel = repo.get_channel(self.conn, DISCONNECTED)
+    def test_needs_config_channel_is_not_publishable(self):
+        # 百家号在 seed 里是 needs_config(未配密钥),发布入口必须拒绝
+        channel = repo.get_channel(self.conn, BAIJIHAO)
 
         self.assertNotEqual(channel["status"], "connected")
 

@@ -33,7 +33,7 @@
       <a class="btn" href="/tasks">看创作进度 →</a>
     </header>
     <div class="content">
-      <div class="notice">发布与渠道登录是<strong>展示态</strong>：记录会真实写入数据库，但不发起真实登录或发帖，响应带 <code>integration: "demo"</code>。效果对比只描述采样结果，不构成因果承诺。</div>
+      <div class="notice">渠道连接与发布走<strong>真实链路</strong>（浏览器自动化，决策 011）：连接/检测在内容工作室发起，此处为只读镜像。效果对比只描述采样结果，不构成因果承诺。</div>
       <div class="cards" id="stats"></div>
 
       <div class="panel" style="margin-top:14px">
@@ -60,10 +60,16 @@
   var stat = function (l, v, s) {
     return '<div class="card"><div class="label">' + esc(l) + '</div><div class="value">' + esc(v) + '</div><div class="sub">' + esc(s) + "</div></div>";
   };
-  var PUB_TEXT = { queued: "待发布（演示态）", published: "已发布", failed: "失败" };
-  var CH_TEXT = { connected: "已连接", expired: "已过期", disconnected: "未连接" };
-  var CH_TAG = { connected: "ok", expired: "warn", disconnected: "" };
-  var LOGIN_TEXT = { scan_qr: "扫码登录", oauth: "OAuth 授权", password: "账号密码" };
+  var PUB_TEXT = {
+    queued: "排队中", running: "发布中…", published: "已发布",
+    draft_saved: "已存草稿", blocked: "被平台拦", failed: "失败", unknown: "待人工确认",
+  };
+  var CH_TEXT = {
+    connected: "已连接", disconnected: "未连接", expired: "已过期",
+    connecting: "登录中", needs_config: "待配置密钥", not_implemented: "未接入",
+  };
+  var CH_TAG = { connected: "ok", expired: "warn", disconnected: "", connecting: "warn" };
+  var LOGIN_TEXT = { scan_qr: "扫码登录", oauth: "OAuth 授权", password: "账号密码", browser: "浏览器登录态", api: "API 密钥" };
 
   function renderStats(rows, channels) {
     var pubs = [];
@@ -86,19 +92,19 @@
     rows.forEach(function (r) { (r.publications || []).forEach(function (p) { pubs.push({ r: r, p: p }); }); });
     $("pubMeta").textContent = pubs.length + " 条";
     if (!pubs.length) {
-      $("pubs").innerHTML = G.empty("还没有发布记录，可在内容工作室点「一键发布」生成演示记录");
+      $("pubs").innerHTML = G.empty("还没有发布记录，可在内容工作室勾选已连接渠道发起发布");
       return;
     }
     $("pubs").innerHTML = pubs.map(function (x) {
       var p = x.p;
       return '<div class="pub-row"><span class="tag">' + esc(p.platform_name || p.platform_key) + "</span>" +
-        '<span class="tag ' + (p.status === "published" ? "ok" : p.status === "failed" ? "bad" : "warn") + '">' +
+        '<span class="tag ' + (p.status === "published" || p.status === "draft_saved" ? "ok" : p.status === "failed" || p.status === "blocked" ? "bad" : "warn") + '">' +
         esc(PUB_TEXT[p.status] || p.status) + "</span>" +
         '<span class="muted">' + esc(x.r.title) + "</span>" +
         '<span class="spacer"></span>' +
         '<span class="muted">' + esc((p.published_at || "").slice(0, 16).replace("T", " ")) + "</span>" +
         (p.published_url ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链 →</a>'
-                         : '<span class="muted">演示态，无真实回链</span>') +
+                         : '<span class="muted">无回链</span>') +
         (p.failure_reason ? '<span class="tag bad">' + esc(p.failure_reason) + "</span>" : "") + "</div>";
     }).join("");
   }
@@ -106,12 +112,12 @@
   function renderChannels(channels) {
     $("chMeta").textContent = channels.length + " 个渠道";
     $("channels").innerHTML = '<div class="table-wrap"><table><thead><tr><th>渠道</th><th>状态</th>' +
-      "<th>登录方式</th><th>账号</th><th class=\"nowrap\">最后检查</th></tr></thead><tbody>" +
+      "<th>登录方式</th><th>检测附注</th><th class=\"nowrap\">最后检查</th></tr></thead><tbody>" +
       channels.map(function (c) {
         return "<tr><td>" + esc(c.platform_name) + "</td><td>" +
           '<span class="tag ' + (CH_TAG[c.status] || "") + '">' + esc(CH_TEXT[c.status] || c.status) + "</span></td>" +
           "<td>" + esc(LOGIN_TEXT[c.login_mode] || "—") + "</td>" +
-          '<td class="muted">' + esc(c.account_name || "—") + "</td>" +
+          '<td class="muted" style="max-width:260px;word-break:break-all">' + esc(c.last_check_note || "—") + "</td>" +
           '<td class="nowrap">' + esc((c.last_checked_at || "").slice(0, 16).replace("T", " ") || "—") + "</td></tr>";
       }).join("") + "</tbody></table></div>";
   }

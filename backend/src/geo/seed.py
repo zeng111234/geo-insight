@@ -83,14 +83,17 @@ ART_QUEUED = "55555555-5555-5555-5555-555555555557"
 ART_DRAFT2 = "55555555-5555-5555-5555-555555555558"
 PUBLISHED_AT = "2026-11-04T10:00:00+08:00"
 
+# 2026-11-24 决策 011(第二批):全部 7 渠道都有发布器了,初始态统一为
+# 「未连接」(disconnected,登录态未知待检测)或「待配置密钥」(百家号)。
+# connected 只能来自真实检测/登录(POST /v1/channels/{id}/check 或 connect)。
 CHANNELS = [
-    ("66666666-6666-6666-6666-666666666661", "wechat", "微信公众号", "辽宁辽征律师事务所", "connected", "scan_qr"),
-    ("66666666-6666-6666-6666-666666666662", "zhihu", "知乎", "辽征律所 · 张律师", "connected", "oauth"),
-    ("66666666-6666-6666-6666-666666666663", "baijiahao", "百家号", None, "disconnected", None),
+    ("66666666-6666-6666-6666-666666666661", "wechat", "微信公众号", None, "disconnected", None),
+    ("66666666-6666-6666-6666-666666666662", "zhihu", "知乎", None, "disconnected", None),
+    ("66666666-6666-6666-6666-666666666663", "baijiahao", "百家号", None, "needs_config", None),
     ("66666666-6666-6666-6666-666666666664", "xiaohongshu", "小红书", None, "disconnected", None),
     ("66666666-6666-6666-6666-666666666665", "toutiao", "今日头条", None, "disconnected", None),
     ("66666666-6666-6666-6666-666666666666", "sohu", "搜狐号", None, "disconnected", None),
-    ("66666666-6666-6666-6666-666666666667", "douyin", "抖音", None, "expired", "scan_qr"),
+    ("66666666-6666-6666-6666-666666666667", "douyin", "抖音", None, "disconnected", None),
 ]
 
 
@@ -697,7 +700,8 @@ def seed_studio(conn) -> None:
             """INSERT INTO channel_account
                (id, tenant_id, platform_key, platform_name, account_name, status, login_mode, last_checked_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (cid, TENANT, key, name, account, status, mode, now if status != "disconnected" else None),
+            # last_checked_at 只在 connected 时有意义;初始诚实态从未检测过
+            (cid, TENANT, key, name, account, status, mode, now if status == "connected" else None),
         )
 
     articles = [

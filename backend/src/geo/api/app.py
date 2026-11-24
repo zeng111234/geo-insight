@@ -23,6 +23,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from geo import db
 from geo.api import nav
@@ -36,7 +37,9 @@ from geo.services import (
     auth_service,
     config_service,
     content_service,
+    mention_service,
     metric_service,
+    publish_service,
     report_service,
     sampling_service,
 )
@@ -498,27 +501,127 @@ async def _json_body(request: Request) -> dict | JSONResponse:
 async def list_channels(request: Request):
     conn = db.connect()
     try:
-        return JSONResponse({"items": repo.list_channels(conn, _tenant(request))})
+        items = repo.list_channels(conn, _tenant(request))
+        # support 告诉前端该渠道有没有真实发布器(browser/api);没有的渠道
+        # 不渲染「连接」按钮,显示「未接入」
+        for c in items:
+            support = publish_service.CHANNEL_SUPPORT.get(c["platform_key"])
+            c["support"] = support["kind"] if support else None
+        return JSONResponse({"items": items})
     finally:
         conn.close()
 
 
 async def connect_channel(request: Request):
+    """真实连接(决策 011):浏览器渠道派生可见登录子进程,扫码后自动落库。
+
+    HTTP 等不了扫码(分钟级交互),所以这里只负责:校验 → 置 connecting →
+    派生子进程+监控线程 → 立刻回 202。监控线程按退出码把状态写成
+    connected/disconnected 并释放渠道锁。
+    """
     conn = db.connect()
     try:
         channel = repo.get_channel(conn, request.path_params["channel_id"])
         if not channel or channel["tenant_id"] != _tenant(request):
             return _error(request, "NOT_FOUND", "channel not found", 404)
-        updated = repo.connect_channel(conn, channel["id"], _now())
+    finally:
+        conn.close()
+
+    key = channel["platform_key"]
+    support = publish_service.CHANNEL_SUPPORT.get(key)
+    if support is None:
+        return _error(request, "NOT_IMPLEMENTED", f"{channel['platform_name']} 还没有发布器,无法连接", 400)
+    if support["kind"] == "api":
+        return _error(
+            request,
+            "NEEDS_CONFIG",
+            "百家号走 API 密钥:在 backend/data/baijiahao.local.json 配置"
+            " app_id/app_token(后台「开发 → 基本配置」),然后点「检测」",
+            400,
+        )
+    if not publish_service.try_channel_lock(key):
+        return _error(request, "CHANNEL_BUSY", f"{channel['platform_name']} 正在登录或发布中,稍后再试", 409)
+
+    # 测试模式(GEO_PUBLISH_WORKER=0)不派登录子进程:冒烟跑在 uvicorn 子进程里,
+    # 不该真的弹浏览器;状态也不动,如实回 skipped
+    if not settings.publish_worker_enabled:
         return JSONResponse(
             {
-                **updated,
-                "integration": "demo",
-                "note": "展示态：已置为已连接，未接入真实登录或授权",
-            }
+                "status": "skipped",
+                "channel_id": channel["id"],
+                "platform_name": channel["platform_name"],
+                "integration": "real",
+                "note": "登录派发已关闭(GEO_PUBLISH_WORKER=0,测试模式)",
+            },
+            status_code=202,
+        )
+
+    conn = db.connect()
+    try:
+        repo.update_channel_status(
+            conn, channel["id"], "connecting", _now(),
+            note="登录流程进行中:浏览器窗口已打开,请完成扫码登录",
         )
     finally:
         conn.close()
+    publish_service.start_login(channel)
+    return JSONResponse(
+        {
+            "status": "connecting",
+            "channel_id": channel["id"],
+            "platform_name": channel["platform_name"],
+            "integration": "real",
+            "note": "浏览器窗口已打开,请在其中完成扫码登录;完成后渠道状态会自动更新",
+        },
+        status_code=202,
+    )
+
+
+async def check_channel(request: Request):
+    """真实检测登录态:开一次无头浏览器(10-15 秒),结果落库。
+
+    耗时操作丢线程池,不阻塞事件循环;期间持有渠道锁,登录/发布会被 409。
+    """
+    conn = db.connect()
+    try:
+        channel = repo.get_channel(conn, request.path_params["channel_id"])
+        if not channel or channel["tenant_id"] != _tenant(request):
+            return _error(request, "NOT_FOUND", "channel not found", 404)
+    finally:
+        conn.close()
+
+    key = channel["platform_key"]
+    support = publish_service.CHANNEL_SUPPORT.get(key)
+    if support is None:
+        return _error(request, "NOT_IMPLEMENTED", f"{channel['platform_name']} 没有发布器,无需检测", 400)
+    if not publish_service.try_channel_lock(key):
+        return _error(request, "CHANNEL_BUSY", f"{channel['platform_name']} 正在登录或发布中,稍后再试", 409)
+    try:
+        ok, note = await run_in_threadpool(publish_service.run_channel_check, channel)
+    finally:
+        publish_service.release_channel_lock(key)
+
+    # 失效状态的落库口径:连过又失效 → expired;从未连上 → disconnected;
+    # 百家号缺密钥 → needs_config。已连接过与否看库里旧状态,不靠猜。
+    if ok:
+        status = "connected"
+    elif support["kind"] == "api" and "未配置密钥" in note:
+        status = "needs_config"
+    elif channel["status"] in ("connected", "expired"):
+        status = "expired"
+    else:
+        status = "disconnected"
+
+    conn = db.connect()
+    try:
+        updated = repo.update_channel_status(
+            conn, channel["id"], status, _now(),
+            login_mode=support["kind"] if ok else None,
+            note=note,
+        )
+    finally:
+        conn.close()
+    return JSONResponse({**updated, "reachable": ok})
 
 
 async def list_articles(request: Request):
@@ -558,6 +661,14 @@ async def article_detail(request: Request):
 
 
 async def publish_article(request: Request):
+    """真实发布(决策 011):校验 → 入队(幂等/可重试)→ 派发 worker → 秒回 202。
+
+    worker 在后台线程跑浏览器自动化(分钟级),publication 状态会走
+    queued → running → published/draft_saved/blocked/failed/unknown,
+    前端轮询文章详情拿进度。渠道锁由本端点先拿、worker 收尾释放,
+    同渠道并发会被 409(浏览器 profile 只有一份)。
+    GEO_PUBLISH_WORKER=0 时不派发、不加锁,纯入队(冒烟/自动化用)。
+    """
     payload = await _json_body(request)
     if isinstance(payload, JSONResponse):
         return payload
@@ -578,35 +689,70 @@ async def publish_article(request: Request):
             if not channel or channel["tenant_id"] != _tenant(request):
                 blocked.append({"channel_id": channel_id, "reason": "not_found"})
             elif channel["status"] != "connected":
-                blocked.append({"channel_id": channel_id, "channel": channel["platform_name"], "reason": "not_connected"})
+                blocked.append(
+                    {"channel_id": channel_id, "channel": channel["platform_name"], "reason": channel["status"]}
+                )
             else:
-                targets.append(channel)
+                title_err = publish_service.title_error(channel["platform_key"], article["title"])
+                if title_err:
+                    blocked.append(
+                        {"channel_id": channel_id, "channel": channel["platform_name"], "reason": title_err}
+                    )
+                else:
+                    targets.append(channel)
         if blocked:
             return JSONResponse(
                 {
                     "code": "CHANNEL_NOT_CONNECTED",
-                    "message": "存在未连接或不存在的渠道，未发起任何发布",
+                    "message": "存在未连接或不可发布的渠道，未发起任何发布",
                     "request_id": request.state.request_id,
                     "blocked": blocked,
                 },
                 status_code=400,
             )
 
-        created, existing = repo.create_publications(conn, article_id, targets, _now())
-        return JSONResponse(
-            {
-                "article_id": article_id,
-                "status": "queued",
-                "queued": [{"channel_id": c["id"], "channel": c["platform_name"]} for c in targets],
-                "created": created,
-                "existing": existing,
-                "integration": "demo",
-                "note": "展示态：已写入发布队列，未真实发帖",
-            },
-            status_code=202,
-        )
+        # 渠道互斥:全部渠道先拿锁再入队;任何一个忙就全部放弃(不产生半套记录)
+        locked_keys = []
+        if settings.publish_worker_enabled:
+            for ch in targets:
+                if publish_service.try_channel_lock(ch["platform_key"]):
+                    locked_keys.append(ch["platform_key"])
+                else:
+                    for key in locked_keys:
+                        publish_service.release_channel_lock(key)
+                    return _error(
+                        request, "CHANNEL_BUSY", f"{ch['platform_name']} 正在登录或发布中,稍后再试", 409
+                    )
+
+        created, requeued, existing = repo.create_publications(conn, article_id, targets, _now())
+        to_dispatch = [*created, *requeued]
+        pub_channels = repo.get_publication_channels(conn, to_dispatch) if to_dispatch else []
     finally:
         conn.close()
+
+    if settings.publish_worker_enabled and pub_channels:
+        key_of = {ch["id"]: ch["platform_key"] for ch in targets}
+        for row in pub_channels:
+            publish_service.spawn_publication_worker(row["id"], key_of[row["channel_id"]], article)
+
+    return JSONResponse(
+        {
+            "article_id": article_id,
+            "status": "queued",
+            "queued": [{"channel_id": c["id"], "channel": c["platform_name"]} for c in targets],
+            "created": created,
+            "requeued": requeued,
+            "existing": existing,
+            "integration": "real",
+            "worker": settings.publish_worker_enabled,
+            "note": (
+                "已派发真实发布(浏览器自动化);发布记录状态会持续更新,请稍后刷新查看"
+                if settings.publish_worker_enabled
+                else "发布 worker 已关闭,记录仅入队不执行(测试模式)"
+            ),
+        },
+        status_code=202,
+    )
 
 
 async def article_impact(request: Request):
@@ -1033,6 +1179,32 @@ async def answers_export(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# 003 提及识别（FR-007/FR-008）：改别名后按当前配置一键重跑
+# ---------------------------------------------------------------------------
+
+async def mention_recompute(request: Request):
+    conn = db.connect()
+    try:
+        result = mention_service.recompute(
+            conn,
+            tenant_id=_tenant(request),
+            tracker_id=request.path_params["tracker_id"],
+            actor_id=_actor_id(request),
+            now=_now(),
+        )
+        if result is None:
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        # 删旧提及、写新提及、审计在同一事务里提交（audit_service 的约定）。
+        conn.commit()
+        return JSONResponse(result)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # 001 报告（FR-027 ~ FR-031）
 # ---------------------------------------------------------------------------
 
@@ -1105,6 +1277,11 @@ def create_app() -> Starlette:
     # 老库升级上来时 app_user 可能还没有密码，这里补齐，否则登录页永远进不去
     with closing(db.connect()) as conn:
         auth_service.ensure_admin_password(conn)
+        # 发布通道真实化(决策 011):上一个进程留下的 running / connecting
+        # 都没有 worker 在管了(线程随进程死),开机即纠正——页面绝不能
+        # 显示"发布中/登录中"而实际什么都不会发生
+        repo.sweep_stale_publications(conn, "服务重启,发布中断;请重新发布")
+        repo.sweep_stale_connecting(conn, "服务重启,登录流程中断;请重新连接")
 
     routes = [
         Route("/login", login_page),
@@ -1172,6 +1349,11 @@ def create_app() -> Starlette:
         ),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/answers", list_answers),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/answers/export", answers_export),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/mentions/recompute",
+            mention_recompute,
+            methods=["POST"],
+        ),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/citations/summary", citations_summary),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/citations", citations_detail),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/reports", list_reports, methods=["GET"]),
@@ -1179,8 +1361,9 @@ def create_app() -> Starlette:
         Route(f"{settings.api_prefix}/reports/{{report_id}}", report_detail),
         Route(f"{settings.api_prefix}/answers/{{answer_id}}", answer_detail),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/articles", list_articles),
-        Route(f"{settings.api_prefix}/channels", list_channels),
-        Route(f"{settings.api_prefix}/channels/{{channel_id}}/connect", connect_channel, methods=["POST"]),
+Route(f"{settings.api_prefix}/channels", list_channels),
+Route(f"{settings.api_prefix}/channels/{{channel_id}}/connect", connect_channel, methods=["POST"]),
+Route(f"{settings.api_prefix}/channels/{{channel_id}}/check", check_channel, methods=["POST"]),
         Route(f"{settings.api_prefix}/articles/{{article_id}}", article_detail, methods=["GET", "PATCH"]),
         Route(f"{settings.api_prefix}/articles/{{article_id}}/publish", publish_article, methods=["POST"]),
         Route(f"{settings.api_prefix}/articles/{{article_id}}/impact", article_impact),
