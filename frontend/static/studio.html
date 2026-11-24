@@ -242,7 +242,16 @@ function toast(msg, kind = "") {
   toastTimer = setTimeout(() => { el.className = "toast " + kind; }, 4200);
 }
 
+// CSRF 双提交:写请求带 X-CSRF-Token(geo_csrf 由登录下发,非 HttpOnly)
+function csrfToken() {
+  const m = document.cookie.match(/(?:^|;\s*)geo_csrf=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
 async function api(path, options) {
+  if (options && options.method && options.method !== "GET") {
+    options.headers = Object.assign({}, options.headers, { "X-CSRF-Token": csrfToken() });
+  }
   const res = await fetch(API + path, options);
   const text = await res.text();
   let data = null;

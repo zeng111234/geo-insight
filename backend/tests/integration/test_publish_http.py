@@ -55,6 +55,9 @@ class PublishHttpTest(unittest.TestCase):
         cls.client = TestClient(app)
         body = f"email={settings.admin_email}&password={settings.admin_password}"
         cls.client.post("/login", content=body, headers=FORM, follow_redirects=False)
+        # CSRF(决策 011 之后所有写请求都要带头):登录下发的 geo_csrf 挂成默认头,
+        # 单个用例就不用每处都写 headers 了
+        cls.client.headers.update({"X-CSRF-Token": cls.client.cookies.get("geo_csrf", "")})
 
     # ------------------------------------------------------------------
     # 渠道列表:诚实初始态

@@ -19,7 +19,16 @@
   };
   var num = function (v) { return v === null || v === undefined ? "—" : String(v); };
 
+  // CSRF 双提交:写请求带 X-CSRF-Token(geo_csrf 由登录下发,非 HttpOnly)
+  function csrfToken() {
+    var m = document.cookie.match(/(?:^|;\s*)geo_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : "";
+  }
+
   async function request(path, options) {
+    if (options && options.method && options.method !== "GET") {
+      options.headers = Object.assign({}, options.headers, { "X-CSRF-Token": csrfToken() });
+    }
     var res = await fetch(API + path, options);
     var body = await res.json().catch(function () { return {}; });
     if (!res.ok) {

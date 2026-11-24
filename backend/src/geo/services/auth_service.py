@@ -28,9 +28,13 @@ SCRYPT_R = 8
 SCRYPT_P = 1
 KEY_LEN = 32
 
-# token -> {user_id, email, role, tenant_id, expires_at}
+# token -> {user_id, email, role, tenant_id, csrf_token, expires_at}
 _SESSIONS: dict[str, dict] = {}
 _LOCK = threading.Lock()
+
+# 登录限流状态：标识 -> 最近失败时间戳列表（过期条目惰性清理）
+_LOGIN_FAILURES: dict[str, list[float]] = {}
+_LOGIN_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------- 密码
@@ -154,7 +158,7 @@ def _purge(now: float) -> None:
 
 
 def create_session(user: dict) -> tuple[str, int]:
-    """返回 (token, 有效期秒数)。"""
+    """返回 (token, 有效期秒数)。session 里带 csrf_token(写接口校验用)。"""
     token = secrets.token_urlsafe(32)
     ttl = max(60, settings.session_hours * 3600)
     now = time.time()
@@ -165,6 +169,7 @@ def create_session(user: dict) -> tuple[str, int]:
             "email": user["email"],
             "role": user.get("role"),
             "tenant_id": user.get("tenant_id"),
+            "csrf_token": secrets.token_urlsafe(32),
             "expires_at": now + ttl,
         }
     return token, ttl
@@ -195,3 +200,36 @@ def clear_sessions() -> None:
     """测试用：清空内存会话。"""
     with _LOCK:
         _SESSIONS.clear()
+
+
+# ---------------------------------------------------------------- 登录限流（FR-006）
+
+
+def login_throttled(identifier: str) -> int:
+    """返回该标识还需冷却的秒数（>0 = 已锁定），0 = 放行。
+
+    标识是「账号 + 客户端 IP」的组合：单拦账号会被任意 IP 撞锁（DoS 别人），
+    单拦 IP 又换账号就绕过。内存态、重启清零——防的是暴力尝试，不是持久封锁。
+    """
+    now = time.time()
+    with _LOGIN_LOCK:
+        fails = [t for t in _LOGIN_FAILURES.get(identifier, []) if now - t < settings.login_lockout_s]
+        if len(fails) >= settings.login_max_failures:
+            return int(settings.login_lockout_s - (now - fails[0])) + 1
+    return 0
+
+
+def record_login_failure(identifier: str) -> None:
+    with _LOGIN_LOCK:
+        _LOGIN_FAILURES.setdefault(identifier, []).append(time.time())
+
+
+def clear_login_failures(identifier: str) -> None:
+    with _LOGIN_LOCK:
+        _LOGIN_FAILURES.pop(identifier, None)
+
+
+def _reset_login_failures_for_tests() -> None:
+    """测试专用：清空限流状态，避免用例间串扰。"""
+    with _LOGIN_LOCK:
+        _LOGIN_FAILURES.clear()

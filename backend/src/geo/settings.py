@@ -40,6 +40,11 @@ class Settings:
     admin_password: str = os.getenv("GEO_ADMIN_PASSWORD", "geo-demo-2026")
     session_hours: int = int(os.getenv("GEO_SESSION_HOURS", "12"))
     cookie_name: str = "geo_session"
+    # CSRF 双提交 cookie 名(登录后非 HttpOnly 下发,页面 JS 读它放进 X-CSRF-Token)
+    csrf_cookie_name: str = "geo_csrf"
+    # 登录限流(FR-006):连续失败 N 次锁定 M 秒,锁定期内正确密码也拒绝
+    login_max_failures: int = int(os.getenv("GEO_LOGIN_MAX_FAILURES", "5"))
+    login_lockout_s: int = int(os.getenv("GEO_LOGIN_LOCKOUT_S", "300"))
 
     # ---- 渠道发布（决策 011：发布通道真实化）----
     # 渠道自动化开关(登录派发 + 发布 worker)。默认开；冒烟/自动化测试设 0:

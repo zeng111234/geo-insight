@@ -373,7 +373,7 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
 - **审计只覆盖两类删除**（别名、竞品）。导入批次回滚同样是破坏性操作，还没接审计；
   也没有审计的查询接口（只有 `scripts/audit_log.py`）
 - 契约 fuzz（Schemathesis）、交互 E2E（表单提交等完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖；删除确认做过一次 CDP 真实点击验证（临时脚本，未入库），但**其余交互（表单提交、下钻抽屉、打印）仍未模拟用户操作**
-- **CSRF 防护**：线上为了能在应用卡的 iframe 里保持登录态，会话 cookie 用了 `SameSite=None`
-  （决策 010），等于放弃了 SameSite 自带的那层防护。所有写接口目前没有 token 校验，
-  对外使用前必须补上（一次性 token 或双提交 cookie）
+- ~~CSRF 防护~~ **已补上（003 US3，2026-11-24）**：双提交 cookie（`geo_csrf` + `X-CSRF-Token`
+  头，决策 010 的洞清零）+ 登录限流（连续 5 错锁定，`GEO_LOGIN_MAX_FAILURES`/`GEO_LOGIN_LOCKOUT_S`
+  可调）。注意 `GEO_AUTH_REQUIRED=0` 时鉴权与 CSRF 一并跳过（自动化检查专用）
 - **AI 成稿与积分**：按决策 003 整体取消；决策 009 已改判为 H2.5 阶段恢复（只做账本，不做对外收费）

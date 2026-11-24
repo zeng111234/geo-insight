@@ -110,12 +110,23 @@ def delete(path: str) -> int:
         return exc.code
 
 
+def _csrf_token() -> str:
+    """登录后服务端下发的 geo_csrf(写接口的 X-CSRF-Token 头)。"""
+    for c in _COOKIES:
+        if c.name == "geo_csrf":
+            return c.value
+    return ""
+
+
 def _request(path: str, payload: dict, method: str) -> tuple[int, dict]:
+    headers = {"Content-Type": "application/json"}
+    if method != "GET":
+        headers["X-CSRF-Token"] = _csrf_token()
     req = urllib.request.Request(
         BASE + path,
         data=json.dumps(payload).encode("utf-8"),
         method=method,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -210,6 +221,31 @@ def main() -> None:
         status, location = post_form("/login", {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
         check("正确密码登录成功", status == 303 and location == "/", (status, location))
         check("登录后拿到 session cookie", any(c.name == "geo_session" for c in _COOKIES), list(_COOKIES))
+        # CSRF(003 FR-005):登录同时下发非 HttpOnly 的 geo_csrf;写请求不带
+        # X-CSRF-Token 必须 403——SameSite=None 场景下第三方页面的写请求没有这个头
+        check("登录后下发 csrf cookie", any(c.name == "geo_csrf" for c in _COOKIES), list(_COOKIES))
+        csrf = _csrf_token()
+        no_token_req = urllib.request.Request(
+            BASE + "/logout", data=b"", method="POST"
+        )
+        try:
+            with urllib.request.urlopen(no_token_req, timeout=5) as resp:
+                no_token_status = resp.status
+        except urllib.error.HTTPError as exc:
+            no_token_status = exc.code
+        check("写请求缺 CSRF token 被 403", no_token_status == 403, no_token_status)
+        with_token_req = urllib.request.Request(
+            BASE + "/logout", data=b"", method="POST", headers={"X-CSRF-Token": csrf}
+        )
+        try:
+            with _NO_REDIRECT.open(with_token_req, timeout=5) as resp:
+                with_token_status, with_token_loc = resp.status, resp.headers.get("location", "")
+        except urllib.error.HTTPError as exc:
+            with_token_status, with_token_loc = exc.code, exc.headers.get("location", "")
+        check("带 token 的写请求放行(logout 303)", with_token_status == 303, (with_token_status, with_token_loc))
+        # logout 之后重新登录,后续断言继续用会话
+        status, location = post_form("/login", {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+        check("csrf 验证后重新登录", status == 303 and location == "/", (status, location))
 
         status, body = get("/v1/trackers")
         check("tracker list", status == 200 and len(body["items"]) == 2, body)

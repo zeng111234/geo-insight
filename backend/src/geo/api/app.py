@@ -8,6 +8,7 @@ Uses Starlette directly because FastAPI is not installable in this environment
 import csv
 import io
 import json
+import secrets
 import time
 import uuid
 from contextlib import closing
@@ -102,6 +103,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         session = auth_service.get_session(request.cookies.get(settings.cookie_name))
         if session:
             request.state.user = session
+            # CSRF 双提交校验需要会话里的 token(CSRF 中间件比对请求头)
+            request.state.csrf = session.get("csrf_token")
             return await call_next(request)
 
         if path.startswith(settings.api_prefix):
@@ -117,6 +120,43 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.method in {"GET", "HEAD"}:
             target = f"/login?next={quote(path)}"
         return RedirectResponse(target, status_code=302)
+
+
+WRITE_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
+
+
+class CsrfMiddleware(BaseHTTPMiddleware):
+    """写接口校验 X-CSRF-Token(003 FR-005,补决策 010 自认的洞)。
+
+    方案是「会话态 token + 双提交 cookie」:登录时签发 csrf_token 存进 session,
+    并以非 HttpOnly cookie(geo_csrf)下发给页面 JS;写请求带 X-CSRF-Token 头,
+    与 session 里的 token 比对。SameSite=None 的线上环境里,拿到会话 cookie 的
+    第三方页面发起的写请求没有这个头,403 拒之。
+
+    只对「已登录的写」生效:未登录的写已被 AuthMiddleware 401;/login 自身是
+    公开路径(还没有会话,由登录限流负责)。鉴权整体关闭(自动化检查)时同样
+    跳过——那套检查本来就不走登录态。
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if not settings.auth_required:
+            return await call_next(request)
+        if request.method not in WRITE_METHODS:
+            return await call_next(request)
+        if getattr(request.state, "csrf", None) is None:
+            return await call_next(request)  # 未登录的写:交给 401,不抢戏
+
+        header = request.headers.get("x-csrf-token", "")
+        if header and secrets.compare_digest(header, request.state.csrf):
+            return await call_next(request)
+        return JSONResponse(
+            {
+                "code": "CSRF_REJECTED",
+                "message": "写请求缺少有效的 X-CSRF-Token(跨站请求)",
+                "request_id": getattr(request.state, "request_id", ""),
+            },
+            status_code=403,
+        )
 
 
 def _safe_next(value: str | None) -> str:
@@ -135,7 +175,8 @@ async def login_page(request: Request):
         STATIC_DIR,
         _safe_next(request.query_params.get("next")),
         settings.admin_email,
-        request.query_params.get("error") == "1",
+        request.query_params.get("error") if request.query_params.get("error") in ("1", "locked") else False,
+        cooldown=int(request.query_params.get("cooldown") or 0),
     )
 
 
@@ -155,17 +196,30 @@ async def login_submit(request: Request):
     raw = (await request.body()).decode("utf-8", "replace")
     form = {key: values[0] for key, values in parse_qs(raw, keep_blank_values=True).items()}
     next_url = _safe_next(form.get("next"))
+    email = form.get("email", "")
+
+    # 登录限流(FR-006):账号+IP 联合标识。锁定期内连正确密码都拒绝——
+    # 否则攻击者可以拿正确密码撞锁来试探
+    identifier = f"{email}@{request.client.host if request.client else '?'}"
+    cooldown = auth_service.login_throttled(identifier)
+    if cooldown:
+        return RedirectResponse(
+            f"/login?error=locked&cooldown={cooldown}&next={quote(next_url)}", status_code=303
+        )
 
     conn = db.connect()
     try:
-        user = auth_service.authenticate(conn, form.get("email", ""), form.get("password", ""))
+        user = auth_service.authenticate(conn, email, form.get("password", ""))
     finally:
         conn.close()
 
     if not user:
+        auth_service.record_login_failure(identifier)
         return RedirectResponse(f"/login?error=1&next={quote(next_url)}", status_code=303)
 
+    auth_service.clear_login_failures(identifier)
     token, ttl = auth_service.create_session(user)
+    session = auth_service.get_session(token)
     response = RedirectResponse(next_url, status_code=303)
     # 本地 http 用 lax（浏览器不接受给 http 设 None），线上 https 必须 None + Secure。
     # 原因：发布后的应用是在应用卡的 iframe 里打开的，SameSite=lax 的 cookie 在第三方上下文
@@ -178,6 +232,17 @@ async def login_submit(request: Request):
         token,
         max_age=ttl,
         httponly=True,
+        samesite="none" if is_https else "lax",
+        secure=is_https,
+        path="/",
+    )
+    # CSRF 双提交的另一半:非 HttpOnly,页面 JS 读它放进 X-CSRF-Token 头。
+    # 有效期跟会话一致(会话没了,token 也没意义了)
+    response.set_cookie(
+        settings.csrf_cookie_name,
+        session["csrf_token"] if session else "",
+        max_age=ttl,
+        httponly=False,
         samesite="none" if is_https else "lax",
         secure=is_https,
         path="/",
@@ -1380,6 +1445,7 @@ Route(f"{settings.api_prefix}/channels/{{channel_id}}/check", check_channel, met
             # works when opened from another local port during debugging.
             Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]),
             Middleware(AuthMiddleware),
+            Middleware(CsrfMiddleware),
         ],
     )
 

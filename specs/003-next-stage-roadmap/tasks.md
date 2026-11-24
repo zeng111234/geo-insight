@@ -21,10 +21,14 @@
 
 ## Phase 2: 安全补齐(US3,P1,对外演示前必须)
 
-- [ ] T007 CSRF token:所有写接口校验(一次性 token 或双提交 cookie,零依赖原则),无 token 或 token 无效返回 403 且数据不变 per FR-005 in `backend/src/geo/api/`(中间件层)
-- [ ] T008 登录限流:连续 5 次密码错误触发锁定,锁定期内正确密码也拒绝 per FR-006 in `backend/src/geo/services/auth_service.py`
-- [ ] T009 既有测试适配:全量测试改为先取 token 再请求,允许按测试类做最小化适配而非逐条重写 per SC-003/spec Edge
-- [ ] T010 安全验证:模拟跨站写请求(带 cookie 无 token)100% 被 403;连续 5 错后第 6 次登录被限流 per SC-003
+- [X] T007 CSRF token:所有写接口校验(一次性 token 或双提交 cookie,零依赖原则),无 token 或 token 无效返回 403 且数据不变 per FR-005 in `backend/src/geo/api/`(中间件层)
+  **2026-11-24 完成**:双提交 cookie——登录时 session 带 csrf_token 并以非 HttpOnly 的 `geo_csrf` 下发,页面 JS(app.js/studio api()/logout 表单)放进 `X-CSRF-Token` 头,`CsrfMiddleware` 用 `secrets.compare_digest` 比对;未登录写仍走 401,鉴权关闭(自动化检查)时跳过。决策 010 的洞就此补上。
+- [X] T008 登录限流:连续 5 次密码错误触发锁定,锁定期内正确密码也拒绝 per FR-006 in `backend/src/geo/services/auth_service.py`
+  **2026-11-24 完成**:账号+IP 联合标识(单拦账号会被撞锁 DoS,单拦 IP 换账号即绕),进程内状态,阈值/时长走 `GEO_LOGIN_MAX_FAILURES`/`GEO_LOGIN_LOCKOUT_S`;登录页渲染锁定剩余秒数。
+- [X] T009 既有测试适配:全量测试改为先取 token 再请求,允许按测试类做最小化适配而非逐条重写 per SC-003/spec Edge
+  **2026-11-24 完成**:TestClient 类在登录后挂默认 `X-CSRF-Token` 头(每类一行);smoke 的 `_request` 从 cookie 罐取 token 自动附带。按类最小化适配,没逐条重写。
+- [X] T010 安全验证:模拟跨站写请求(带 cookie 无 token)100% 被 403;连续 5 错后第 6 次登录被限流 per SC-003
+  **2026-11-24 完成**:集成测试 5 条(缺 token 403/伪造 token 403/带 token 放行/限流锁定/锁定过期)+ 冒烟 4 条显式断言;两个变异自检过(拿掉 CSRF 校验红 3 条,拿掉限流红 2 条)。
 
 ## Phase 3: 提及识别 v1(US4,P2)
 

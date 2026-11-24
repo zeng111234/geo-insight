@@ -43,6 +43,10 @@
 带 sharecode 作为第一道门槛。但**真要对外用之前必须补 CSRF token**（每个写接口校验
 一次性 token 或双提交 cookie）。这一条写进 README 的「尚未实现」，不靠记忆。
 
+> 2026-11-24 更新:该洞已由 003 US3 落地补上——双提交 cookie + `X-CSRF-Token`
+> 头(详见 003 tasks.md T007~T010)。SameSite=None 的线上环境从此有 CSRF 防护,
+> 本决策遗留的代价清零。
+
 ## 验证
 
 - `test_https_login_sets_cross_site_cookie`：带 `X-Forwarded-Proto: https` 登录，

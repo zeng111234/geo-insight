@@ -31,6 +31,8 @@ class AuthHttpTest(unittest.TestCase):
 
     def setUp(self):
         self.client.cookies.clear()
+        # 登录限流是进程内状态,错误密码的用例会累计计数,每条用例前清零
+        auth_service._reset_login_failures_for_tests()
 
     def login(self, password: str | None = None, extra: str = ""):
         body = f"email={settings.admin_email}&password={password or settings.admin_password}{extra}"
@@ -131,8 +133,79 @@ class AuthHttpTest(unittest.TestCase):
 
         response = self.client.post("/logout", follow_redirects=False)
 
+        self.assertEqual(response.status_code, 403)  # 缺 X-CSRF-Token,先被 CSRF 拒
+        self.assertEqual(response.json()["code"], "CSRF_REJECTED")
+        self.assertEqual(self.client.get("/v1/trackers").status_code, 200)  # 会话还在
+
+        token = self.client.cookies.get("geo_csrf")
+        response = self.client.post("/logout", headers={"X-CSRF-Token": token}, follow_redirects=False)
+
         self.assertEqual(response.status_code, 303)
         self.assertEqual(self.client.get("/v1/trackers").status_code, 401)
+
+    # --- CSRF(003 FR-005,补决策 010 的洞) ---
+    def test_write_without_csrf_token_is_403(self):
+        # SameSite=None 的线上环境里,拿到会话 cookie 的第三方页面发起的写请求
+        # 没有 token 头——必须 403,数据不动
+        self.login()
+        response = self.client.post("/logout", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "CSRF_REJECTED")
+        self.assertEqual(self.client.get("/v1/trackers").status_code, 200)
+
+    def test_write_with_wrong_csrf_token_is_403(self):
+        self.login()
+        response = self.client.post("/logout", headers={"X-CSRF-Token": "forged"}, follow_redirects=False)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_csrf_cookie_is_readable_by_js_and_matches_session(self):
+        # 双提交的前提:geo_csrf 非 HttpOnly(JS 读得到)且与会话 token 一致
+        # 直接看原始 Set-Cookie 头,同时用这次登录的会话比对,不经过 login() 两次
+        response = self.client.post(
+            "/login",
+            content=f"email={settings.admin_email}&password={settings.admin_password}",
+            headers=FORM,
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303)
+        raw = response.headers.get("set-cookie", "")
+        # httpx 会把多个 set-cookie 合并;geo_csrf 那一段不能带 HttpOnly
+        self.assertIn("geo_csrf=", raw)
+        csrf_segment = [seg for seg in raw.split(", ") if seg.startswith("geo_csrf=")]
+        self.assertTrue(csrf_segment, raw)
+        self.assertNotIn("HttpOnly", csrf_segment[0])
+        cookie = self.client.cookies.get("geo_csrf")
+        session = auth_service.get_session(self.client.cookies.get(settings.cookie_name))
+        self.assertEqual(session["csrf_token"], cookie)
+
+    # --- 登录限流(003 FR-006) ---
+    def test_login_rate_limit_locks_after_consecutive_failures(self):
+        for _ in range(settings.login_max_failures):
+            self.login(password="wrong-password")
+        # 锁定期内:正确密码也进不去,重定向带 error=locked
+        response = self.login()
+        self.assertIn("error=locked", response.headers.get("location", ""))
+        # 未登录态保持
+        self.assertEqual(self.client.get("/v1/trackers").status_code, 401)
+
+    def test_login_lockout_expires_and_allows_login(self):
+        old = settings.login_lockout_s
+        object.__setattr__(settings, "login_lockout_s", 1)
+        try:
+            for _ in range(settings.login_max_failures):
+                self.login(password="wrong-password")
+            self.assertIn("error=locked", self.login().headers.get("location", ""))
+            import time as _time
+
+            _time.sleep(1.2)  # 过锁定期
+            response = self.login()
+            self.assertEqual(response.status_code, 303)
+            self.assertNotIn("error", response.headers.get("location", ""))
+            self.assertEqual(self.client.get("/v1/trackers").status_code, 200)
+        finally:
+            object.__setattr__(settings, "login_lockout_s", old)
 
     # --- 安全边界 ---
     def test_open_redirect_is_blocked(self):
