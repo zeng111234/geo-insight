@@ -98,6 +98,7 @@
   .dash-facts b { display: block; font-size: 16px; font-weight: 600; color: var(--text-strong); margin: 2px 0 1px; }
   .dash-cites { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px; }
   @media (max-width: 1180px) { .dash-grid { grid-template-columns: 1fr; } }
+  .tag.kw { color: var(--accent-ink); border-color: var(--accent-weak); background: var(--accent-weak); margin-left: 2px; }
   .sent-table .sentiment { margin-top: 0; }
   .note-line { margin-top: 12px; font-size: 11px; color: var(--muted); }
   .note-line code { font-size: 10.5px; background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }
@@ -238,13 +239,17 @@
     var st = $("objStatus");
     st.textContent = STATUS_TEXT[t.status] || t.status;
     st.className = "tag " + (t.status === "active" ? "ok" : "");
+    // 核心词单独做成 chip：它是"判断跑题"的依据，和行业/地区这类描述性字段不是一回事
+    var kwChips = (t.keywords || []).map(function (k) {
+      return '<span class="tag kw">' + esc(k) + "</span>";
+    }).join("");
     $("objMeta").innerHTML = [
       t.name,
       t.industry,
       t.region,
       "创建于 " + String(t.created_at || "").slice(0, 10),
       qs.total + " 个问题（核心 " + (qs.core || 0) + " / 长尾 " + (qs.long_tail || 0) + "）"
-    ].filter(Boolean).map(esc).map(function (v) { return "<span>" + v + "</span>"; }).join("");
+    ].filter(Boolean).map(esc).map(function (v) { return "<span>" + v + "</span>"; }).join("") + kwChips;
   }
 
   function renderTabs() {
@@ -455,6 +460,7 @@
         '<span class="muted">' + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</span>" +
         (own ? '<span class="tag ok">本品牌 · 第 ' + G.num(own.position) + " 位</span>" : '<span class="tag">未提及</span>') +
         (own && own.sentiment ? '<span class="tag">' + esc(SENTI_TEXT[own.sentiment] || own.sentiment) + "</span>" : "") +
+        (a.off_topic === true ? '<span class="tag warn" title="正文没有任何核心词">疑似跑题</span>' : "") +
         '<span class="spacer"></span><a class="plain" href="/answer/' + esc(a.id) + '">证据详情 →</a></div>' +
         '<div class="text">' + esc((a.text || "").slice(0, 320)) + ((a.text || "").length > 320 ? "…" : "") + "</div>" +
         '<div class="cite">引用 ' + cites + " 条 · 通道 " + esc(a.channel) + "</div></div>";

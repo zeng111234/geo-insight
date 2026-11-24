@@ -8,6 +8,7 @@ lives here, not in the HTTP layer.
 import json
 import sqlite3
 
+from geo.domain import relevance
 from geo.repositories import config_repository as config
 from geo.repositories import sqlite_repository as repo
 from geo.settings import settings
@@ -113,6 +114,8 @@ def tracker_detail(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) ->
     tracker = repo.get_tracker(conn, tracker_id, tenant_id)
     if not tracker:
         return None
+    # 存的是 JSON 字符串，出参统一成数组，前端直接用
+    tracker["keywords"] = relevance.parse_keywords(tracker.get("keywords"))
     tracker["question_summary"] = repo.question_summary(conn, tracker_id)
     profile = config.get_brand_profile(conn, tracker_id, tenant_id) or {}
     tracker["brand"] = {

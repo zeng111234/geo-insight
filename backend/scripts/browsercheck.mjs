@@ -74,6 +74,7 @@ const EXTRA = {
     ["分问题对比条", /<th>问题<\/th>[\s\S]{0,2400}class="cmp-bar"/],
     ["趋势折线", /提及率趋势[\s\S]{0,300}class="spark"[\s\S]{0,300}<path/],
     ["引用概览", /独立域名<\/i>/],
+    ["核心词标签", /class="tag kw"/],
   ],
   "/monitor?tab=answers": [
     ["问题下拉", /id="qSelect"/],

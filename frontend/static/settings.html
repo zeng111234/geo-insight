@@ -67,6 +67,11 @@ if (location.protocol === "file:") {
               <label class="field" style="flex:1"><span>行业</span><input id="industry" type="text" /></label>
               <label class="field" style="flex:1"><span>地区</span><input id="region" type="text" /></label>
             </div>
+            <label class="field"><span>核心词</span>
+              <input id="keywords" type="text" placeholder="逗号分隔，例：律所，刑事辩护，离婚" /></label>
+            <div class="muted" style="font-size:11px;margin:-4px 0 10px">
+              用于判断答案是否跑题：正文一个核心词都没出现时，问答明细里标「疑似跑题」。
+            </div>
             <div class="row">
               <button class="primary" id="saveBrand">保存修改</button>
               <span class="muted" id="saveState"></span>
@@ -248,6 +253,7 @@ function renderDetail(d) {
   $("brandName").value = d.brand.name || "";
   $("industry").value = d.industry || "";
   $("region").value = d.region || "";
+  $("keywords").value = (d.keywords || []).join("，");
   $("statusBadge").textContent = STATUS_TEXT[d.status] || d.status;
   $("scope").textContent = [d.brand.name, d.industry, d.region].filter(Boolean).join(" · ");
 
@@ -344,6 +350,7 @@ $("saveBrand").addEventListener("click", async () => {
     brand_name: $("brandName").value.trim(),
     industry: $("industry").value.trim(),
     region: $("region").value.trim(),
+    keywords: $("keywords").value.trim(),
   };
   if (!body.name || !body.brand_name) { toast("监控名称与品牌名称不能为空", "warn"); return; }
   try {

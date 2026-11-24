@@ -283,6 +283,15 @@ def seed() -> dict:
             (TRACKER, TENANT, BRAND, COMPETITOR_SET, "辽宁辽征 · 律所", "律师事务所", "沈阳", now, now),
         )
         conn.execute(
+            "UPDATE tracker SET keywords = ? WHERE id = ?",
+            (
+                json.dumps(
+                    ["律所", "律师", "刑事辩护", "离婚", "劳动仲裁"], ensure_ascii=False
+                ),
+                TRACKER,
+            ),
+        )
+        conn.execute(
             "INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at) VALUES (?, ?, ?, ?, ?)",
             (QUESTION_SET, TENANT, TRACKER, "律所核心问题", now),
         )
@@ -968,6 +977,13 @@ def seed_alt_tracker(conn) -> dict:
                                status, settings, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', '{}', ?, ?)""",
         (TRACKER2, TENANT, BRAND2, CSET2, "华辰教育 · 教培", "教育培训", "北京", now, now),
+    )
+    conn.execute(
+        "UPDATE tracker SET keywords = ? WHERE id = ?",
+        (
+            json.dumps(["幼儿园", "幼小衔接", "入园", "学前教育"], ensure_ascii=False),
+            TRACKER2,
+        ),
     )
     conn.execute(
         "INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at) VALUES (?, ?, ?, ?, ?)",

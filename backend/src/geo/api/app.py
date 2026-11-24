@@ -27,6 +27,7 @@ from starlette.staticfiles import StaticFiles
 from geo import db
 from geo.api import nav
 from geo.domain import methodology as methodology_module
+from geo.domain import relevance
 from geo.repositories import config_repository as config_repo
 from geo.repositories import report_repository as report_repo
 from geo.repositories import sqlite_repository as repo
@@ -247,6 +248,7 @@ async def list_trackers(request: Request):
         items = repo.list_trackers(conn, _tenant(request))
         for item in items:
             item["question_summary"] = repo.question_summary(conn, item["id"])
+            item["keywords"] = relevance.parse_keywords(item.get("keywords"))
         return JSONResponse({"items": items, "page": {"page": 1, "limit": len(items), "total": len(items)}})
     finally:
         conn.close()
@@ -366,6 +368,7 @@ async def list_answers(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        tracker = repo.get_tracker(conn, tracker_id, _tenant(request))
         items, total = repo.list_answers(
             conn,
             tracker_id,
@@ -377,7 +380,17 @@ async def list_answers(request: Request):
             page,
             limit,
         )
-        return JSONResponse({"items": items, "page": {"page": page, "limit": limit, "total": total}})
+        # 没有核心词时 off_topic 为 None（未判定），不能当成 False
+        keywords = relevance.parse_keywords((tracker or {}).get("keywords"))
+        for item in items:
+            item["off_topic"] = relevance.is_off_topic(item.get("text"), keywords)
+        return JSONResponse(
+            {
+                "items": items,
+                "keywords": keywords,
+                "page": {"page": page, "limit": limit, "total": total},
+            }
+        )
     finally:
         conn.close()
 
@@ -635,6 +648,14 @@ async def tracker_detail(request: Request):
                     return _error(request, "VALIDATION_ERROR", f"{key} must be a string")
             if "name" in payload and not payload["name"].strip():
                 return _error(request, "VALIDATION_ERROR", "name must not be empty")
+            # 核心词：数组或逗号分隔字符串都收，统一去重后存 JSON
+            keywords_json = None
+            if "keywords" in payload:
+                words = relevance.parse_keywords(payload["keywords"])
+                error = relevance.validate_keywords(words)
+                if error:
+                    return _error(request, "VALIDATION_ERROR", error)
+                keywords_json = json.dumps(words, ensure_ascii=False)
             updated = config_repo.update_tracker(
                 conn,
                 tracker_id,
@@ -643,6 +664,7 @@ async def tracker_detail(request: Request):
                 brand_name=payload.get("brand_name"),
                 industry=payload.get("industry"),
                 region=payload.get("region"),
+                keywords=keywords_json,
                 status=None,
                 now=_now(),
             )

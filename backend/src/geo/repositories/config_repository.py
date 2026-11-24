@@ -178,6 +178,7 @@ def update_tracker(
     brand_name: str | None,
     industry: str | None,
     region: str | None,
+    keywords: str | None,
     status: str | None,
     now: str,
 ) -> dict | None:
@@ -188,7 +189,13 @@ def update_tracker(
         return None
 
     fields, params = [], []
-    for column, value in (("name", name), ("industry", industry), ("region", region), ("status", status)):
+    for column, value in (
+        ("name", name),
+        ("industry", industry),
+        ("region", region),
+        ("keywords", keywords),
+        ("status", status),
+    ):
         if value is not None:
             fields.append(f"{column} = ?")
             params.append(value)
