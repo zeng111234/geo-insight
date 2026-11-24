@@ -58,6 +58,33 @@
   .answer .text { font-size: 12.5px; line-height: 1.7; color: var(--text-body); white-space: pre-wrap; }
   .answer .cite { font-size: 11px; color: var(--muted); margin-top: 7px; }
   .todo { padding: 22px 16px; }
+
+  /* 问答明细：左回答、右引用。窄屏堆成上下，引用不至于挤成一条 */
+  .ans-split { display: grid; grid-template-columns: minmax(0, 1fr) 318px; flex: 1 1 auto; min-height: 0; }
+  .ans-main { overflow-y: auto; min-height: 0; }
+  .ans-cite { border-left: 1px solid var(--border); overflow-y: auto; min-height: 0; }
+  .ans-cite .hd { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--muted); }
+  .cite-item { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
+  .cite-item .top { display: flex; gap: 5px; align-items: baseline; margin-bottom: 3px; }
+  .cite-item .idx { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cite-item a { color: var(--accent-ink); text-decoration: none; word-break: break-all; }
+  .cite-item a:hover { text-decoration: underline; }
+  .cite-item .sub { color: var(--muted); font-size: 10.5px; }
+  .answer.sel { background: var(--accent-weak); }
+  @media (max-width: 1280px) { .ans-split { grid-template-columns: 1fr; } .ans-cite { border-left: none; border-top: 1px solid var(--border); } }
+
+  /* 指标明细 / 趋势 / 信源 共用 */
+  .tab-pad { padding: 12px 14px; }
+  .metric-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .metric-bar button { font-size: 11.5px; padding: 4px 10px; border-radius: 999px; }
+  .metric-bar button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .rule { font-size: 11px; color: var(--muted); margin: 9px 0 10px; line-height: 1.6; }
+  .bars { display: grid; gap: 6px; }
+  .bar-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) 62px; gap: 9px; align-items: center; font-size: 11.5px; }
+  .bar-row .track { height: 7px; background: var(--subtle); border-radius: 999px; overflow: hidden; }
+  .bar-row .fill { display: block; height: 100%; background: var(--accent); }
+  .bar-row .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .spark { width: 100%; height: 168px; display: block; }
 </style>
 </head>
 <body>
@@ -128,7 +155,9 @@
     questionId: "",
     answers: [],
     answerTotal: 0,
-    answerPages: 1
+    answerPages: 1,
+    selectedAnswer: "",
+    metric: "mention_rate"
   };
 
   var STATUS_TEXT = { active: "监控中", draft: "草稿", paused: "已暂停", archived: "已归档" };
@@ -264,13 +293,41 @@
     box.innerHTML = '<div class="ans-toolbar"><span class="muted">监控问题</span>' +
       '<select id="qSelect" aria-label="监控问题">' + (opts || '<option value="">没有问题</option>') + "</select>" +
       '<span class="spacer"></span><span class="muted" id="ansMeta">—</span></div>' +
-      '<div id="ansList"><div class="empty">加载中…</div></div>';
+      '<div class="ans-split">' +
+        '<div class="ans-main" id="ansList"><div class="empty">加载中…</div></div>' +
+        '<div class="ans-cite" id="ansCite"><div class="empty" style="padding:14px 0">选一条回答看它的引用</div></div>' +
+      "</div>";
     $("qSelect").addEventListener("change", function () {
       state.questionId = this.value;
+      state.selectedAnswer = "";
       G.pagerReset("mon-answers");
       loadAnswerPage();
     });
     await loadAnswerPage();
+  }
+
+  var TYPE_TEXT = {
+    news: "新闻", video: "视频", database: "数据库", forum: "论坛",
+    wiki: "百科", wechat: "公众号", blog: "博客"
+  };
+
+  // 右栏只显示当前选中那条回答的引用。一条回答的引用本来就是它自己的证据，
+  // 混在一起看反而分不清哪条引用支撑哪条回答。
+  function renderCitations(a) {
+    var box = $("ansCite");
+    if (!box) return;
+    if (!a) { box.innerHTML = '<div class="empty" style="padding:14px 0">选一条回答看它的引用</div>'; return; }
+    var cites = a.citations || [];
+    var head = '<div class="hd">引用信源 · ' + cites.length + " 条</div>";
+    if (!cites.length) { box.innerHTML = head + G.empty("这条回答没有给出引用"); return; }
+    box.innerHTML = head + cites.map(function (c, i) {
+      var when = c.published_at_unknown ? "发布时间未知" : String(c.published_at || "").slice(0, 10);
+      return '<div class="cite-item">' +
+        '<div class="top"><span class="idx">' + (i + 1) + ".</span>" +
+        '<a href="' + esc(c.url) + '" target="_blank" rel="noopener">' + esc(c.media_name || c.domain) + "</a></div>" +
+        '<div class="sub">' + esc(c.domain) + " · " + esc(TYPE_TEXT[c.media_type] || c.media_type) +
+        " · " + esc(when) + "</div></div>";
+    }).join("");
   }
 
   var PAGE_SIZE = 10;
@@ -294,11 +351,19 @@
     var meta = $("ansMeta");
     if (meta) meta.textContent = total + " 条答案";
 
-    if (!state.answers.length) { listBox.innerHTML = G.empty("该问题在当前周期没有有效答案"); return; }
+    if (!state.answers.length) {
+      listBox.innerHTML = G.empty("该问题在当前周期没有有效答案");
+      renderCitations(null);
+      return;
+    }
+    if (!state.selectedAnswer || !state.answers.some(function (a) { return a.id === state.selectedAnswer; })) {
+      state.selectedAnswer = state.answers[0].id;
+    }
     listBox.innerHTML = state.answers.map(function (a) {
       var own = (a.mentions || []).filter(function (m) { return m.subject_type === "own"; })[0];
       var cites = (a.citations || []).length;
-      return '<div class="answer"><div class="head">' +
+      return '<div class="answer' + (a.id === state.selectedAnswer ? " sel" : "") +
+        '" data-answer="' + esc(a.id) + '"><div class="head">' +
         '<span class="tag">' + esc(a.model_key) + "</span>" +
         '<span class="muted">' + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</span>" +
         (own ? '<span class="tag ok">本品牌 · 第 ' + G.num(own.position) + " 位</span>" : '<span class="tag">未提及</span>') +
@@ -307,15 +372,165 @@
         '<div class="text">' + esc((a.text || "").slice(0, 320)) + ((a.text || "").length > 320 ? "…" : "") + "</div>" +
         '<div class="cite">引用 ' + cites + " 条 · 通道 " + esc(a.channel) + "</div></div>";
     }).join("") + G.pagerNav("mon-answers", st.page, pages, total);
+
+    renderCitations(state.answers.filter(function (a) { return a.id === state.selectedAnswer; })[0]);
+  }
+
+  // ---- 指标明细：看「谁进了分母」----
+  var METRIC_TABS = [
+    ["mention_rate", "提及率"],
+    ["mention_count", "提及数"],
+    ["avg_rank", "平均排名"],
+    ["top3_rate", "Top3 占比"],
+    ["sentiment", "情感分布"]
+  ];
+
+  function metricValueText(d) {
+    if (d.status === "insufficient_samples") return "样本不足";
+    if (d.metric === "sentiment" && d.distribution) {
+      var x = d.distribution;
+      return "正 " + fmtPct(x.pos) + " · 中 " + fmtPct(x.neu) + " · 负 " + fmtPct(x.neg);
+    }
+    if (d.metric === "mention_count") return G.num(d.value);
+    if (d.metric === "avg_rank") return fmtNum(d.value);
+    return fmtPct(d.value);
+  }
+
+  async function renderMetricsTab() {
+    if (!state.metric) state.metric = "mention_rate";
+    var d = await G.get("/trackers/" + state.trackerId + "/metrics/" + state.metric + "/samples?" + G.dates());
+    var items = d.items || [];
+    $("tabBody").innerHTML = '<div class="tab-pad"><div class="metric-bar">' +
+      METRIC_TABS.map(function (m) {
+        return '<button type="button" data-metric="' + m[0] + '"' +
+          (m[0] === state.metric ? ' class="on"' : "") + ">" + esc(m[1]) + "</button>";
+      }).join("") + "</div>" +
+      '<div class="rule">' + esc(d.rule) + "<br />当前值 " + esc(metricValueText(d)) +
+      " · 分母 " + G.num(d.sample_base) + " 条 · 下方 " + items.length +
+      " 行样本（含未进分母的，靠「进分母」列区分）</div>" +
+      '<div class="table-wrap" id="metricTable"></div></div>';
+    renderMetricRows(items);
+  }
+
+  function renderMetricRows(all) {
+    var box = $("metricTable");
+    if (!box) return;
+    if (!all.length) { box.innerHTML = G.empty("该周期没有样本"); return; }
+    var st = G.pagerSlice("mon-samples", all, function () { renderMetricRows(all); }, 12);
+    box.innerHTML = "<table><thead><tr><th>问题</th><th>模型</th><th>采集时间</th>" +
+      '<th class="num">进分母</th><th>提及</th><th class="num">位次</th><th>情感</th></tr></thead><tbody>' +
+      st.slice.map(function (r) {
+        return "<tr><td>" + esc(r.question_text) + "</td><td>" + esc(r.model_key) + "</td>" +
+          "<td>" + esc(String(r.collected_at).slice(0, 16).replace("T", " ")) + "</td>" +
+          '<td class="num">' + (r.in_denominator ? "✓" : "—") + "</td>" +
+          "<td>" + (r.mentioned ? '<span class="tag ok">提及</span>' : '<span class="tag">未提及</span>') + "</td>" +
+          '<td class="num">' + G.num(r.position) + "</td>" +
+          "<td>" + esc(SENTI_TEXT[r.sentiment] || "—") + "</td></tr>";
+      }).join("") + "</tbody></table>" + st.nav;
+  }
+
+  // ---- 趋势分析：折线用 SVG，缺数据的点直接跳过，不在缺口处插值 ----
+  function trendSvg(points) {
+    var W = 620, H = 150, pad = 10;
+    var vals = points.map(function (p) { return p.mention_rate; })
+      .filter(function (v) { return v !== null && v !== undefined; });
+    var max = vals.length ? Math.max.apply(null, vals) : 1;
+    if (max <= 0) max = 1;
+    var step = points.length > 1 ? (W - pad * 2) / (points.length - 1) : 0;
+    var d = "", started = false;
+    points.forEach(function (p, i) {
+      if (p.mention_rate === null || p.mention_rate === undefined) { started = false; return; }
+      var x = pad + i * step;
+      var y = H - pad - (p.mention_rate / max) * (H - pad * 2);
+      d += (started ? " L" : " M") + x.toFixed(1) + " " + y.toFixed(1);
+      started = true;
+    });
+    return '<svg class="spark" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" role="img">' +
+      '<line x1="' + pad + '" y1="' + (H - pad) + '" x2="' + (W - pad) + '" y2="' + (H - pad) +
+        '" stroke="var(--border)" stroke-width="1" />' +
+      '<path d="' + d + '" fill="none" stroke="var(--accent)" stroke-width="2" ' +
+        'stroke-linejoin="round" stroke-linecap="round" /></svg>';
+  }
+
+  async function renderTrendTab() {
+    var d = await G.get("/trackers/" + state.trackerId + "/metrics/trend?" + G.dates());
+    var pts = d.points || [];
+    if (!pts.length) { $("tabBody").innerHTML = G.empty("该周期没有按日数据"); return; }
+    $("tabBody").innerHTML = '<div class="tab-pad">' +
+      '<div class="rule">粒度 ' + esc(d.granularity === "day" ? "按日" : d.granularity) +
+      " · " + pts.length + " 个数据点 · 折线为提及率，缺数据的日子直接断开不插值" +
+      (d.model_changes && d.model_changes.length ? " · 周期内模型集合有变更" : "") + "</div>" +
+      trendSvg(pts) + '<div class="table-wrap" id="trendTable"></div></div>';
+    renderTrendRows(pts);
+  }
+
+  function renderTrendRows(all) {
+    var box = $("trendTable");
+    if (!box) return;
+    var st = G.pagerSlice("mon-trend", all, function () { renderTrendRows(all); }, 12);
+    box.innerHTML = "<table><thead><tr><th>日期</th>" +
+      '<th class="num">有效样本</th><th class="num">提及数</th>' +
+      '<th class="num">提及率</th><th class="num">平均排名</th></tr></thead><tbody>' +
+      st.slice.map(function (p) {
+        return "<tr><td>" + esc(p.date) + "</td>" +
+          '<td class="num">' + G.num(p.valid_total) + "</td>" +
+          '<td class="num">' + G.num(p.mention_total) + "</td>" +
+          '<td class="num">' + fmtPct(p.mention_rate) + "</td>" +
+          '<td class="num">' + fmtNum(p.avg_rank) + "</td></tr>";
+      }).join("") + "</tbody></table>" + st.nav;
+  }
+
+  // ---- 信源分析：总量 → 类型分布 → 媒体排行 → URL 去重明细 ----
+  async function renderSourcesTab() {
+    var box = $("tabBody");
+    var s = await G.get("/trackers/" + state.trackerId + "/citations/summary?" + G.dates());
+    var st = G.pagerInit("mon-cites", renderSourcesTab);
+    var d = await G.get("/trackers/" + state.trackerId + "/citations?" + G.dates() +
+      "&limit=10&page=" + st.page);
+    var total = (d.page && d.page.total) || 0;
+    var pages = Math.max(1, Math.ceil(total / 10));
+    if (st.page > pages) { st.page = pages; return renderSourcesTab(); }
+
+    var kpi = function (label, text, sub) {
+      return '<div class="kpi"><div class="k">' + esc(label) + '</div><div class="v small">' +
+        esc(text) + '</div><div class="s">' + esc(sub) + "</div></div>";
+    };
+    var bars = function (rows, nameKey, countKey, labelFn) {
+      var max = rows.reduce(function (m, r) { return Math.max(m, r[countKey]); }, 1);
+      return '<div class="bars">' + rows.map(function (r) {
+        var label = labelFn ? labelFn(r[nameKey]) : r[nameKey];
+        return '<div class="bar-row"><span>' + esc(label) + "</span>" +
+          '<span class="track"><span class="fill" style="width:' +
+          ((r[countKey] / max) * 100).toFixed(1) + '%"></span></span>' +
+          '<span class="val">' + G.num(r[countKey]) + "</span></div>";
+      }).join("") + "</div>";
+    };
+
+    box.innerHTML = '<div class="tab-pad">' +
+      '<div class="kpis" style="padding:0 0 12px">' +
+        kpi("引用总数", G.num(s.total_citations), "全部答案的引用条数") +
+        kpi("独立域名", G.num(s.unique_domains), "去重后的站点数") +
+        kpi("独立 URL", G.num(s.unique_urls), "去重后的页面数") +
+        kpi("视频占比", fmtPct(s.video_share), "发布时间未知 " + fmtPct(s.unknown_published_share)) +
+      "</div>" +
+      '<div class="rule">媒体类型分布</div>' + bars(s.by_type, "media_type", "count", function (v) { return TYPE_TEXT[v] || v; }) +
+      '<div class="rule" style="margin-top:14px">媒体排行（按引用次数）</div>' +
+      bars(s.top_media, "media_name", "count") +
+      '<div class="rule" style="margin-top:14px">URL 明细（按出现次数去重，共 ' + G.num(total) + " 个）</div>" +
+      '<div class="table-wrap"><table><thead><tr><th>页面</th><th>媒体</th><th>类型</th>' +
+      '<th class="num">出现次数</th><th>首次出现</th></tr></thead><tbody>' +
+      (d.items || []).map(function (c) {
+        return "<tr><td>" + esc((c.url || "").slice(0, 76)) + "</td><td>" + esc(c.media_name || "—") + "</td>" +
+          "<td>" + esc(TYPE_TEXT[c.media_type] || c.media_type) + "</td>" +
+          '<td class="num">' + G.num(c.times) + "</td><td>" + esc(c.first_seen || "—") + "</td></tr>";
+      }).join("") + "</tbody></table></div>" +
+      G.pagerNav("mon-cites", st.page, pages, total) + "</div>";
   }
 
   // 还没接数据的 tab：写清缺什么，不画假图。
   var TODO_TEXT = {
-    metrics: ["指标明细", "逐条指标的构成样本（分母里到底有哪几条）。接口已有 /metrics/{metric}/samples，本批未接。"],
-    trend: ["趋势分析", "按日趋势与环比。接口已有 /metrics/trend，本批未接。"],
     competitors: ["竞品排名", "竞品在答案里的出现次数与平均位次。需要新增按 competitor 聚合的接口。"],
-    sources: ["信源分析", "引用域名排行与被引页面。接口已有 /citations/summary，本批未接。"],
-    sentiment: ["情感倾向", "按模型拆分的情感分布。总量已有，拆分要补聚合。"],
+    sentiment: ["情感倾向", "按模型拆分的情感分布。总量已在指标看板与指标明细里，拆分要补聚合。"],
     competitorStats: ["竞品统计", "竞品共现矩阵。需要新增聚合接口。"],
     media: ["视频/图文引用", "按 media_type 过滤的引用列表。字段已有值，本批未接。"],
     health: ["采集健康", "计划应采 / 实际已采 / 缺口。目前只有导入通道，没有采集调度，只能展示差额。"]
@@ -329,7 +544,10 @@
 
   var RENDER = {
     dashboard: renderDashboard,
-    answers: renderAnswers
+    answers: renderAnswers,
+    metrics: renderMetricsTab,
+    trend: renderTrendTab,
+    sources: renderSourcesTab
   };
 
   async function renderTab() {
@@ -351,6 +569,26 @@
     syncUrl(true);
     renderTabs();
     renderTab();
+  });
+
+  // 问答明细点一条回答，右栏换成它的引用；指标明细切指标。
+  // 委托在 tabBody 上：tab 内容每次整体重建，逐个绑定会漏掉重建后的节点。
+  $("tabBody").addEventListener("click", function (e) {
+    var ans = e.target.closest("[data-answer]");
+    if (ans) {
+      state.selectedAnswer = ans.dataset.answer;
+      Array.prototype.forEach.call(document.querySelectorAll("#ansList [data-answer]"), function (el) {
+        el.classList.toggle("sel", el === ans);
+      });
+      renderCitations(state.answers.filter(function (a) { return a.id === state.selectedAnswer; })[0]);
+      return;
+    }
+    var mb = e.target.closest("[data-metric]");
+    if (mb && state.tab === "metrics") {
+      state.metric = mb.dataset.metric;
+      G.pagerReset("mon-samples");
+      renderTab();
+    }
   });
 
   $("trackerList").addEventListener("click", function (e) {

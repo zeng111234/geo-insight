@@ -50,7 +50,8 @@ try {
 
 const PAGES = [
   "/", "/settings", "/reports", "/report/" + reportId, "/answer/" + answerId, "/studio",
-  "/monitor", "/monitor?tab=answers",
+  "/monitor", "/monitor?tab=answers", "/monitor?tab=metrics",
+  "/monitor?tab=trend", "/monitor?tab=sources",
   "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources"
 ];
 
@@ -70,7 +71,21 @@ const EXTRA = {
   ],
   "/monitor?tab=answers": [
     ["问题下拉", /id="qSelect"/],
+    ["引用信源栏", /id="ansCite"[\s\S]{0,400}cite-item/],
     ["明细翻页条", /class="pager"/],
+  ],
+  "/monitor?tab=metrics": [
+    ["指标切换按钮", /class="metric-bar"[\s\S]{0,400}data-metric="avg_rank"/],
+    ["样本表", /id="metricTable"[^>]*>[\s\S]{0,300}<table/],
+    ["明细翻页条", /class="pager"/],
+  ],
+  "/monitor?tab=trend": [
+    ["趋势折线", /class="spark"[\s\S]{0,200}<path/],
+    ["每日摘要表", /id="trendTable"[^>]*>[\s\S]{0,300}<table/],
+  ],
+  "/monitor?tab=sources": [
+    ["类型分布条", /class="bar-row"[\s\S]{0,200}class="fill"/],
+    ["URL 明细表", /<th>页面<\/th>/],
   ],
   "/insight": [
     ["结论列表", /<ul class="concl">/],
