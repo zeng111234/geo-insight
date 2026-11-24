@@ -4,6 +4,7 @@
 版本表、checksum、老库认领这些边界才是迁移链存在的理由。
 """
 
+import importlib.util
 import sqlite3
 import tempfile
 import unittest
@@ -178,6 +179,87 @@ class ShippedMigrationsTest(unittest.TestCase):
     def test_real_chain_is_idempotent(self):
         migrate.apply(self.conn)
         self.assertEqual(migrate.apply(self.conn), [])
+
+
+class ImportBatchRebuildTest(unittest.TestCase):
+    """004 重建 import_batch：SQLite 改 CHECK 只能重建表，三件事都不能丢。
+
+    数据（批次历史）、外键（answer 还指着它）、可重跑（重建不重复执行）。
+    """
+
+    OLD_DEFINITION = """
+        CREATE TABLE import_batch (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            tracker_id TEXT,
+            source_name TEXT NOT NULL,
+            source_format TEXT NOT NULL CHECK (source_format IN ('csv', 'jsonl')),
+            status TEXT NOT NULL DEFAULT 'running'
+                CHECK (status IN ('running', 'completed', 'failed')),
+            row_total INTEGER NOT NULL DEFAULT 0,
+            row_inserted INTEGER NOT NULL DEFAULT 0,
+            row_skipped INTEGER NOT NULL DEFAULT 0,
+            row_failed INTEGER NOT NULL DEFAULT 0,
+            report_uri TEXT,
+            error TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT
+        );
+        CREATE TABLE answer (id TEXT PRIMARY KEY, import_batch_id TEXT REFERENCES import_batch(id));
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.conn = sqlite3.connect(Path(self._tmp.name) / "t.db")
+        self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys = ON")
+        self.addCleanup(self.conn.close)
+
+    def migration(self):
+        path = Path(__file__).resolve().parents[2] / "migrations" / "004_import_batch_rollback.py"
+        spec = importlib.util.spec_from_file_location("m004", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def prepare(self):
+        self.conn.executescript(self.OLD_DEFINITION)
+        self.conn.execute(
+            """INSERT INTO import_batch(id, tenant_id, source_name, source_format, started_at, status, row_inserted)
+               VALUES ('b1', 't1', 'f.csv', 'csv', '2026-11-24T10:00:00+08:00', 'completed', 7)"""
+        )
+        self.conn.execute("INSERT INTO answer(id, import_batch_id) VALUES ('a1', 'b1')")
+        self.conn.commit()
+
+    def test_rebuild_keeps_rows_and_allows_rolled_back(self):
+        self.prepare()
+        self.migration().apply(self.conn)
+
+        row = self.conn.execute("SELECT * FROM import_batch").fetchone()
+        self.assertEqual(row["row_inserted"], 7)
+        self.assertEqual(row["source_name"], "f.csv")
+        # 新约束生效
+        self.conn.execute("UPDATE import_batch SET status = 'rolled_back' WHERE id = 'b1'")
+        self.conn.commit()
+
+    def test_rebuild_keeps_foreign_key_enforced(self):
+        self.prepare()
+        self.migration().apply(self.conn)
+
+        # 迁移结束必须把 foreign_keys 打开，否则后续写入全部失去保护
+        self.assertEqual(self.conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("INSERT INTO answer(id, import_batch_id) VALUES ('a2', 'no-such-batch')")
+
+    def test_rebuild_is_rerunnable(self):
+        self.prepare()
+        module = self.migration()
+        module.apply(self.conn)
+        module.apply(self.conn)
+
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM import_batch").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM answer").fetchone()[0], 1)
 
 
 if __name__ == "__main__":

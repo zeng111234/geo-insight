@@ -265,5 +265,134 @@ class ImportTest(unittest.TestCase):
             self.run_import(path)
 
 
+class RollbackTest(unittest.TestCase):
+    """整批撤销。真正要保住的性质是：撤完能重导，且不误伤别人。"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.conn = build_minimal_db(self.root / "geo.db")
+        self.addCleanup(self.conn.close)
+
+    def write(self, name: str, text: str) -> Path:
+        path = self.root / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def run_import(self, path, **kwargs):
+        kwargs.setdefault("tenant_id", TENANT)
+        kwargs.setdefault("report_dir", self.root / "reports")
+        kwargs.setdefault("now", NOW)
+        return import_service.import_file(self.conn, path=path, **kwargs)
+
+    def rollback(self, batch_id, **kwargs):
+        kwargs.setdefault("tenant_id", TENANT)
+        kwargs.setdefault("now", NOW)
+        return import_service.rollback_batch(self.conn, batch_id, **kwargs)
+
+    def counts(self) -> tuple[int, int, int]:
+        return tuple(
+            self.conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("answer", "mention", "citation")
+        )
+
+    def rich_file(self, name: str = "rich.jsonl", time: str = "2026-11-20 09:00:00") -> Path:
+        line = json.dumps(
+            {
+                "question": QUESTION_TEXT,
+                "answer": f"带提及和引用的答案 {time}",
+                "model": "doubao",
+                "collected_at": time,
+                "mentions": [
+                    {"brand": "辽宁辽征律师事务所", "sentiment": "pos", "position": 2},
+                    {"brand": "北京盈科（沈阳）律师事务所", "sentiment": "neg", "position": 3},
+                ],
+                "citations": [{"url": "https://example-news.com/a/1", "media_type": "news"}],
+            },
+            ensure_ascii=False,
+        )
+        return self.write(name, line + "\n")
+
+    def test_rollback_removes_everything_the_batch_wrote(self):
+        path = self.rich_file()
+        report = self.run_import(path)
+        self.assertEqual(self.counts(), (1, 2, 1))
+
+        result = self.rollback(report.batch_id)
+
+        self.assertEqual(result["status"], "rolled_back")
+        self.assertEqual((result["answers"], result["mentions"], result["citations"]), (1, 2, 1))
+        self.assertEqual(self.counts(), (0, 0, 0))
+        status = self.conn.execute(
+            "SELECT status FROM import_batch WHERE id = ?", (report.batch_id,)
+        ).fetchone()[0]
+        self.assertEqual(status, "rolled_back")
+
+    def test_reimport_after_rollback_is_not_a_duplicate(self):
+        """撤销的唯一目的就是这个：改完再导一次，不能被判成重复。"""
+        path = self.rich_file()
+        first = self.run_import(path)
+        self.assertEqual(first.inserted, 1)
+
+        self.rollback(first.batch_id)
+        second = self.run_import(path)
+
+        self.assertEqual((second.inserted, second.skipped), (1, 0))
+        self.assertEqual(self.counts(), (1, 2, 1))
+
+    def test_rollback_twice_is_idempotent(self):
+        report = self.run_import(self.rich_file())
+        self.rollback(report.batch_id)
+
+        again = self.rollback(report.batch_id)
+
+        self.assertTrue(again["already_rolled_back"])
+        self.assertEqual(again["answers"], 0)
+        self.assertEqual(self.counts(), (0, 0, 0))
+
+    def test_rollback_only_touches_its_own_batch(self):
+        batch_a = self.run_import(self.rich_file("a.jsonl", "2026-11-20 09:00:00"))
+        batch_b = self.run_import(self.rich_file("b.jsonl", "2026-11-20 10:00:00"))
+        self.assertEqual(self.counts(), (2, 4, 2))
+
+        self.rollback(batch_a.batch_id)
+
+        self.assertEqual(self.counts(), (1, 2, 1))
+        remaining = self.conn.execute("SELECT import_batch_id FROM answer").fetchone()[0]
+        self.assertEqual(remaining, batch_b.batch_id)
+
+    def test_rollback_dry_run_changes_nothing(self):
+        report = self.run_import(self.rich_file())
+
+        result = self.rollback(report.batch_id, dry_run=True)
+
+        self.assertTrue(result["dry_run"])
+        self.assertEqual((result["answers"], result["mentions"], result["citations"]), (1, 2, 1))
+        self.assertEqual(self.counts(), (1, 2, 1))
+        status = self.conn.execute(
+            "SELECT status FROM import_batch WHERE id = ?", (report.batch_id,)
+        ).fetchone()[0]
+        self.assertEqual(status, "completed")
+
+    def test_rollback_keeps_subject_registry(self):
+        """竞品的 brand 行是主体注册，可能被别的批次引用，不能跟着批次删。"""
+        report = self.run_import(self.rich_file())
+        brand_count = self.conn.execute("SELECT COUNT(*) FROM brand").fetchone()[0]
+        self.assertEqual(brand_count, 2)  # 本方 + 导入时建的竞品
+
+        self.rollback(report.batch_id)
+
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM brand").fetchone()[0], 2)
+
+    def test_unknown_batch_and_wrong_tenant_raise(self):
+        with self.assertRaises(import_service.ImportFailure):
+            self.rollback("no-such-batch")
+
+        report = self.run_import(self.rich_file())
+        with self.assertRaises(import_service.ImportFailure):
+            self.rollback(report.batch_id, tenant_id="00000000-0000-0000-0000-0000000000ff")
+
+
 if __name__ == "__main__":
     unittest.main()

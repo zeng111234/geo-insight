@@ -77,6 +77,24 @@ python scripts/import_answers.py --file data/import-sample.jsonl --create-questi
   报告里有行号、字段、错误码、原始行。要严格模式就用 `--on-error abort`，整批不落库。
 - 退出码：0 全部成功、2 有失败行但其余已入库、1 无法开始，可直接接进脚本。
 
+**撤销一次导入**
+
+同一条观测入库后，靠重新导入是改不动的（会被判成重复）。标错了提及、导错了文件，
+唯一出路是整批撤回再重导：
+
+```bash
+cd backend
+python scripts/import_answers.py --list-batches                  # 找批次 id
+python scripts/import_answers.py --delete-batch <id> --dry-run   # 先看会删多少
+python scripts/import_answers.py --delete-batch <id>             # 真回滚
+```
+
+- 级联删掉这批写入的 answer 及其 mention / citation / answer_block，批次状态置为 `rolled_back`。
+- **只动自己这一批**，别的批次和演示数据不受影响。
+- 重复回滚是幂等的，不会报错，也不会再删东西。
+- **竞品的 `brand` 行不跟着删**：那是「主体注册」，可能被别的批次的提及引用，跟着删会让别人的提及失去主语。
+- 回滚后可以重新导入同一份文件，此时会正常新增而不是判重复。
+
 **② 采集器（接口已就位，等平台权限）**
 
 `collectors/` 定义 `Collector` 协议（`available / supports / collect`），注册表显式登记，不做目录扫描。
@@ -144,14 +162,14 @@ curl "$B/articles/55555555-5555-5555-5555-555555555551/impact"
 
 ```bash
 cd backend
-python -m unittest discover -s tests -t . -p "test_*.py" -v   # 74 条
+python -m unittest discover -s tests -t . -p "test_*.py" -v   # 84 条
 python scripts/smoke.py                                        # 80 条真实 HTTP 断言（自动选空闲端口）
 node scripts/pagecheck.mjs                                    # 77 条页面字段契约 + 侧栏结构 + 样式契约（需服务在跑）
 node scripts/browsercheck.mjs                                 # 32 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 ```
 
-合计 285 条，全部通过。
+合计 295 条，全部通过。
 
 `smoke.py` 自建临时库、在**自动挑选的空闲端口**启动 uvicorn、逐个请求断言后关闭进程，不碰演示数据，也不会误连到正在运行的开发服务（显式指定 `GEO_SMOKE_PORT` 且端口被占用时直接报错）。
 
@@ -206,6 +224,4 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
 - **鉴权与租户隔离**：首版租户由默认配置派生，不能给外部用户直接使用
 - 渠道真实登录与发帖（002 T019/T020）；按周聚合；片段级情感聚合；合规命中审计落库
 - 契约 fuzz（Schemathesis）、交互 E2E（表单提交等完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖，但**其余交互（表单提交、下钻抽屉、打印）仍未模拟用户操作**
-- **导入后的修正**：同一条观测被导入后不能靠重新导入覆盖提及/引用（会被判为重复），
-  目前要先手工删行再导入；按批次回滚（`--delete-batch`）还没做
 - **AI 成稿与积分**：按决策 003 整体取消，不是待办

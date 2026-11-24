@@ -611,6 +611,77 @@ def _parse_row(
     )
 
 
+def rollback_batch(
+    conn: sqlite3.Connection,
+    batch_id: str,
+    *,
+    tenant_id: str | None = None,
+    dry_run: bool = False,
+    now: str | None = None,
+) -> dict:
+    """撤销一次导入：删掉这批写入的 answer 及其提及/引用/分块。
+
+    为什么需要它：同一条观测一旦入库，靠重新导入是改不动的（会被 row_hash 判为重复）。
+    标错了提及、导错了文件，唯一的出路就是整批撤回再重导。
+
+    刻意不动的东西：brand 行。竞品的 brand 行是"主体注册"，可能被别的批次的提及引用，
+    跟着批次删会让别人的提及失去主语。
+
+    已回滚过的批次再回滚：不做任何事，返回 ``already_rolled_back``。
+    这是幂等而不是报错——脚本重跑不该因为"已经撤过了"就红。
+    """
+    tenant = tenant_id or settings.default_tenant_id
+    stamp = now or datetime.now().astimezone().isoformat(timespec="seconds")
+
+    batch = repo.batch_by_id(conn, batch_id)
+    if not batch:
+        raise ImportFailure(f"没有这个导入批次：{batch_id}")
+    if batch["tenant_id"] != tenant:
+        raise ImportFailure(f"批次 {batch_id} 不属于当前租户")
+
+    counts = repo.batch_data_counts(conn, batch_id)
+    if batch["status"] == "rolled_back":
+        return {
+            "batch_id": batch_id,
+            "source_name": batch["source_name"],
+            "previous_status": batch["status"],
+            "status": "rolled_back",
+            "dry_run": dry_run,
+            "already_rolled_back": True,
+            "answers": 0,
+            "mentions": 0,
+            "citations": 0,
+            "blocks": 0,
+            "message": "该批次此前已回滚，本次未做任何改动",
+        }
+
+    if dry_run:
+        return {
+            "batch_id": batch_id,
+            "source_name": batch["source_name"],
+            "previous_status": batch["status"],
+            "status": batch["status"],
+            "dry_run": True,
+            "already_rolled_back": False,
+            **counts,
+            "message": f"演练：将删除 {counts['answers']} 条答案及其提及/引用，未写入任何改动",
+        }
+
+    deleted = repo.delete_batch_data(conn, batch_id)
+    repo.mark_batch_rolled_back(conn, batch_id, stamp)
+    conn.commit()
+    return {
+        "batch_id": batch_id,
+        "source_name": batch["source_name"],
+        "previous_status": batch["status"],
+        "status": "rolled_back",
+        "dry_run": False,
+        "already_rolled_back": False,
+        **deleted,
+        "message": f"已回滚 {deleted['answers']} 条答案、{deleted['mentions']} 条提及、{deleted['citations']} 条引用",
+    }
+
+
 # ---------------------------------------------------------------- 报告
 
 

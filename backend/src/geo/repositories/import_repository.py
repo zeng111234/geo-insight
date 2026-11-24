@@ -179,6 +179,73 @@ def row_hash_exists(conn: sqlite3.Connection, row_hash: str) -> bool:
     )
 
 
+def batch_by_id(conn: sqlite3.Connection, batch_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM import_batch WHERE id = ?", (batch_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_batches(conn: sqlite3.Connection, tenant_id: str, limit: int = 20) -> list[dict]:
+    rows = conn.execute(
+        """SELECT id, source_name, source_format, status, row_total, row_inserted,
+                  row_skipped, row_failed, started_at
+           FROM import_batch WHERE tenant_id = ?
+           ORDER BY started_at DESC, rowid DESC LIMIT ?""",
+        (tenant_id, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def batch_data_counts(conn: sqlite3.Connection, batch_id: str) -> dict:
+    """不删除，只数——dry-run 用。"""
+
+    def count(sql: str) -> int:
+        return int(conn.execute(sql, (batch_id,)).fetchone()[0])
+
+    return {
+        "answers": count("SELECT COUNT(*) FROM answer WHERE import_batch_id = ?"),
+        "mentions": count(
+            "SELECT COUNT(*) FROM mention WHERE answer_id IN "
+            "(SELECT id FROM answer WHERE import_batch_id = ?)"
+        ),
+        "citations": count(
+            "SELECT COUNT(*) FROM citation WHERE answer_id IN "
+            "(SELECT id FROM answer WHERE import_batch_id = ?)"
+        ),
+        "blocks": count(
+            "SELECT COUNT(*) FROM answer_block WHERE answer_id IN "
+            "(SELECT id FROM answer WHERE import_batch_id = ?)"
+        ),
+    }
+
+
+def delete_batch_data(conn: sqlite3.Connection, batch_id: str) -> dict:
+    """按 answer 往下级联删干净。
+
+    顺序不能反：citation / mention / answer_block 都是 answer 的子表，
+    先删子再删父，否则外键会拦。
+
+    刻意不动 brand 行：竞品的 brand 行是"主体注册"，可能被别的批次的提及引用，
+    跟着批次删会让别人的提及失去主语。
+    """
+    counts: dict[str, int] = {}
+    for name, table in (("citations", "citation"), ("mentions", "mention"), ("blocks", "answer_block")):
+        cursor = conn.execute(
+            f"DELETE FROM {table} WHERE answer_id IN (SELECT id FROM answer WHERE import_batch_id = ?)",
+            (batch_id,),
+        )
+        counts[name] = cursor.rowcount
+    cursor = conn.execute("DELETE FROM answer WHERE import_batch_id = ?", (batch_id,))
+    counts["answers"] = cursor.rowcount
+    return counts
+
+
+def mark_batch_rolled_back(conn: sqlite3.Connection, batch_id: str, finished_at: str) -> None:
+    conn.execute(
+        "UPDATE import_batch SET status = 'rolled_back', finished_at = ? WHERE id = ?",
+        (finished_at, batch_id),
+    )
+
+
 def insert_answer(conn: sqlite3.Connection, payload: dict[str, Any]) -> str:
     answer_id = new_id()
     conn.execute(
