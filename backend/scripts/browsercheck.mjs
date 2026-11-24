@@ -52,6 +52,7 @@ const PAGES = [
   "/", "/settings", "/reports", "/report/" + reportId, "/answer/" + answerId, "/studio",
   "/monitor", "/monitor?tab=answers", "/monitor?tab=metrics",
   "/monitor?tab=trend", "/monitor?tab=sources",
+  "/monitor?tab=competitors", "/monitor?tab=competitorStats", "/monitor?tab=media",
   "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources"
 ];
 
@@ -86,6 +87,17 @@ const EXTRA = {
   "/monitor?tab=sources": [
     ["类型分布条", /class="bar-row"[\s\S]{0,200}class="fill"/],
     ["URL 明细表", /<th>页面<\/th>/],
+  ],
+  "/monitor?tab=competitors": [
+    ["竞品排名表", /<th>竞品<\/th>[\s\S]{0,300}class="cmp-bar"/],
+  ],
+  "/monitor?tab=competitorStats": [
+    ["共现矩阵", /class="matrix"[\s\S]{0,400}class="diag"/],
+  ],
+  "/monitor?tab=media": [
+    ["类型切换", /class="metric-bar"[\s\S]{0,400}data-media="news"/],
+    ["引用明细表", /<th>页面<\/th>/],
+    ["明细翻页条", /class="pager"/],
   ],
   "/insight": [
     ["结论列表", /<ul class="concl">/],

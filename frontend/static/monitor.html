@@ -85,6 +85,11 @@
   .bar-row .fill { display: block; height: 100%; background: var(--accent); }
   .bar-row .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   .spark { width: 100%; height: 168px; display: block; }
+  .matrix th, .matrix td { padding: 5px 7px; font-size: 11px; white-space: nowrap; min-width: 46px; }
+  .matrix td.n { text-align: center; font-variant-numeric: tabular-nums; }
+  .matrix td.diag { background: var(--subtle); color: var(--muted); text-align: center; }
+  .cmp-bar { display: block; height: 7px; background: var(--subtle); border-radius: 999px; overflow: hidden; }
+  .cmp-bar > span { display: block; height: 100%; background: var(--accent); }
 </style>
 </head>
 <body>
@@ -157,7 +162,8 @@
     answerTotal: 0,
     answerPages: 1,
     selectedAnswer: "",
-    metric: "mention_rate"
+    metric: "mention_rate",
+    mediaType: "video"
   };
 
   var STATUS_TEXT = { active: "监控中", draft: "草稿", paused: "已暂停", archived: "已归档" };
@@ -527,12 +533,100 @@
       G.pagerNav("mon-cites", st.page, pages, total) + "</div>";
   }
 
+  // ---- 竞品排名：占比分母是有效样本，不是提及数 ----
+  async function renderCompetitorsTab() {
+    var d = await G.get("/trackers/" + state.trackerId + "/competitors/ranking?" + G.dates());
+    var items = d.items || [];
+    if (!items.length) {
+      $("tabBody").innerHTML = '<div class="tab-pad"><div class="notice warn">' +
+        "当前周期没有竞品提及。导入时在 mentions 里标 subject_type=competitor 才会有数据；" +
+        "自动识别竞品提及还没做。</div></div>";
+      return;
+    }
+    var max = items[0].mentions || 1;
+    $("tabBody").innerHTML = '<div class="tab-pad">' +
+      '<div class="rule">分母为有效样本 ' + G.num(d.valid_total) +
+      " 条 · 占比 = 出现该竞品的答案数 ÷ 有效样本数 · 平均位次只算给出列表的提及</div>" +
+      '<div class="table-wrap"><table><thead><tr><th>竞品</th><th class="num">提及</th>' +
+      '<th class="num">占比</th><th class="num">平均位次</th><th>情感 正/中/负</th>' +
+      '<th style="width:170px">对比</th></tr></thead><tbody>' +
+      items.map(function (it) {
+        return "<tr><td>" + esc(it.name) + "</td>" +
+          '<td class="num">' + G.num(it.mentions) + "</td>" +
+          '<td class="num">' + fmtPct(it.share) + "</td>" +
+          '<td class="num">' + fmtNum(it.avg_position) + "</td>" +
+          "<td>" + it.pos + " / " + it.neu + " / " + it.neg + "</td>" +
+          '<td><span class="cmp-bar"><span style="width:' +
+          ((it.mentions / max) * 100).toFixed(1) + '%"></span></span></td></tr>';
+      }).join("") + "</tbody></table></div></div>";
+  }
+
+  // ---- 竞品统计：共现矩阵 ----
+  async function renderCompetitorStatsTab() {
+    var d = await G.get("/trackers/" + state.trackerId + "/competitors/cooccurrence?" + G.dates());
+    var labels = d.labels || [], m = d.matrix || [];
+    if (!labels.length) {
+      $("tabBody").innerHTML = '<div class="tab-pad"><div class="notice warn">' +
+        "当前周期没有可用于共现分析的品牌提及。</div></div>";
+      return;
+    }
+    // 六个长品牌名会把面板撑破，表头截到 6 个字，全名放 title
+    var shortName = function (n) { return n.length > 6 ? n.slice(0, 6) + "…" : n; };
+    $("tabBody").innerHTML = '<div class="tab-pad">' +
+      '<div class="rule">单元格 = 两个品牌在同一答案里同时出现的答案数；对角线是自己和自己，留空</div>' +
+      '<div class="table-wrap"><table class="matrix"><thead><tr><th></th>' +
+      labels.map(function (n) {
+        return '<th title="' + esc(n) + '">' + esc(shortName(n)) + "</th>";
+      }).join("") +
+      "</tr></thead><tbody>" +
+      labels.map(function (n, i) {
+        return '<tr><th title="' + esc(n) + '">' + esc(shortName(n)) + "</th>" +
+          labels.map(function (_, j) {
+            return i === j
+              ? '<td class="diag">—</td>'
+              : '<td class="n">' + G.num(m[i][j]) + "</td>";
+          }).join("") + "</tr>";
+      }).join("") + "</tbody></table></div></div>";
+  }
+
+  // ---- 视频/图文引用：按类型筛选的 URL 明细 ----
+  var MEDIA_TYPES = [
+    ["video", "视频"], ["news", "新闻"], ["forum", "论坛"], ["wechat", "公众号"],
+    ["blog", "博客"], ["wiki", "百科"], ["database", "数据库"]
+  ];
+
+  async function renderMediaTab() {
+    if (!state.mediaType) state.mediaType = "video";
+    var st = G.pagerInit("mon-media", renderMediaTab);
+    var d = await G.get("/trackers/" + state.trackerId + "/citations?" + G.dates() +
+      "&mediaType=" + state.mediaType + "&limit=10&page=" + st.page);
+    var total = (d.page && d.page.total) || 0;
+    var pages = Math.max(1, Math.ceil(total / 10));
+    if (st.page > pages) { st.page = pages; return renderMediaTab(); }
+
+    $("tabBody").innerHTML = '<div class="tab-pad"><div class="metric-bar">' +
+      MEDIA_TYPES.map(function (t) {
+        return '<button type="button" data-media="' + t[0] + '"' +
+          (t[0] === state.mediaType ? ' class="on"' : "") + ">" + esc(t[1]) + "</button>";
+      }).join("") + "</div>" +
+      '<div class="rule">当前类目共 ' + G.num(total) + " 个页面（按 URL 去重）· 出现 " +
+      G.num(d.total_occurrences) + " 次</div>" +
+      '<div class="table-wrap"><table><thead><tr><th>页面</th><th>媒体</th>' +
+      '<th class="num">出现次数</th><th>首次出现</th></tr></thead><tbody>' +
+      ((d.items || []).length
+        ? d.items.map(function (c) {
+            return "<tr><td>" + esc((c.url || "").slice(0, 80)) + "</td>" +
+              "<td>" + esc(c.media_name || "—") + "</td>" +
+              '<td class="num">' + G.num(c.times) + "</td>" +
+              "<td>" + esc(c.first_seen || "—") + "</td></tr>";
+          }).join("")
+        : '<tr><td colspan="4"><div class="empty">该周期没有这一类引用</div></td></tr>') +
+      "</tbody></table></div>" + G.pagerNav("mon-media", st.page, pages, total) + "</div>";
+  }
+
   // 还没接数据的 tab：写清缺什么，不画假图。
   var TODO_TEXT = {
-    competitors: ["竞品排名", "竞品在答案里的出现次数与平均位次。需要新增按 competitor 聚合的接口。"],
     sentiment: ["情感倾向", "按模型拆分的情感分布。总量已在指标看板与指标明细里，拆分要补聚合。"],
-    competitorStats: ["竞品统计", "竞品共现矩阵。需要新增聚合接口。"],
-    media: ["视频/图文引用", "按 media_type 过滤的引用列表。字段已有值，本批未接。"],
     health: ["采集健康", "计划应采 / 实际已采 / 缺口。目前只有导入通道，没有采集调度，只能展示差额。"]
   };
   function renderTodo(key) {
@@ -547,7 +641,10 @@
     answers: renderAnswers,
     metrics: renderMetricsTab,
     trend: renderTrendTab,
-    sources: renderSourcesTab
+    competitors: renderCompetitorsTab,
+    sources: renderSourcesTab,
+    competitorStats: renderCompetitorStatsTab,
+    media: renderMediaTab
   };
 
   async function renderTab() {
@@ -587,6 +684,13 @@
     if (mb && state.tab === "metrics") {
       state.metric = mb.dataset.metric;
       G.pagerReset("mon-samples");
+      renderTab();
+      return;
+    }
+    var mt = e.target.closest("[data-media]");
+    if (mt && state.tab === "media") {
+      state.mediaType = mt.dataset.media;
+      G.pagerReset("mon-media");
       renderTab();
     }
   });

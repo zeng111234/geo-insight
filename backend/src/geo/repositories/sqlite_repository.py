@@ -610,6 +610,7 @@ def url_dedup_citations(
     end: str,
     limit: int = 100,
     offset: int = 0,
+    media_type: str | None = None,
 ) -> dict:
     """FR-020：内容明细按 URL 去重，次数仍按出现次数累计。
 
@@ -617,6 +618,9 @@ def url_dedup_citations(
     以前 totals 在 LIMIT 后的行上求和，数据一厚就出现「3254 次引用只报 100 次出现」。
     """
     where, params = _filters(tracker_id, start, end, None, None)
+    if media_type:
+        where += " AND c.media_type = ?"
+        params = [*params, media_type]
     totals = conn.execute(
         f"""
         SELECT COUNT(DISTINCT c.url) AS total_urls, COUNT(*) AS total_occurrences
@@ -643,3 +647,57 @@ def url_dedup_citations(
         "total_urls": totals["total_urls"],
         "total_occurrences": totals["total_occurrences"],
     }
+
+
+def competitor_ranking_rows(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> list[dict]:
+    """竞品在答案里的表现：出现次数、平均位次、情感分布。
+
+    位次只统计有列表的提及（position 非空），和本方品牌的口径一致 ——
+    没有列表的答案里，竞品也可能被点名，但那是"提到"不是"排第几"。
+    """
+    rows = conn.execute(
+        f"""
+        SELECT b.id AS brand_id, b.name AS name,
+               COUNT(*) AS mentions,
+               SUM(CASE WHEN m.position IS NOT NULL THEN 1 ELSE 0 END) AS ranked,
+               AVG(m.position) AS avg_position,
+               SUM(CASE WHEN m.sentiment = 'pos' THEN 1 ELSE 0 END) AS pos,
+               SUM(CASE WHEN m.sentiment = 'neu' THEN 1 ELSE 0 END) AS neu,
+               SUM(CASE WHEN m.sentiment = 'neg' THEN 1 ELSE 0 END) AS neg
+        FROM mention m
+        JOIN answer a ON a.id = m.answer_id
+        JOIN brand b ON b.id = m.brand_id
+        WHERE a.tracker_id = ? AND a.is_valid = 1 AND m.subject_type = 'competitor'
+          AND {day_of('a.collected_at')} BETWEEN ? AND ?
+        GROUP BY b.id, b.name
+        ORDER BY mentions DESC, avg_position ASC
+        """,
+        (tracker_id, start, end),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def competitor_cooccurrence_rows(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> list[dict]:
+    """同一答案里同时出现的品牌对（含本方品牌）。
+
+    ``m1.brand_id < m2.brand_id`` 让每一对只算一次，也顺手排除了自配对。
+    """
+    rows = conn.execute(
+        f"""
+        SELECT b1.name AS left_name, b2.name AS right_name, COUNT(*) AS times
+        FROM mention m1
+        JOIN mention m2 ON m2.answer_id = m1.answer_id AND m1.brand_id < m2.brand_id
+        JOIN answer a ON a.id = m1.answer_id
+        JOIN brand b1 ON b1.id = m1.brand_id
+        JOIN brand b2 ON b2.id = m2.brand_id
+        WHERE a.tracker_id = ? AND a.is_valid = 1
+          AND {day_of('a.collected_at')} BETWEEN ? AND ?
+        GROUP BY b1.name, b2.name
+        """,
+        (tracker_id, start, end),
+    ).fetchall()
+    return [dict(r) for r in rows]

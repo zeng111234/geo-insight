@@ -368,11 +368,21 @@ async def citations_detail(request: Request):
             limit = min(100, max(1, int(request.query_params.get("limit", 100))))
         except ValueError:
             return _error(request, "VALIDATION_ERROR", "page/limit must be integers")
+        # mediaType：视频/图文引用 tab 只需要某一类，在服务端过滤，
+        # 否则前端得先拉全量再去重分页，页码会算错
+        media_type = (request.query_params.get("mediaType") or "").strip() or None
         detail = repo.url_dedup_citations(
-            conn, tracker_id, period[0], period[1], limit=limit, offset=(page - 1) * limit
+            conn,
+            tracker_id,
+            period[0],
+            period[1],
+            limit=limit,
+            offset=(page - 1) * limit,
+            media_type=media_type,
         )
         return JSONResponse({
             "items": detail["items"],
+            "media_type": media_type,
             "total_urls": detail["total_urls"],
             "total_occurrences": detail["total_occurrences"],
             "page": {"page": page, "limit": limit, "total": detail["total_urls"]},
@@ -656,6 +666,40 @@ async def brand_alias_delete(request: Request):
     except Exception:
         conn.rollback()
         raise
+    finally:
+        conn.close()
+
+
+async def competitors_ranking(request: Request):
+    """竞品排名：出现次数、占比、平均位次、情感分布。"""
+    period = _period(request)
+    if isinstance(period, JSONResponse):
+        return period
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        if not repo.get_tracker(conn, tracker_id, _tenant(request)):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        return JSONResponse(
+            metric_service.build_competitor_ranking(conn, tracker_id, period[0], period[1])
+        )
+    finally:
+        conn.close()
+
+
+async def competitors_cooccurrence(request: Request):
+    """竞品共现矩阵：同一答案里同时出现的次数。"""
+    period = _period(request)
+    if isinstance(period, JSONResponse):
+        return period
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        if not repo.get_tracker(conn, tracker_id, _tenant(request)):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        return JSONResponse(
+            metric_service.build_competitor_cooccurrence(conn, tracker_id, period[0], period[1])
+        )
     finally:
         conn.close()
 
@@ -997,6 +1041,14 @@ def create_app() -> Starlette:
             f"{settings.api_prefix}/brands/{{brand_id}}/aliases/{{alias_id}}",
             brand_alias_delete,
             methods=["DELETE"],
+        ),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/competitors/ranking",
+            competitors_ranking,
+        ),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/competitors/cooccurrence",
+            competitors_cooccurrence,
         ),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/competitors", competitors, methods=["GET", "POST"]),
         Route(

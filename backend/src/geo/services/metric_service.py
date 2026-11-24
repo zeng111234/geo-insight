@@ -201,3 +201,56 @@ def build_samples(
         "distribution": value.get("distribution") if isinstance(value, dict) else None,
         "items": items,
     }
+
+
+def build_competitor_ranking(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> dict:
+    """竞品排名：出现次数、占比、平均位次、情感分布。
+
+    占比的分母是有效样本数，不是提及数 —— 问的是「多少条答案里提到了它」。
+    """
+    counts = repo.window_counts(conn, tracker_id, start, end)
+    total = counts["valid_total"]
+    items = repo.competitor_ranking_rows(conn, tracker_id, start, end)
+    for it in items:
+        it["share"] = (it["mentions"] / total) if total else None
+        if it["avg_position"] is not None:
+            it["avg_position"] = round(it["avg_position"], 2)
+        for key in ("pos", "neu", "neg"):
+            it[key] = int(it[key] or 0)
+    return {
+        "metric_version": settings.metric_version,
+        "period": {"from": start, "to": end},
+        "valid_total": total,
+        "items": items,
+    }
+
+
+def build_competitor_cooccurrence(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> dict:
+    """竞品共现：同一答案里同时出现的次数，含本方品牌。
+
+    读法：matrix[i][j] = 品牌 i 与品牌 j 在同一答案里同时出现的答案数。
+    对角线上是各自的出现次数，可以拿来当参照基数。
+    """
+    rows = repo.competitor_cooccurrence_rows(conn, tracker_id, start, end)
+    labels: list[str] = []
+    for r in rows:
+        for key in ("left_name", "right_name"):
+            if r[key] and r[key] not in labels:
+                labels.append(r[key])
+    labels.sort()
+    index = {name: i for i, name in enumerate(labels)}
+    matrix = [[0] * len(labels) for _ in labels]
+    for r in rows:
+        i, j = index[r["left_name"]], index[r["right_name"]]
+        matrix[i][j] = int(r["times"])
+        matrix[j][i] = int(r["times"])
+    return {
+        "metric_version": settings.metric_version,
+        "period": {"from": start, "to": end},
+        "labels": labels,
+        "matrix": matrix,
+    }

@@ -457,6 +457,36 @@ def _rich_answer_text(question_text: str, with_list: bool, with_brand: bool, pos
     return f"关于「{question_text}」，沈阳有多家律所可以处理此类案件，建议先电话咨询并比较收费方式。"
 
 
+def _ensure_competitor_brands(conn) -> list[tuple[str, str]]:
+    """竞品在 mention 里也要有 brand 行（外键指向 brand），打上 kind='competitor'。
+
+    没有这一步，竞品提及根本插不进去；若按名字当成 own，指标就会把竞品算成本方
+    —— 迁移 003 修的就是这个坑。这里显式写 kind，不靠「在不在 brand 表」反推。
+    """
+    rows = conn.execute(
+        "SELECT id, name FROM brand WHERE tenant_id = ? AND kind = 'competitor'", (TENANT,)
+    ).fetchall()
+    if rows:
+        return [(r["id"], r["name"]) for r in rows]
+
+    names = conn.execute(
+        """SELECT c.name FROM competitor c
+           JOIN competitor_set cs ON cs.id = c.competitor_set_id
+           JOIN tracker t ON t.competitor_set_id = cs.id
+           WHERE t.id = ? ORDER BY c.name""",
+        (TRACKER,),
+    ).fetchall()
+    out: list[tuple[str, str]] = []
+    for r in names:
+        brand_id = uid()
+        conn.execute(
+            "INSERT INTO brand(id, tenant_id, name, kind, created_at) VALUES (?, ?, ?, 'competitor', ?)",
+            (brand_id, TENANT, r["name"], "2026-11-01T08:00:00+08:00"),
+        )
+        out.append((brand_id, r["name"]))
+    return out
+
+
 def seed_rich_period(conn) -> dict:
     """2026-11-06..30：12 问题 x 3 模型，core 每题 3 次/日、long_tail 1 次/日（60 槽位/日）。
 
@@ -465,6 +495,7 @@ def seed_rich_period(conn) -> dict:
     - 失败的 run_item 不产生答案、不进任何指标分母（FR-010 口径）
     """
     stats = {"answers": 0, "failed_items": 0, "days": 0}
+    comp_brands = _ensure_competitor_brands(conn)
     day = datetime.fromisoformat(RICH_START).date()
     end = datetime.fromisoformat(RICH_END).date()
     while day <= end:
@@ -573,6 +604,41 @@ def seed_rich_period(conn) -> dict:
                                 f"{alias} 出现在答案中",
                             ),
                         )
+
+                    # 竞品提及：只写在 rich 期间（11-06 起），完全避开黄金窗口 11-01..03，
+                    # 保证 22.22% / 9 样本那些手算值不受影响。
+                    # 竞品只出现在给出列表的答案里 —— 没有列表就没有"排第几"，不该有竞品位次。
+                    if with_list and _hint("cp|" + key) % 100 < 55:
+                        used_pos = {position} if position is not None else set()
+                        for ci in range(1 + _hint("cpn|" + key) % 2):
+                            cid, cname = comp_brands[_hint(f"cpb|{key}|{ci}") % len(comp_brands)]
+                            pos = 1 + _hint(f"cpp|{key}|{ci}") % 5
+                            if pos in used_pos:
+                                pos = next((p for p in range(1, 6) if p not in used_pos), None)
+                            if pos is None:
+                                continue
+                            used_pos.add(pos)
+                            senti_c = ["pos", "pos", "neu", "neu", "neu", "neg"][
+                                _hint(f"cps|{key}|{ci}") % 6
+                            ]
+                            # INSERT OR IGNORE：UNIQUE(answer_id, brand_id) 保证同一答案
+                            # 不会因为循环抽到同一竞品而撞约束
+                            conn.execute(
+                                """INSERT OR IGNORE INTO mention
+                                       (id, answer_id, brand_id, subject_type, matched_alias, match_type,
+                                        position, position_type, sentiment, sentiment_confidence, snippet)
+                                   VALUES (?, ?, ?, 'competitor', ?, 'exact', ?, 'list_index', ?, ?, ?)""",
+                                (
+                                    uid(),
+                                    answer_id,
+                                    cid,
+                                    cname,
+                                    pos,
+                                    senti_c,
+                                    0.7 + (_hint(f"cpc|{key}|{ci}") % 20) / 100,
+                                    f"{cname} 出现在答案中",
+                                ),
+                            )
 
                     n_cites = 2 + _hint("c|" + key) % 2
                     start = _hint("d|" + key) % len(CITE_POOL)
