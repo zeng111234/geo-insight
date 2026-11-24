@@ -1,5 +1,8 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -23,6 +26,10 @@ class Settings:
     report_sync_budget_ms: int = int(os.getenv("GEO_REPORT_BUDGET_MS", "60000"))
     # 无列表样本占比告警阈值（spec Edge Cases 要求展示占比，plan 要求超阈值提示）
     no_list_alert_threshold: float = float(os.getenv("GEO_NO_LIST_THRESHOLD", "0.5"))
+    # 迁移链目录；测试会让它指向临时目录
+    migrations_dir: str = os.getenv("GEO_MIGRATIONS_DIR", str(BACKEND_DIR / "migrations"))
+    # 导入失败报告的存放目录，相对路径按 backend/ 解析
+    import_report_dir: str = os.getenv("GEO_IMPORT_REPORT_DIR", str(BACKEND_DIR / "import_reports"))
 
 
 settings = Settings()
