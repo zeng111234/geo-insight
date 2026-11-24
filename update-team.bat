@@ -30,5 +30,5 @@ start "GEO 团队版" "%~dp0start-team.bat"
 
 echo.
 echo 完成。同事刷新页面、重新登录一次即可。
-timeout /t 5 >nul
+pause
 exit /b 0

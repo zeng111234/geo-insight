@@ -28,6 +28,8 @@ Thumbs.db
 backend/data/*.local.json
 # start-team.bat 的共享密码文件（批处理 call 用，非 JSON）
 backend/data/team.local.bat
+# backup-team.bat 的整库快照（同事机器上的运行时产物）
+backend/backups/
 .browser-profiles/
 
 # Reasonix 会话状态
