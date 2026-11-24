@@ -92,11 +92,21 @@ def render_sidebar(active: str) -> str:
                 + f">{_icon(icon)}<span>{escape(label)}</span></a>"
             )
     parts.append("</nav>")
-    parts.append(
+    foot = [
         '<div class="side-foot"><div class="k">数据范围</div>'
         "<div>国内 AI 平台 · 客户工作台</div>"
-        '<div class="muted">演示数据 · 单进程本地版</div></div>'
-    )
+        '<div class="muted">演示数据 · 单进程本地版</div>'
+    ]
+    # 关了鉴权（自动化检查）时不留死按钮
+    from geo.settings import settings
+
+    if settings.auth_required:
+        foot.append(
+            '<form method="post" action="/logout" class="side-logout">'
+            '<button class="ghost small" type="submit">退出登录</button></form>'
+        )
+    foot.append("</div>")
+    parts.append("".join(foot))
     parts.append("</aside>")
     return "\n".join(parts)
 
@@ -148,3 +158,21 @@ def render_page(static_dir: Path | None, name: str, active: str):
         )
     html = (static_dir / name).read_text(encoding="utf-8")
     return HTMLResponse(inject_footer(inject_sidebar(html, active)))
+
+
+def render_login(static_dir: Path | None, next_url: str, email: str, error: bool):
+    """登录页：不套侧栏与页脚——没登录的人不该看到导航。"""
+    from starlette.responses import HTMLResponse, JSONResponse
+
+    if static_dir is None or not (static_dir / "login.html").is_file():
+        return JSONResponse(
+            {"code": "UI_NOT_FOUND", "message": "frontend/static/login.html not found"},
+            status_code=404,
+        )
+    html = (static_dir / "login.html").read_text(encoding="utf-8")
+    message = '<p class="login-error">邮箱或密码不正确</p>' if error else ""
+    return HTMLResponse(
+        html.replace("{{error}}", message)
+        .replace("{{next}}", escape(next_url, quote=True))
+        .replace("{{email}}", escape(email, quote=True))
+    )

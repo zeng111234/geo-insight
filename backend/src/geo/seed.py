@@ -370,6 +370,12 @@ def seed() -> dict:
         report_service.generate(conn, TRACKER, TENANT, "2026-11-14", "2026-11-20", "2026-11-21T09:00:00+08:00")
         report_service.generate(conn, TRACKER, TENANT, "2026-11-21", "2026-11-30", "2026-12-01T09:00:00+08:00")
 
+        # 演示账号必须能登录：上面重建了 app_user（没有密码哈希），这里补上。
+        # 登录不了等于演示第一步就断了，所以它属于"能用的演示数据"的一部分。
+        from geo.services import auth_service
+
+        auth_service.ensure_admin_password(conn)
+
     return {
         "tenant_id": TENANT,
         "tracker_id": TRACKER,

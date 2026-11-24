@@ -31,5 +31,15 @@ class Settings:
     # 导入失败报告的存放目录，相对路径按 backend/ 解析
     import_report_dir: str = os.getenv("GEO_IMPORT_REPORT_DIR", str(BACKEND_DIR / "import_reports"))
 
+    # ---- 鉴权 ----
+    # 默认开启。只在自动化检查（页面契约 / 浏览器 DOM / 分页行为）时显式关掉，
+    # 见 README「验证」一节；业务代码不读这个开关去做别的事。
+    auth_required: bool = os.getenv("GEO_AUTH_REQUIRED", "1") != "0"
+    admin_email: str = os.getenv("GEO_ADMIN_EMAIL", "demo@example.com")
+    # 演示默认密码。真实使用必须用环境变量覆盖，README 里写明了。
+    admin_password: str = os.getenv("GEO_ADMIN_PASSWORD", "geo-demo-2026")
+    session_hours: int = int(os.getenv("GEO_SESSION_HOURS", "12"))
+    cookie_name: str = "geo_session"
+
 
 settings = Settings()

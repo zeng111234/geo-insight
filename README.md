@@ -6,7 +6,8 @@
 
 ## 三分钟演示路径
 
-1. **双击 `start.bat`**（Python 3.10+ 即可，不装依赖、不用 Docker）。浏览器自动打开看板。
+1. **双击 `start.bat`**（Python 3.10+ 即可，不装依赖、不用 Docker）。浏览器自动打开**登录页**，
+   账号已预填，密码 `geo-demo-2026`（启动日志也会打印）。登录后进入看板。
 2. 看板 `/`：8 张指标卡 → 趋势 → 问答明细 → 信源明细。可主动讲三句：
    - 平均排名显示「样本不足」，是因为只有 2 个带列表位次的样本，**低于 3 条不给数字**（口径规则，不是 bug）；
    - 点指标卡会下钻到构成该指标的样本，再点可看答案原文与引用；
@@ -27,6 +28,27 @@ python backend/run.py
 ```
 
 浏览器打开 <http://127.0.0.1:8123>。**不要用 `file://` 直接打开 html**——浏览器会拦掉本地页面对 `127.0.0.1` 的请求；页面顶部也会给出这条提示。
+
+### 登录
+
+服务默认开启鉴权，未登录时页面跳 `/login`、接口返回 401。
+
+| 项 | 值 |
+|---|---|
+| 账号 | `demo@example.com`（登录页已预填） |
+| 密码 | `geo-demo-2026`（**演示默认值**，启动日志会打印） |
+| 覆盖方式 | `GEO_ADMIN_PASSWORD` / `GEO_ADMIN_EMAIL` / `GEO_SESSION_HOURS`（默认 12 小时） |
+| 退出 | 侧栏底部「退出登录」 |
+
+实现上的三个取舍（都比较保守，写在 `services/auth_service.py` 顶部）：
+
+- 密码用标准库 `hashlib.scrypt`（N=2¹⁴），不引 bcrypt/argon2；哈希串自带参数，将来调强度不用迁移。
+- Session 存在**进程内 dict**，不引 JWT、不建 session 表。代价是**重启后要重新登录**——单进程单用户，
+  这比维护一张要清理过期的表划算。
+- 登录后租户来自会话，**不再信任 `X-Tenant-Id` 请求头**，否则任何登录用户改个头就能看别人的数据。
+
+自动化检查（页面契约 / 浏览器 DOM / 分页行为）不看登录态，启动服务时加 `GEO_AUTH_REQUIRED=0` 即可关闭；
+业务代码不会因为这个开关做别的事。`smoke.py` 相反，它**真的登录一次**再跑，覆盖 401 / 302 / cookie / 登出。
 
 | 路径 | 内容 |
 |---|---|
@@ -182,14 +204,20 @@ curl "$B/articles/55555555-5555-5555-5555-555555555551/impact"
 
 ```bash
 cd backend
-python -m unittest discover -s tests -t . -p "test_*.py" -v   # 97 条
-python scripts/smoke.py                                        # 80 条真实 HTTP 断言（自动选空闲端口）
-node scripts/pagecheck.mjs                                    # 77 条页面字段契约 + 侧栏结构 + 样式契约（需服务在跑）
+python -m unittest discover -s tests -t . -p "test_*.py" -v   # 119 条（含 HTTP 层鉴权，需 starlette）
+python scripts/smoke.py                                        # 86 条真实 HTTP 断言（自己登录，自动选空闲端口）
+
+# 后三个不看登录态：启动服务时显式关掉鉴权
+GEO_AUTH_REQUIRED=0 python run.py --no-browser &
+node scripts/pagecheck.mjs                                    # 77 条页面字段契约 + 侧栏结构 + 样式契约
 node scripts/browsercheck.mjs                                 # 32 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 ```
 
-合计 308 条，全部通过。
+合计 336 条，全部通过。
+
+用**系统 Python** 跑（`start.bat` 用的也是它）：`backend/.venv` 是历史残留，里面只有 pip，
+`starlette` 装在系统环境。空 venv 里跑单测不会报错，HTTP 层那 10 条会自动跳过并说明原因。
 
 `smoke.py` 自建临时库、在**自动挑选的空闲端口**启动 uvicorn、逐个请求断言后关闭进程，不碰演示数据，也不会误连到正在运行的开发服务（显式指定 `GEO_SMOKE_PORT` 且端口被占用时直接报错）。
 
@@ -241,7 +269,8 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
 
 - **真实平台采集**：登录态、风控、DOM 稳定性全部未验证。采集器协议与离线实现已就位（见「数据接入」），
   但没有接任何平台 API；`mention` 也没有自动提及解析器，靠 seed 或导入时的 `mentions` 字段写入
-- **鉴权与租户隔离**：首版租户由默认配置派生，不能给外部用户直接使用
+- **多用户与角色**：只有一个预置账号，没有注册、改密、角色区分（`app_user.role` 已在表里但没启用）；
+  session 存在进程内，重启即失效，多进程部署会互相看不见
 - 渠道真实登录与发帖（002 T019/T020）；按周聚合；片段级情感聚合；合规命中审计落库
 - 契约 fuzz（Schemathesis）、交互 E2E（表单提交等完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖，但**其余交互（表单提交、下钻抽屉、打印）仍未模拟用户操作**
 - **AI 成稿与积分**：按决策 003 整体取消，不是待办

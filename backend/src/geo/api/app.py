@@ -10,15 +10,17 @@ import io
 import json
 import time
 import uuid
+from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, quote
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -28,7 +30,13 @@ from geo.domain import methodology as methodology_module
 from geo.repositories import config_repository as config_repo
 from geo.repositories import report_repository as report_repo
 from geo.repositories import sqlite_repository as repo
-from geo.services import config_service, content_service, metric_service, report_service
+from geo.services import (
+    auth_service,
+    config_service,
+    content_service,
+    metric_service,
+    report_service,
+)
 from geo.settings import settings
 
 EXPORT_FIELDS = (
@@ -65,7 +73,109 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             )
 
 
+# 登录页、健康检查、图标、静态资源不需要登录。
+# /static 必须放行：登录页自己的 css 就在那儿，否则登录页会裸奔。
+PUBLIC_PATHS = {"/login", "/health", "/favicon.ico"}
+PUBLIC_PREFIXES = ("/static/",)
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    """最简鉴权：有 session 放行，没有就按"接口 401 / 页面跳登录"处理。
+
+    接口返回 401 而不是 302：调用方是脚本或 fetch，跟着 302 拿到一坨 HTML 更难排查。
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if not settings.auth_required:
+            return await call_next(request)
+
+        path = request.url.path
+        if path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
+            return await call_next(request)
+
+        session = auth_service.get_session(request.cookies.get(settings.cookie_name))
+        if session:
+            request.state.user = session
+            return await call_next(request)
+
+        if path.startswith(settings.api_prefix):
+            return JSONResponse(
+                {
+                    "code": "UNAUTHORIZED",
+                    "message": "请先登录",
+                    "request_id": getattr(request.state, "request_id", ""),
+                },
+                status_code=401,
+            )
+        target = "/login"
+        if request.method in {"GET", "HEAD"}:
+            target = f"/login?next={quote(path)}"
+        return RedirectResponse(target, status_code=302)
+
+
+def _safe_next(value: str | None) -> str:
+    """只接受站内相对路径：挡住 ``//evil.com`` 这类开放重定向。"""
+    if not value or not value.startswith("/") or value.startswith("//"):
+        return "/"
+    return value
+
+
+async def login_page(request: Request):
+    if not settings.auth_required:
+        return RedirectResponse("/", status_code=302)
+    if auth_service.get_session(request.cookies.get(settings.cookie_name)):
+        return RedirectResponse("/", status_code=302)
+    return nav.render_login(
+        STATIC_DIR,
+        _safe_next(request.query_params.get("next")),
+        settings.admin_email,
+        request.query_params.get("error") == "1",
+    )
+
+
+async def login_submit(request: Request):
+    # 直接用 parse_qs 解析 urlencoded 表单：Starlette 的 request.form()
+    # 在 multipart 场景要额外依赖，而登录表单只有两个字段，不值得为它引包。
+    raw = (await request.body()).decode("utf-8", "replace")
+    form = {key: values[0] for key, values in parse_qs(raw, keep_blank_values=True).items()}
+    next_url = _safe_next(form.get("next"))
+
+    conn = db.connect()
+    try:
+        user = auth_service.authenticate(conn, form.get("email", ""), form.get("password", ""))
+    finally:
+        conn.close()
+
+    if not user:
+        return RedirectResponse(f"/login?error=1&next={quote(next_url)}", status_code=303)
+
+    token, ttl = auth_service.create_session(user)
+    response = RedirectResponse(next_url, status_code=303)
+    # secure=False 因为本地是 http；上 https 后要同时打开 secure。
+    response.set_cookie(
+        settings.cookie_name,
+        token,
+        max_age=ttl,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+async def logout(request: Request):
+    auth_service.destroy_session(request.cookies.get(settings.cookie_name))
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(settings.cookie_name, path="/")
+    return response
+
+
 def _tenant(request: Request) -> str:
+    user = getattr(request.state, "user", None)
+    if user and user.get("tenant_id"):
+        # 登录后以会话里的租户为准。若继续信任 X-Tenant-Id，
+        # 任何登录用户都能改个请求头看别人的数据。
+        return user["tenant_id"]
     return request.headers.get("X-Tenant-Id", settings.default_tenant_id)
 
 
@@ -808,7 +918,14 @@ def _page(name: str, active: str | None = None):
 
 def create_app() -> Starlette:
     db.init_db()
+    # 老库升级上来时 app_user 可能还没有密码，这里补齐，否则登录页永远进不去
+    with closing(db.connect()) as conn:
+        auth_service.ensure_admin_password(conn)
+
     routes = [
+        Route("/login", login_page),
+        Route("/login", login_submit, methods=["POST"]),
+        Route("/logout", logout, methods=["POST"]),
         Route("/", dashboard),
         Route("/studio", studio_page),
         Route("/settings", _page("settings.html", "settings")),
@@ -870,10 +987,13 @@ def create_app() -> Starlette:
     return Starlette(
         routes=routes,
         middleware=[
+            # 顺序有讲究：RequestContext 最外层保证任何响应都有 request_id；
+            # CORS 在 Auth 外面，预检请求不会被鉴权拦掉；Auth 最内层。
             Middleware(RequestContextMiddleware),
             # Same-origin serving makes CORS unnecessary; kept so the page still
             # works when opened from another local port during debugging.
             Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]),
+            Middleware(AuthMiddleware),
         ],
     )
 

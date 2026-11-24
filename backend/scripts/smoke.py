@@ -11,6 +11,7 @@ so it never tests the dev server by accident. Override with GEO_SMOKE_PORT=n
 Exits non-zero on the first failed assertion, printing the response body.
 """
 
+import http.cookiejar
 import json
 import os
 import socket
@@ -20,6 +21,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -32,6 +34,45 @@ TRACKER = "11111111-1111-1111-1111-111111111111"
 ART_PUBLISHED = "55555555-5555-5555-5555-555555555551"
 ART_DRAFT = "55555555-5555-5555-5555-555555555552"
 DB = Path(tempfile.gettempdir()) / "geo_smoke.db"
+ADMIN_EMAIL = os.getenv("GEO_ADMIN_EMAIL", "demo@example.com")
+ADMIN_PASSWORD = "smoke-pass-123"
+
+# 登录一次，后续所有请求自动带 cookie（install_opener 对所有 urlopen 生效）
+_COOKIES = http.cookiejar.CookieJar()
+urllib.request.install_opener(urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_COOKIES)))
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """要观察 302 本身时用：默认的 opener 会跟着跳走，看不到状态码。"""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_NO_REDIRECT = urllib.request.build_opener(
+    _NoRedirect(), urllib.request.HTTPCookieProcessor(_COOKIES)
+)
+
+
+def status_without_redirect(path: str) -> tuple[int, str]:
+    try:
+        with _NO_REDIRECT.open(BASE + path, timeout=5) as resp:
+            return resp.status, resp.headers.get("location", "")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers.get("location", "")
+
+
+def post_form(path: str, data: dict) -> tuple[int, str]:
+    """登录表单：要看到 303 本身与 Location，所以不跟随重定向；cookie 仍会存进罐子。"""
+    body = urllib.parse.urlencode(data).encode("utf-8")
+    req = urllib.request.Request(
+        BASE + path, data=body, method="POST", headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    try:
+        with _NO_REDIRECT.open(req, timeout=5) as resp:
+            return resp.status, resp.headers.get("location", "")
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers.get("location", "")
 
 
 def get(path: str) -> tuple[int, dict]:
@@ -119,6 +160,8 @@ def main() -> None:
     env = os.environ.copy()
     env["GEO_DB_PATH"] = str(DB)
     env["PYTHONPATH"] = str(ROOT / "src")
+    # 显式指定密码，不依赖默认值：seed 与 uvicorn 用同一份环境，登录才对得上
+    env["GEO_ADMIN_PASSWORD"] = ADMIN_PASSWORD
 
     subprocess.run([sys.executable, "-m", "geo.seed"], cwd=ROOT, env=env, check=True, capture_output=True)
     proc = subprocess.Popen(
@@ -141,6 +184,19 @@ def main() -> None:
 
         status, body = get("/health")
         check("health", status == 200 and body["status"] == "ok", body)
+
+        # 鉴权：未登录时接口必须 401、页面必须跳登录，登录后才能继续
+        status, body = get("/v1/trackers")
+        check("未登录访问接口返回 401", status == 401 and body.get("code") == "UNAUTHORIZED", (status, body))
+        status, location = status_without_redirect("/")
+        check("未登录访问页面跳登录", status == 302 and location.startswith("/login"), (status, location))
+        status, _, _ = get_html("/static/app.css")
+        check("静态资源不拦", status == 200, status)
+        status, location = post_form("/login", {"email": ADMIN_EMAIL, "password": "wrong-password"})
+        check("错误密码不跳首页", status == 303 and "error=1" in location, (status, location))
+        status, location = post_form("/login", {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+        check("正确密码登录成功", status == 303 and location == "/", (status, location))
+        check("登录后拿到 session cookie", any(c.name == "geo_session" for c in _COOKIES), list(_COOKIES))
 
         status, body = get("/v1/trackers")
         check("tracker list", status == 200 and len(body["items"]) == 2, body)

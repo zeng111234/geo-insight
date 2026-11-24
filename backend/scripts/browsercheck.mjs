@@ -30,6 +30,16 @@ if (!CHROME) {
 // 详情页必须用真实 ID：拿假 ID 去请求只会得到 404，页面显示「读取失败」是正确行为，
 // 不能拿来当成页面坏了的证据。
 const TRACKER = "11111111-1111-1111-1111-111111111111";
+
+// 鉴权开着时，浏览器里打开的每个页面都会跳到登录页，DOM 断言没有意义。
+// 早点说清楚，别让人对着一屏「渲染失败」猜。
+const probe = await fetch(`${BASE}/v1/trackers/${TRACKER}/reports`);
+if (probe.status === 401) {
+  console.log("FAIL  服务开启了鉴权，浏览器里只会看到登录页。");
+  console.log("      用 GEO_AUTH_REQUIRED=0 python backend/run.py 启动后再跑本脚本。");
+  process.exit(1);
+}
+
 let reportId = "", answerId = "";
 try {
   const reps = await (await fetch(`${BASE}/v1/trackers/${TRACKER}/reports`)).json();

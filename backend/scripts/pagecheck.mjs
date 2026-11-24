@@ -9,7 +9,16 @@ import { fileURLToPath } from "node:url";
 const STATIC = fileURLToPath(new URL("../../frontend/static/", import.meta.url));
 const fails = [];
 const need = (c, name) => { if (!c) fails.push(name); console.log((c ? "PASS  " : "FAIL  ") + name); };
-const get = async (p) => { const r = await fetch(p); if (!r.ok) throw new Error(p + " -> " + r.status); return r.json(); };
+const get = async (p) => {
+  const r = await fetch(p);
+  if (r.status === 401) {
+    console.log("FAIL  服务开启了鉴权，接口返回 401，页面检查拿不到数据。");
+    console.log("      用 GEO_AUTH_REQUIRED=0 python backend/run.py 启动后再跑本脚本。");
+    process.exit(1);
+  }
+  if (!r.ok) throw new Error(p + " -> " + r.status);
+  return r.json();
+};
 
 // ---- 工作台 ----
 const ov = await get(`${API}/trackers/${T}/metrics/overview?from=2026-11-01&to=2026-11-03`);

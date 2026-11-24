@@ -48,6 +48,8 @@ aside.side nav .group { color: var(--muted); font-size: 11px; padding: 12px 9px 
   font-size: 11px; color: var(--text-body); line-height: 1.7;
 }
 .side-foot .k { color: var(--muted); font-size: 10.5px; margin-bottom: 2px; }
+.side-logout { margin-top: 8px; }
+.side-logout button { width: 100%; }
 
 /* 页面收口：口径与数据范围落在底部。内容少的页面下方会空一大片，
    光调间距治不了，得用真实信息压住底边，视觉重心才不头重脚轻。 */
