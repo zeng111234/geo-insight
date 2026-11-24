@@ -26,6 +26,7 @@ from typing import Any
 ACTIONS = {
     "alias.delete",
     "competitor.delete",
+    "mention.recompute",
 }
 
 
