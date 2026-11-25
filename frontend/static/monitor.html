@@ -603,7 +603,7 @@
       (qRows || '<tr><td colspan="6"><div class="empty">当前没有启用中的问题</div></td></tr>') +
       "</tbody></table></div></div>" +
       '<div class="dash-card"><div class="dash-head">提及率趋势' +
-      '<span>缺数据的日子断开</span></div>' + trendBox + citeBox + "</div>" +
+      '<span>虚线＝无样本区间</span></div>' + trendBox + citeBox + "</div>" +
       "</div>" +
       '<div class="notice" style="margin:0 14px 14px">' +
       "口径：提及与排名按本品牌在答案中的出现位置统计；情感只统计提及到本品牌的样本。" +
@@ -841,27 +841,48 @@
       }).join("") + "</tbody></table>" + st.nav;
   }
 
-  // ---- 趋势分析：折线用 SVG，缺数据的点直接跳过，不在缺口处插值 ----
+  // ---- 趋势折线 ----
+  // 两个坑一起修：
+  // 1) x 轴按真实日期等距，不按点序号——否则跳过一天后 11-05 和 11-07 被画成相邻，
+  //    时间轴失真（原实现用 i*step）。
+  // 2) 缺样本的日子不断开整条线，改用虚线段连过去；虚线 = 这段没有可用样本，
+  //    而实线 = 有样本。既不编造 0%，也不会看着像线坏了。
   function trendSvg(points) {
     var W = 620, H = 150, pad = 10;
-    var vals = points.map(function (p) { return p.mention_rate; })
-      .filter(function (v) { return v !== null && v !== undefined; });
-    var max = vals.length ? Math.max.apply(null, vals) : 1;
+    var DAY_MS = 86400000;
+    function dayNum(s) { return Date.parse(s) / DAY_MS; }
+    var usable = points.filter(function (p) {
+      return p.date && isFinite(dayNum(p.date)) &&
+        p.mention_rate !== null && p.mention_rate !== undefined;
+    });
+    if (!usable.length) return G.empty("该周期没有可画的点");
+    var max = Math.max.apply(null, usable.map(function (p) { return p.mention_rate; }));
     if (max <= 0) max = 1;
-    var step = points.length > 1 ? (W - pad * 2) / (points.length - 1) : 0;
-    var d = "", started = false;
-    points.forEach(function (p, i) {
-      if (p.mention_rate === null || p.mention_rate === undefined) { started = false; return; }
-      var x = pad + i * step;
-      var y = H - pad - (p.mention_rate / max) * (H - pad * 2);
-      d += (started ? " L" : " M") + x.toFixed(1) + " " + y.toFixed(1);
-      started = true;
+
+    var t0 = Math.min.apply(null, points.map(function (p) { return dayNum(p.date); }));
+    var t1 = Math.max.apply(null, points.map(function (p) { return dayNum(p.date); }));
+    var span = Math.max(1, t1 - t0);
+    function xOf(p) { return pad + (dayNum(p.date) - t0) / span * (W - pad * 2); }
+    function yOf(v) { return H - pad - (v / max) * (H - pad * 2); }
+
+    var segs = [], prev = null;
+    usable.forEach(function (p) {
+      var x = xOf(p), y = yOf(p.mention_rate);
+      if (prev !== null) {
+        var gapDays = dayNum(p.date) - dayNum(prev.date);
+        var isGap = gapDays > 1.5;  // 跨过了没样本的日子
+        segs.push('<line x1="' + prev.x.toFixed(1) + '" y1="' + prev.y.toFixed(1) +
+          '" x2="' + x.toFixed(1) + '" y2="' + y.toFixed(1) +
+          '" stroke="' + (isGap ? "var(--muted)" : "var(--accent)") +
+          '" stroke-width="2"' + (isGap ? ' stroke-dasharray="4 4"' : "") +
+          ' stroke-linecap="round" />');
+      }
+      prev = { date: p.date, x: x, y: y };
     });
     return '<svg class="spark" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" role="img">' +
       '<line x1="' + pad + '" y1="' + (H - pad) + '" x2="' + (W - pad) + '" y2="' + (H - pad) +
         '" stroke="var(--border)" stroke-width="1" />' +
-      '<path d="' + d + '" fill="none" stroke="var(--accent)" stroke-width="2" ' +
-        'stroke-linejoin="round" stroke-linecap="round" /></svg>';
+      segs.join("") + "</svg>";
   }
 
   async function renderTrendTab() {
@@ -881,7 +902,7 @@
     }
     $("tabBody").innerHTML = '<div class="tab-pad">' + toggle +
       '<div class="rule">' + (g === "week" ? "按周（周一为起点）" : "按日") +
-      " · " + pts.length + " 个数据点 · 折线为提及率，缺数据的日子直接断开不插值" +
+      " · " + pts.length + " 个数据点 · 横轴按日期等距，虚线段＝这段没有可用样本（不按 0% 插值）" +
       (g === "week" ? " · 区间两端可能不满 7 天，表里标了实际天数" : "") +
       (d.model_changes && d.model_changes.length ? " · 周期内模型集合有变更" : "") + "</div>" +
       trendSvg(pts) + '<div class="table-wrap" id="trendTable"></div></div>';

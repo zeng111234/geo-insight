@@ -171,5 +171,58 @@ class PublishTableContractTest(unittest.TestCase):
         self.assertIn("#channels td .tag { white-space: nowrap; }", self.html)
 
 
+class TrendLineContractTest(unittest.TestCase):
+    """折线：x 轴按真实日期、缺口用虚线，不能再退回点序号+整段消失。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = MONITOR.read_text(encoding="utf-8")
+
+    def test_x_axis_uses_real_dates(self):
+        self.assertIn("function dayNum(s)", self.html)
+        self.assertIn("(dayNum(p.date) - t0) / span", self.html)
+        self.assertNotIn("pad + i * step", self.html)
+
+    def test_gap_uses_dashed_segment(self):
+        self.assertIn('stroke-dasharray="4 4"', self.html)
+        self.assertIn("gapDays > 1.5", self.html)
+
+    def test_legend_matches_behavior(self):
+        self.assertIn("虚线＝无样本区间", self.html)
+
+
+class ArticleBarContractTest(unittest.TestCase):
+    """文章栏：几百篇时搜索+分页，当前文章钉住，不能退回全量平铺。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = STUDIO.read_text(encoding="utf-8")
+
+    def test_search_box_present(self):
+        self.assertIn('id="articleSearch"', self.html)
+        self.assertIn("state.articleQuery", self.html)
+
+    def test_pagination_bounded(self):
+        self.assertIn("ARTICLE_PAGE_SIZE = 12", self.html)
+        self.assertIn("Math.ceil(matched.length / ARTICLE_PAGE_SIZE)", self.html)
+        self.assertIn('id="articleNext"', self.html)
+
+    def test_render_uses_paged_slice(self):
+        """真正守行为：渲染的必须是分页切片，不能退回全量 matched。"""
+        self.assertIn(
+            "const slice = matched.slice((state.articlePage - 1) * ARTICLE_PAGE_SIZE, state.articlePage * ARTICLE_PAGE_SIZE);",
+            self.html,
+        )
+        self.assertIn("slice.map((a) => articleChip(a, false))", self.html)
+
+    def test_current_article_pinned(self):
+        self.assertIn("pinned", self.html)
+        self.assertIn("chip-current", self.html)
+
+    def test_no_full_flatten(self):
+        # 旧实现把全部文章 map 成 chip，没有分页；确认那段已被替换
+        self.assertNotIn("const chips = state.articles.map((a)", self.html)
+
+
 if __name__ == "__main__":
     unittest.main()

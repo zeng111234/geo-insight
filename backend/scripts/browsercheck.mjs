@@ -67,12 +67,13 @@ const EXTRA = {
   // 问题监控是工作台：默认 tab 是指标看板，分页条在问答明细 tab 上，
   // 所以拆成两个 URL 各查各的，而不是笼统要求"这页必须有分页"。
   "/monitor": [
+    ["折线虚线缺口", /stroke-dasharray="4 4"/],
     ["标签页导航", /id="tabs"[^>]*>[\s\S]{0,600}data-tab="dashboard"/],
     ["指标看板卡", /class="kpi[\s\S]{0,300}提问次数/],
     ["监控列表项", /class="titem[\s\S]{0,200}data-tracker=/],
     ["分问题表现表", /分问题表现[\s\S]{0,600}<th>问题<\/th>/],
     ["分问题对比条", /<th>问题<\/th>[\s\S]{0,2400}class="cmp-bar"/],
-    ["趋势折线", /提及率趋势[\s\S]{0,300}class="spark"[\s\S]{0,300}<path/],
+    ["趋势折线", /提及率趋势[\s\S]{0,300}class="spark"[\s\S]{0,300}<line/],
     ["引用概览", /独立域名<\/i>/],
     ["核心词标签", /class="tag kw"/],
   ],
@@ -92,7 +93,7 @@ const EXTRA = {
   ],
   "/monitor?tab=trend": [
     ["粒度切换", /data-granularity="day"[^>]*class="on"/],
-    ["趋势折线", /class="spark"[\s\S]{0,200}<path/],
+    ["趋势折线", /class="spark"[\s\S]{0,200}<line/],
     ["每日摘要表", /id="trendTable"[^>]*>[\s\S]{0,300}<table/],
   ],
   "/monitor?tab=trend&g=week": [
@@ -134,6 +135,7 @@ const EXTRA = {
     ["明细翻页条", /class="pager"/],
   ],
   "/studio": [
+    ["文章栏搜索框", /id="articleSearch"[\s\S]{0,200}article-chips/],
     ["积分徽章", /id="creditBadge"[\s\S]{0,120}id="creditBalance"/],
     ["六阶段步骤条", /class="stage-step[\s\S]{0,900}data-stage="publish"/],
     ["阶段状态已落库", /stage-step (current|done)/],

@@ -47,6 +47,15 @@
   }
   .chip:hover { border-color: #ccd2e3; }
   .chip.on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-weak); }
+  /* 文章栏：几百篇时搜索 + 分页，当前文章钉住，不让栏目撑成几十行 */
+  .article-search { min-width: 180px; max-width: 280px; flex: 1 1 180px; padding: 5px 10px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+    color: var(--text); font-size: var(--fs-meta); }
+  .article-chips { display: flex; flex-wrap: wrap; gap: 8px; flex-basis: 100%; }
+  .article-nav { display: inline-flex; align-items: center; gap: 6px; }
+  .article-nav button { min-width: 26px; padding: 3px 7px; }
+  .article-nav button:disabled { opacity: .4; cursor: default; }
+  .chip-current .chip { border-style: dashed; }
   .tag { font-size: var(--fs-caption); padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2); }
   .tag.published { color: var(--green-ink); border-color: var(--green-line); background: var(--green-tint); }
   .tag.review { color: var(--amber-ink); border-color: var(--amber-line); background: var(--amber-tint); }
@@ -315,7 +324,9 @@ const PUB_TEXT = {
   draft_saved: "已存草稿", blocked: "被平台拦", failed: "失败", unknown: "待人工确认",
 };
 
-const state = { articles: [], articleId: null, article: null, channels: [], impact: null, selected: new Set(), stages: null };
+const state = { articles: [], articleId: null, article: null, channels: [], impact: null, selected: new Set(), stages: null,
+  articleQuery: "", articlePage: 1 };
+const ARTICLE_PAGE_SIZE = 12;
 
 let toastTimer = null;
 function toast(msg, kind = "") {
@@ -355,19 +366,71 @@ function pct(m) {
   return (m.value * 100).toFixed(1) + "%";
 }
 
-/* ---------- 文章列表 ---------- */
+/* ---------- 文章列表：搜索 + 分页，几百篇也不撑爆 ---------- */
+function articleChip(a, pinned) {
+  const on = a.id === state.articleId ? " on" : "";
+  const wrap = pinned ? ' class="chip-current"' : "";
+  return '<span' + wrap + '><span class="chip' + on + '" data-id="' + a.id + '">' +
+    esc(a.title.length > 20 ? a.title.slice(0, 20) + "…" : a.title) +
+    '<span class="tag ' + a.status + '">' + (STATUS_TEXT[a.status] || a.status) + "</span></span></span>";
+}
+
 function renderArticleBar() {
   const bar = $("articleBar");
-  const chips = state.articles.map((a) => {
-    const on = a.id === state.articleId ? " on" : "";
-    return '<span class="chip' + on + '" data-id="' + a.id + '">' +
-      esc(a.title.length > 20 ? a.title.slice(0, 20) + "…" : a.title) +
-      '<span class="tag ' + a.status + '">' + (STATUS_TEXT[a.status] || a.status) + "</span></span>";
-  }).join("");
-  bar.innerHTML = '<span class="pill">文章</span>' + chips;
+  const all = state.articles;
+  if (!all.length) {
+    bar.innerHTML = '<span class="pill">文章</span><span class="empty">该监控对象下还没有文章</span>';
+    return;
+  }
+  const q = state.articleQuery.trim().toLowerCase();
+  const matched = q
+    ? all.filter((a) => (a.title || "").toLowerCase().includes(q) ||
+        (STATUS_TEXT[a.status] || a.status).toLowerCase().includes(q))
+    : all;
+  const pages = Math.max(1, Math.ceil(matched.length / ARTICLE_PAGE_SIZE));
+  if (state.articlePage > pages) state.articlePage = pages;
+  if (state.articlePage < 1) state.articlePage = 1;
+  const slice = matched.slice((state.articlePage - 1) * ARTICLE_PAGE_SIZE, state.articlePage * ARTICLE_PAGE_SIZE);
+
+  // 当前文章钉在最前：即使被搜索过滤掉也不能消失，否则用户不知道自己在哪篇
+  const current = all.find((a) => a.id === state.articleId);
+  const pinned = current && !slice.some((a) => a.id === current.id) ? articleChip(current, true) : "";
+  const search = '<input id="articleSearch" class="article-search" type="search" ' +
+    'placeholder="搜索标题或状态（共 ' + all.length + ' 篇）" value="' + esc(state.articleQuery) + '" ' +
+    'aria-label="搜索文章" />';
+  const nav = pages > 1
+    ? '<span class="article-nav">' +
+        '<button type="button" id="articlePrev"' + (state.articlePage <= 1 ? " disabled" : "") + '>‹</button>' +
+        '<span class="muted">' + state.articlePage + " / " + pages + "</span>" +
+        '<button type="button" id="articleNext"' + (state.articlePage >= pages ? " disabled" : "") + '>›</button>' +
+        '<span class="muted">' + matched.length + " 篇</span>" +
+      "</span>"
+    : "";
+  const chips = slice.map((a) => articleChip(a, false)).join("") ||
+    '<span class="empty">没有匹配的文章</span>';
+
+  bar.innerHTML = '<span class="pill">文章 ' + all.length + " 篇</span>" + search + nav +
+    '<span class="article-chips">' + pinned + chips + "</span>";
+
   bar.querySelectorAll(".chip").forEach((el) => {
     el.addEventListener("click", () => selectArticle(el.dataset.id));
   });
+  $("articleSearch").addEventListener("input", function () {
+    state.articleQuery = this.value;
+    state.articlePage = 1;
+    renderArticleBar();
+    const box = $("articleSearch");
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);  // 重建 DOM 后光标回末尾
+  });
+  if (pages > 1) {
+    $("articlePrev").addEventListener("click", function () {
+      state.articlePage--; renderArticleBar();
+    });
+    $("articleNext").addEventListener("click", function () {
+      state.articlePage++; renderArticleBar();
+    });
+  }
 }
 
 /* ---------- 左栏：创作要求 ---------- */
