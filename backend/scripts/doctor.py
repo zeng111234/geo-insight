@@ -96,12 +96,18 @@ def check_database() -> None:
     # 现在路径已固定，但这个检查留着——老机器上那份历史分叉不会自己消失。
     stray = ROOT / "backend" / "geo.db"
     if stray.is_file() and stray.resolve() != db_path.resolve():
-        record(
-            WARN,
-            "数据库分叉",
-            "backend/geo.db 也存在：老版本按 cwd 建库留下的。确认哪份是最新后删掉另一份，"
-            "否则换启动方式会看到不同数据",
-        )
+        # 空文件和有数据的库要分开说。0 字节的 geo.db 是"连上就建文件、从没写过"的
+        # 残留（某次在 backend 目录里跑脚本留下的），删了毫发无损；
+        # 对它喊"确认哪份是最新"，只会让人以为真有数据在两份之间分叉。
+        if stray.stat().st_size == 0:
+            record(WARN, "数据库", "backend/geo.db 是个空文件（0 字节），可以直接删掉")
+        else:
+            record(
+                WARN,
+                "数据库分叉",
+                "backend/geo.db 也有内容：老版本按 cwd 建库留下的。确认哪份是最新后删掉另一份，"
+                "否则换启动方式会看到不同数据",
+            )
     else:
         record(OK, "数据库位置", str(db_path))
 
@@ -146,6 +152,43 @@ def check_local_files() -> None:
         record(WARN, "渠道登录态", "这台机器还没有登录态；首次发布需要扫码登录一次")
 
 
+def check_collect_keys() -> None:
+    """平台 key 有没有配。
+
+    只报「有没有、从哪来」，**绝不打印 key 本身或它的片段**——
+    这个输出会被粘进聊天、截图、issue 里，一个字母都不该露。
+
+    没 key 是正常的：不采数据时系统其余部分都能用（导入、指标、看板）。
+    所以这里是 WARN 不是 FAIL。
+    """
+    try:
+        from geo.collectors import keys
+    except Exception as exc:  # noqa: BLE001 - 导入失败不该让整个自检挂掉
+        record(WARN, "采集 key", f"无法读取采集配置：{exc}")
+        return
+
+    labels = {"deepseek": "DeepSeek", "doubao": "豆包/火山方舟"}
+    found = []
+    missing = []
+    for provider, label in labels.items():
+        source = keys.source_of(provider)
+        if source == "missing":
+            missing.append(label)
+        else:
+            found.append(f"{label}（{ '环境变量' if source == 'env' else 'keys.local.json' }）")
+
+    if found:
+        record(OK, "采集 key", "已配置：" + "、".join(found))
+    if missing:
+        record(
+            WARN,
+            "采集 key",
+            "未配置：" + "、".join(missing)
+            + "。真实采集需要它；只做导入/看板时可以不管"
+            + f"（位置：{keys.keys_file()}）",
+        )
+
+
 def check_port(port: int) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.5)
@@ -176,6 +219,7 @@ def main() -> int:
     check_optional_deps()
     check_browser()
     check_database()
+    check_collect_keys()
     check_local_files()
     check_writable()
     check_port(args.port)

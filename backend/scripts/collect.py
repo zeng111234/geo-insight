@@ -40,8 +40,10 @@ def show_collectors() -> int:
         return 1
     for collector in items:
         state = "可用" if collector.available() else "未配置"
-        print(f"  {collector.key:<10} {collector.kind:<8} {state:<6} {collector.display_name}")
-    print("\n离线答案库路径由 GEO_COLLECTOR_CSV 指定。")
+        models = "、".join(getattr(collector, "MODEL_KEYS", ())) or "—"
+        print(f"  {collector.key:<10} {collector.kind:<8} {state:<6} 模型:{models:<10} {collector.display_name}")
+    print("\n真实采集的 key：GEO_DEEPSEEK_API_KEY / GEO_ARK_API_KEY（或 backend/data/keys.local.json）。")
+    print("离线答案库路径由 GEO_COLLECTOR_CSV 指定。")
     return 0
 
 
@@ -53,7 +55,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None, help="模型 key，例如 doubao")
     parser.add_argument("--collector", default=None, help="采集器 key，默认取第一个可用的")
     parser.add_argument("--limit", type=int, default=1, help="不给 --question 时，按顺序采前 N 个活跃问题")
+    # --once 是 --limit 1 的别名。试点计划里 D2/D3 的判据都写的是「跑一次」，
+    # 有这个参数就不用记 --limit 的默认值。
+    parser.add_argument("--once", action="store_true", help="只采一条（等同 --limit 1）")
     args = parser.parse_args(argv)
+    if args.once:
+        args.limit = 1
 
     if args.list:
         return show_collectors()
@@ -94,7 +101,13 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if result["inserted"]:
                 inserted += 1
-                print(f"  ✓ {text[:28]}  {result['collector']} → {result['text_length']} 字")
+                # 一行里必须能看出「搜没搜、引了几条」：D1 判「目标问题至少 2/3 次
+                # 触发搜索」全靠这两个数，藏在库里就得每次手工查 SQL。
+                print(
+                    f"  ✓ {text[:28]}  {result['collector']} → {result['text_length']} 字"
+                    f"  | {result['message']}"
+                    f"  | raw={result.get('raw_uri') or '（未落盘）'}"
+                )
             else:
                 duplicated += 1
                 print(f"  = {text[:28]}  {result['message']}")

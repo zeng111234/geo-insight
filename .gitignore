@@ -40,3 +40,6 @@ backend/backups/
 # ZCode 会话状态与发布 draft 运行产物(可再生)
 .zcode/
 backend/data/publish_drafts/
+# 采集原始响应：每次采集一段完整平台 JSON，一天几百个文件。
+# 是"事后复核"的存档（answer.raw_uri 指向这里），属于运行产物，不入库。
+backend/data/raw/

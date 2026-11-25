@@ -1,0 +1,5 @@
+{
+  "_说明": "把它复制成 keys.local.json 再填。keys.local.json 已被 .gitignore 排除，不会入库。也可以不用文件，直接设环境变量 GEO_DEEPSEEK_API_KEY / GEO_ARK_API_KEY（环境变量优先）。",
+  "deepseek": "sk-在这里填 DeepSeek 的 key",
+  "doubao": "在这里填火山方舟的 ARK_API_KEY"
+}

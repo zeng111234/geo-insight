@@ -248,11 +248,15 @@ def mark_batch_rolled_back(conn: sqlite3.Connection, batch_id: str, finished_at:
 
 def insert_answer(conn: sqlite3.Connection, payload: dict[str, Any]) -> str:
     answer_id = new_id()
+    # search_called / search_count 只有采集通道有值：导入的答案我们不知道
+    # 平台当次有没有联网，所以留 NULL 表示「不知道」，不能用 0 冒充「没搜」
+    # （见 014 迁移的说明）。导入通道的 payload 里没有这两个键，.get 拿到 None。
     conn.execute(
         """INSERT INTO answer(id, tenant_id, tracker_id, question_id, model_key, model_version,
                               channel, raw_uri, text, text_hash, collected_at, latency_ms,
-                              token_in, token_out, cost, is_valid, import_batch_id, row_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                              token_in, token_out, cost, is_valid, import_batch_id, row_hash,
+                              search_called, search_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)""",
         (
             answer_id,
             payload["tenant_id"],
@@ -271,9 +275,21 @@ def insert_answer(conn: sqlite3.Connection, payload: dict[str, Any]) -> str:
             payload.get("cost"),
             payload["batch_id"],
             payload["row_hash"],
+            _none_if_missing(payload.get("search_called")),
+            _none_if_missing(payload.get("search_count")),
         ),
     )
     return answer_id
+
+
+def _none_if_missing(value):
+    """True/False -> 1/0，None 保持 None。
+
+    不能写 int(value or 0)：那样 None 会变成 0，把「不知道」记成「没搜」。
+    """
+    if value is None:
+        return None
+    return 1 if value else 0
 
 
 def insert_mention(conn: sqlite3.Connection, answer_id: str, brand_id: str, mention: dict) -> None:

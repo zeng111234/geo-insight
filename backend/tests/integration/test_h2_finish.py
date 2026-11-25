@@ -158,7 +158,9 @@ class H2QuestionSetSwitchTest(unittest.TestCase):
         switch = self.client.patch(
             f"/v1/trackers/{TRACKER}", json={"active_question_set_id": new_id}
         )
-        self.assertEqual(switch.status_code, 200)
+        # 带上响应体：500 时中间件把异常原文放在 message 里，
+        # 不打印的话只看到"500 != 200"，等于没有信息。
+        self.assertEqual(switch.status_code, 200, switch.text)
         # 新集是空的:问题列表清零,指标 0 样本
         self.assertEqual(len(self.client.get(f"/v1/trackers/{TRACKER}/questions").json()["items"]), 0)
         # 切回主集

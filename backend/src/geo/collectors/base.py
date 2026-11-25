@@ -43,6 +43,17 @@ class CollectResult:
     cost: float | None = None
     raw_uri: str = ""
     raw: dict = field(default_factory=dict)
+    # 平台返回的引用原文，交给上层归一化后写 citation 表。
+    # 这里保持「平台原样」，不在采集器里转成 CitationDraft：
+    # 采集器只负责「拿到什么」，判媒体类型是分析层的事。
+    citations: list[dict] = field(default_factory=list)
+    # 三态，None 表示**平台没告诉**，不是"没搜索"。
+    # 「没搜索」与「搜了没引用」必须能分开统计，否则改问法时无从判断。
+    search_called: bool | None = None
+    # 平台自己报的搜索次数（DeepSeek 的 usage.server_tool_use.web_search_requests、
+    # 豆包的 usage.tool_usage.web_search）。search_called 只有一个布尔，
+    # 深度思考模式一次问答可能搜多轮，次数是另一条信息。
+    search_count: int | None = None
 
 
 @runtime_checkable

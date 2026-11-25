@@ -28,6 +28,10 @@ class CsvBankCollector:
     display_name = "本地答案库（离线兜底）"
     kind = "offline"
 
+    # 答案库只有正文，没有引用结构。这里给个默认值只是为了 collect_service
+    # 不必特判采集器类型；真的没有引用可写，build_drafts 会返回空列表。
+    CITE_TYPE_DEFAULT = "inline"
+
     def __init__(self, path: str | Path | None = None):
         self._path = Path(path) if path else None
         self._cache: dict[tuple[str, str], dict] = {}

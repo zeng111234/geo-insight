@@ -37,3 +37,37 @@ def available() -> list[Collector]:
 def first_available() -> Collector | None:
     items = available()
     return items[0] if items else None
+
+
+def for_model(model_key: str) -> Collector | None:
+    """挑一个「既可用、又支持这个模型」的采集器。
+
+    不能直接用 ``first_available()``：注册顺序里离线库在第一位，
+    它「可用」但不一定认识 doubao；而换了顺序又会变成「有 key 却用了离线库」。
+    两个问题都不该由注册顺序决定，所以这里按能力筛，并且 **api 优先于 offline**。
+
+    api 优先的理由：离线库是演练用的，配置了 key 就说明用户想采真数据；
+    真采失败应该报错让人看见，而不是悄悄退回一份旧答案。
+    """
+    candidates = [
+        collector
+        for collector in _REGISTRY.values()
+        if collector.available() and collector.supports(model_key)
+    ]
+    if not candidates:
+        return None
+    online = [c for c in candidates if c.kind == "api"]
+    return (online or candidates)[0]
+
+
+def supported_models() -> list[str]:
+    """所有「现在能用」的采集器能采的模型，供 CLI 提示。
+
+    从采集器反推而不是另建一张表：多一张表就多一处会过期的真相。
+    """
+    models: list[str] = []
+    for collector in available():
+        for model in getattr(collector, "MODEL_KEYS", ()):
+            if model not in models:
+                models.append(model)
+    return models
