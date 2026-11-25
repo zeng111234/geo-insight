@@ -58,6 +58,17 @@ def main(argv: list[str] | None = None) -> int:
     # --once 是 --limit 1 的别名。试点计划里 D2/D3 的判据都写的是「跑一次」，
     # 有这个参数就不用记 --limit 的默认值。
     parser.add_argument("--once", action="store_true", help="只采一条（等同 --limit 1）")
+    parser.add_argument(
+        "--force", action="store_true",
+        help="越过当天的计划量补采（人工补数据用；会超出计划，指标里多算样本）",
+    )
+    parser.add_argument(
+        "--loop", action="store_true",
+        help="按缺口循环采集：跑一轮 → 睡 interval 秒 → 再跑。Ctrl+C 停",
+    )
+    parser.add_argument(
+        "--interval", type=int, default=3600, help="--loop 的间隔秒数，默认 3600",
+    )
     args = parser.parse_args(argv)
     if args.once:
         args.limit = 1
@@ -80,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
             tracker_id = tracker["id"]
             print(f"监控对象：{tracker['name']}（{tracker_id}）")
 
+        if args.loop:
+            return run_loop(conn, tracker_id, args)
+
         questions = [args.question] if args.question else repo.active_question_texts(conn, tracker_id, args.limit)
         if not questions:
             print("[x] 没有可采集的问题", file=sys.stderr)
@@ -94,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
                     question_text=text,
                     model_key=args.model,
                     collector_key=args.collector,
+                    allow_over=args.force,
                 )
             except CollectorError as exc:
                 failed += 1
@@ -105,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
                 # 触发搜索」全靠这两个数，藏在库里就得每次手工查 SQL。
                 print(
                     f"  ✓ {text[:28]}  {result['collector']} → {result['text_length']} 字"
+                    f"  [{result['sample_day']} 第 {result['sample_idx']} 条]"
                     f"  | {result['message']}"
                     f"  | raw={result.get('raw_uri') or '（未落盘）'}"
                 )
@@ -116,6 +132,53 @@ def main(argv: list[str] | None = None) -> int:
         return 2 if failed else 0
     finally:
         conn.close()
+
+
+def run_loop(conn, tracker_id: str, args) -> int:
+    """按缺口循环采集。Ctrl+C 正常退出（返回 0，不是异常）。
+
+    每轮都把「今天还差几条」打印出来再决定采不采：这一行是调度器唯一
+    可观测的地方，出问题时能立刻分清是"没缺口所以没采"还是"采了但失败"。
+    """
+    import time
+    from datetime import datetime
+
+    rounds = 0
+    try:
+        while True:
+            rounds += 1
+            try:
+                stats = collect_service.fill_gaps(
+                    conn,
+                    tracker_id=tracker_id,
+                    model_key=args.model,
+                    force=args.force,
+                    collector_key=args.collector,
+                )
+            except ValueError as exc:
+                # 没采样计划、没启用中的问题：这是配置问题，循环下去没意义
+                print(f"[x] {exc}", file=sys.stderr)
+                return 1
+
+            stamp = datetime.now().strftime("%H:%M:%S")
+            print(
+                f"[{stamp}] 第 {rounds} 轮 · {stats['date']} · {args.model}："
+                f"计划缺口 {stats['planned_missing']} → 补采 {stats['inserted']}，"
+                f"失败 {stats['failed']}，今日还差 {stats['remaining_missing']}"
+            )
+            for err in stats["errors"][:5]:
+                print(f"    ! [{err['code']}] {err['question'][:20]}  {err['message'][:90]}")
+
+            if stats["aborted"]:
+                # 提前收手时要说清原因，否则会被当成"采完了"
+                print("    本轮提前结束（认证失败 / 采满 / 连续限流）。间隔后重试")
+
+            if stats["remaining_missing"] == 0:
+                print(f"    今天已经采满，{args.interval} 秒后再检查")
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print(f"\n已停止（共 {rounds} 轮）。")
+        return 0
 
 
 if __name__ == "__main__":

@@ -78,3 +78,61 @@ def recompute(
         now=now,
     )
     return summary
+
+
+def detect_for_answer(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    tracker_id: str,
+    answer_id: str,
+) -> dict:
+    """只对一条答案做识别——采集之后的增量路径。
+
+    为什么不全量重算：采集循环每小时跑一次，全量扫全部答案会让每次采集
+    多花几百毫秒到几秒，而且随库增长越来越慢；1500 条时还能忍，15000 条时
+    调度器会被自己的重算拖到跑不完一轮。
+
+    口径必须与 ``recompute`` 完全一致：同一个 ``mention_parser``、同一套别名
+    （品牌名 + 启用中的别名）、同样只处理 ``is_valid=1``。
+    两套路径分叉是这类"为了快复制一份逻辑"最常见的失败方式，
+    所以 tests/integration/test_collect_slot.py 里有一条交叉断言：
+    同一批答案，增量结果必须与全量重算的提及数逐个相等。
+
+    不写审计：这是采集的附带动作，一次采集一条，写审计会把审计表刷成流水账；
+    人工触发的全量重算才需要留痕。
+    """
+    row = conn.execute(
+        "SELECT text, is_valid FROM answer WHERE id = ? AND tracker_id = ? AND tenant_id = ?",
+        (answer_id, tracker_id, tenant_id),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"答案不存在或不属于该租户：{answer_id}")
+
+    profile = config_repo.get_brand_profile(conn, tracker_id, tenant_id)
+    if profile is None:
+        return {"answer_id": answer_id, "matched": False, "reason": "NO_BRAND_PROFILE"}
+
+    if not row["is_valid"]:
+        # 无效答案不进指标分母，也不进识别——与 recompute 的 answer_texts 口径一致
+        return {"answer_id": answer_id, "matched": False, "reason": "INVALID_ANSWER"}
+
+    aliases = [profile["name"]] + [alias["alias"] for alias in profile["aliases"]]
+    hit = mention_parser.detect(row["text"], aliases)
+
+    # 先清旧结果再写：mention 表有 UNIQUE(answer_id, brand_id)，
+    # 不清的话重试第二次插入直接撞约束，把一次正常重试变成异常。
+    conn.execute(
+        "DELETE FROM mention WHERE answer_id = ? AND brand_id = ? AND subject_type = 'own'",
+        (answer_id, profile["id"]),
+    )
+    if hit is None:
+        return {"answer_id": answer_id, "matched": False}
+
+    mention_repo.insert_mention(conn, answer_id, profile["id"], hit)
+    return {
+        "answer_id": answer_id,
+        "matched": True,
+        "matched_alias": hit.alias,
+        "sentiment": hit.sentiment,
+    }

@@ -632,14 +632,15 @@ class CollectToDatabaseTests(RawDirMixin):
         ).fetchone()
         self.assertEqual(row["search_called"], 1)
 
-    def test_duplicate_is_not_written_twice(self):
-        """同一秒同内容重跑：answer 与 citation 都不新增。
+    def test_same_day_second_collect_is_a_new_sample(self):
+        """同一天再采一次 = 第 2 条样本，不是重复。
 
-        引用写在 answer 之后，如果幂等判断只在 answer 上，
-        重复跑会留下"一条答案两份引用"，指标直接翻倍。
+        平台对同一个问题常常逐字返回相同的答案。早期用 row_hash（含到达秒）
+        判重，同一秒内采两次会被吞掉一条——但那是两次独立观测，
+        吞掉之后样本数永远够不到计划量，提及率的分母就是错的。
+        幂等改由槽位保证（见 tests/integration/test_collect_slot.py）。
         """
-        body = dict(DEEPSEEK_BODY)
-        self.use_fake(lambda url, payload: resp(body=body))
+        self.use_fake(lambda url, payload: resp(body=DEEPSEEK_BODY))
         first = collect_service.run_once(
             self.conn,
             tracker_id=fixtures.TRACKER,
@@ -647,8 +648,6 @@ class CollectToDatabaseTests(RawDirMixin):
             model_key="deepseek",
             tenant_id=fixtures.TENANT,
         )
-        self.assertTrue(first["inserted"])
-
         second = collect_service.run_once(
             self.conn,
             tracker_id=fixtures.TRACKER,
@@ -656,10 +655,14 @@ class CollectToDatabaseTests(RawDirMixin):
             model_key="deepseek",
             tenant_id=fixtures.TENANT,
         )
-        self.assertFalse(second["inserted"])
-        self.assertEqual(second["reason"], "DUPLICATE")
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM answer").fetchone()[0], 1)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM citation").fetchone()[0], 1)
+
+        self.assertTrue(first["inserted"])
+        self.assertTrue(second["inserted"])
+        self.assertEqual(first["sample_idx"], 1)
+        self.assertEqual(second["sample_idx"], 2)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM answer").fetchone()[0], 2)
+        # 每条答案各自带一份引用，不能串到一条上
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM citation").fetchone()[0], 2)
 
     def test_imported_answer_keeps_search_unknown(self):
         """导入的答案没有搜索信息 → 两列必须是 NULL。

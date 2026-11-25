@@ -251,12 +251,15 @@ def insert_answer(conn: sqlite3.Connection, payload: dict[str, Any]) -> str:
     # search_called / search_count 只有采集通道有值：导入的答案我们不知道
     # 平台当次有没有联网，所以留 NULL 表示「不知道」，不能用 0 冒充「没搜」
     # （见 014 迁移的说明）。导入通道的 payload 里没有这两个键，.get 拿到 None。
+    #
+    # sample_day / sample_idx 同理：只有采集通道分配槽位（015 迁移 + 唯一索引）。
+    # 导入的答案不知道是当天第几次，留 NULL；唯一索引是部分索引，不管它们。
     conn.execute(
         """INSERT INTO answer(id, tenant_id, tracker_id, question_id, model_key, model_version,
                               channel, raw_uri, text, text_hash, collected_at, latency_ms,
                               token_in, token_out, cost, is_valid, import_batch_id, row_hash,
-                              search_called, search_count)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)""",
+                              search_called, search_count, sample_day, sample_idx)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
         (
             answer_id,
             payload["tenant_id"],
@@ -277,9 +280,33 @@ def insert_answer(conn: sqlite3.Connection, payload: dict[str, Any]) -> str:
             payload["row_hash"],
             _none_if_missing(payload.get("search_called")),
             _none_if_missing(payload.get("search_count")),
+            payload.get("sample_day"),
+            payload.get("sample_idx"),
         ),
     )
     return answer_id
+
+
+def max_slot(
+    conn: sqlite3.Connection,
+    tracker_id: str,
+    question_id: str,
+    model_key: str,
+    channel: str,
+    day: str,
+) -> int:
+    """当天这个(问题, 模型, 渠道)已经用到的最大样本序号；没采过返回 0。
+
+    取 max 而不是 count：如果中间有行被删掉（人工清理、测试），count 会算出
+    一个已经被用过的序号，撞唯一索引。max + 1 只会往前，不会回头。
+    """
+    row = conn.execute(
+        """SELECT MAX(sample_idx) FROM answer
+           WHERE tracker_id = ? AND question_id = ? AND model_key = ? AND channel = ?
+             AND sample_day = ?""",
+        (tracker_id, question_id, model_key, channel, day),
+    ).fetchone()
+    return int(row[0] or 0)
 
 
 def _none_if_missing(value):

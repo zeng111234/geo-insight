@@ -119,13 +119,22 @@ class CollectServiceTest(unittest.TestCase):
         self.assertEqual(row["text"], "采集到的正文")
         self.assertTrue(row["raw_uri"].startswith("collect://csv_bank/"))
 
-    def test_same_second_is_deduplicated(self):
-        self.run_once()
+    def test_same_day_second_collect_is_a_second_sample(self):
+        """同一天再采一次是第 2 条样本，不再按"同一秒"去重。
+
+        早期实现用 row_hash（含到达秒）判重：同一秒内采两次会被吞掉一条。
+        但平台对同一个问题经常返回逐字相同的答案，吞掉之后样本数永远
+        够不到计划量，提及率的分母就是错的。
+        幂等改由槽位保证（见 tests/integration/test_collect_slot.py）。
+        """
+        first = self.run_once()
         again = self.run_once()
 
-        self.assertFalse(again["inserted"])
-        self.assertEqual(again["reason"], "DUPLICATE")
-        self.assertEqual(self.scalar("SELECT COUNT(*) FROM answer"), 1)
+        self.assertTrue(first["inserted"])
+        self.assertTrue(again["inserted"])
+        self.assertEqual(first["sample_idx"], 1)
+        self.assertEqual(again["sample_idx"], 2)
+        self.assertEqual(self.scalar("SELECT COUNT(*) FROM answer"), 2)
 
     def test_unknown_question_is_refused(self):
         with self.assertRaises(CollectorError) as ctx:
