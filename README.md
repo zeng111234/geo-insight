@@ -137,6 +137,12 @@ python backend/run.py --no-browser    # 不自动开浏览器
 
 `--reset` 会重建全部演示数据，**包括 5 份报告**（含一份不可比、一份 +23.3pp 可比），所以重置后报告中心不会是空的。
 
+**最小日志（H4-5）**：每个请求在控制台输出一行 JSON，含 `method/path/status/duration_ms/request_id`
+（只记 URL 路径、不记 query，避免把 token 写进日志）。`/health` 的 `ops` 字段给出进程内最近 200 个请求的
+错误率（只算 5xx）、慢请求数（默认 >1000ms）、P95——没有样本时错误率是 `null` 而非 0。
+`GEO_LOG_WINDOW` / `GEO_SLOW_MS` 可调。这是进程内的，重启清零、不落盘，不假装成持久化监控；
+`/health` 与 `/static` 自己不计数，避免看板探针污染分母。
+
 ## 备份与恢复
 
 数据只有一份（项目根的 `geo.db`），丢了自己重建不出来——里面是真实的采集结果与配置。

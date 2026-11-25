@@ -26,7 +26,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from geo import code_rev, db
+from geo import code_rev, db, observability
 from geo.api import nav
 from geo.domain import channels as channels_domain
 from geo.domain import citation as citation_domain
@@ -71,11 +71,19 @@ EXPORT_FIELDS = (
 )
 
 
+# H4-5 最小可观测：进程内请求窗口。重启清零——不假装成持久化监控。
+request_window = observability.RequestWindow()
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request.state.request_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex
+        started = time.perf_counter()
+        status = 500
         try:
-            return await call_next(request)
+            response = await call_next(request)
+            status = response.status_code
+            return response
         except Exception as exc:  # noqa: BLE001
             return JSONResponse(
                 {
@@ -84,6 +92,16 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
                     "request_id": request.state.request_id,
                 },
                 status_code=500,
+            )
+        finally:
+            # 成功、业务错误、未捕获异常三条路径都要记——漏了异常路径，
+            # 错误率就永远偏低，出了问题看板反而一片绿。
+            request_window.observe(
+                request.method,
+                request.url.path,
+                status,
+                int((time.perf_counter() - started) * 1000),
+                request.state.request_id,
             )
 
 
@@ -336,6 +354,7 @@ async def health(request: Request):
         "status": "ok",
         "metric_version": settings.metric_version,
         "code_rev": code_rev.code_rev(),
+        "ops": request_window.stats(),
     })
 
 
