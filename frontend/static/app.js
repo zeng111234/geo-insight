@@ -37,6 +37,15 @@
       body: JSON.stringify(payload || {})
     });
   };
+  var patch = function (path, payload) {
+    return request(path, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+  };
+  // DELETE 成功时是 204 无 body，request 里的 res.json() 会失败并吞成 {}，这是预期的
+  var del = function (path) { return request(path, { method: "DELETE" }); };
 
   var toastTimer = null;
   function toast(msg, kind) {
@@ -155,7 +164,7 @@
 
   window.GEO = {
     API: API, $: $, esc: esc, pct: pct, metricText: metricText, num: num,
-    get: get, post: post, toast: toast, dates: dates, tracker: tracker,
+    get: get, post: post, patch: patch, del: del, toast: toast, dates: dates, tracker: tracker,
     fillTrackers: fillTrackers, fail: fail, empty: empty,
     pagerInit: pagerInit, pagerReset: pagerReset, pagerNav: pagerNav, pagerSlice: pagerSlice
   };

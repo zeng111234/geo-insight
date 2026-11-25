@@ -466,3 +466,79 @@ def failure_stats(
     attempted = int(row["attempted"] or 0)
     failed = int(row["failed"] or 0)
     return {"attempted": attempted, "failed": failed, "rate": (failed / attempted) if attempted else None}
+
+
+# ---------------------------------------------------------------------------
+# 删除监控对象
+# ---------------------------------------------------------------------------
+
+# 删除顺序从叶子到根。两张表会被两个父级同时引用，顺序错了会撞外键：
+# - run_item 引用 question，必须在 question 之前删；
+# - answer 被 citation/mention/answer_block 引用，先删子表再删父表。
+_ANSWER_CHILDREN = ("citation", "mention", "answer_block")
+
+
+def delete_tracker(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) -> dict | None:
+    """级联删除监控对象及其全部派生数据，返回删除前的快照供审计用。
+
+    **不 commit**：删除与审计必须同一事务，否则会出现"数据删了但没记账"。
+    调用方负责 commit / rollback。
+
+    返回 ``{"tracker": {...}, "deleted": {表名: 行数}}``；对象不存在或不属于该租户时返回 None。
+
+    为什么要连子表一起删：answer/report/article 上都有 tracker_id，
+    只删 tracker 会留下一堆孤儿行；而这些行里有客户问过的问题和原始回答，
+    留着比删掉更危险。
+    """
+    row = conn.execute(
+        "SELECT id, tenant_id, brand_id, name, industry, region, status, created_at "
+        "FROM tracker WHERE id = ? AND tenant_id = ?",
+        (tracker_id, tenant_id),
+    ).fetchone()
+    if not row:
+        return None
+
+    deleted: dict[str, int] = {}
+
+    for table in _ANSWER_CHILDREN:
+        cur = conn.execute(
+            f"DELETE FROM {table} WHERE answer_id IN "
+            f"(SELECT id FROM answer WHERE tracker_id = ?)",
+            (tracker_id,),
+        )
+        deleted[table] = cur.rowcount
+
+    cur = conn.execute(
+        "DELETE FROM report_snapshot WHERE report_id IN "
+        "(SELECT id FROM report WHERE tracker_id = ?)",
+        (tracker_id,),
+    )
+    deleted["report_snapshot"] = cur.rowcount
+
+    cur = conn.execute(
+        "DELETE FROM article_fact WHERE article_id IN "
+        "(SELECT id FROM article WHERE tracker_id = ?)",
+        (tracker_id,),
+    )
+    deleted["article_fact"] = cur.rowcount
+
+    # run_item 引用 question，必须先于 question 删
+    cur = conn.execute(
+        "DELETE FROM run_item WHERE run_id IN (SELECT id FROM run WHERE tracker_id = ?)",
+        (tracker_id,),
+    )
+    deleted["run_item"] = cur.rowcount
+
+    cur = conn.execute(
+        "DELETE FROM question WHERE question_set_id IN "
+        "(SELECT id FROM question_set WHERE tracker_id = ?)",
+        (tracker_id,),
+    )
+    deleted["question"] = cur.rowcount
+
+    for table in ("answer", "report", "article", "run", "sampling_plan", "question_set"):
+        cur = conn.execute(f"DELETE FROM {table} WHERE tracker_id = ?", (tracker_id,))
+        deleted[table] = cur.rowcount
+
+    conn.execute("DELETE FROM tracker WHERE id = ? AND tenant_id = ?", (tracker_id, tenant_id))
+    return {"tracker": dict(row), "deleted": deleted}

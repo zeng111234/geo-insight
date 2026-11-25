@@ -699,6 +699,41 @@ async def tracker_detail(request: Request):
         conn.close()
 
 
+async def tracker_delete(request: Request):
+    """删除监控对象：级联删掉它的答案、提及、引用、报告、文章与采样计划。
+
+    这是全系统破坏性最强的操作——一次能带走几千行。三道闸：
+    1. 租户校验（不匹配按 404 处理，不泄露对象是否存在）；
+    2. 与审计同一事务，审计写失败整体回滚；
+    3. 前端二次确认里要手打对象名（见 monitor.html），不是点一下「确定」。
+    """
+    conn = db.connect()
+    try:
+        tenant_id = _tenant(request)
+        tracker_id = request.path_params["tracker_id"]
+        removed = config_repo.delete_tracker(conn, tracker_id, tenant_id)
+        if removed is None:
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+
+        audit_service.record(
+            conn,
+            tenant_id=tenant_id,
+            actor_id=_actor_id(request),
+            action="tracker.delete",
+            object_type="tracker",
+            object_id=tracker_id,
+            # 表快照 + 删了多少行：事后要能回答「那次删掉了什么」
+            before={**removed["tracker"], "deleted_rows": removed["deleted"]},
+        )
+        conn.commit()
+        return Response(status_code=204)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 async def brand_profile(request: Request):
     conn = db.connect()
     try:
@@ -1129,6 +1164,8 @@ def create_app() -> Starlette:
         Route(f"{settings.api_prefix}/trackers", list_trackers, methods=["GET"]),
         Route(f"{settings.api_prefix}/trackers", create_tracker, methods=["POST"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}", tracker_detail, methods=["GET", "PATCH"]),
+        # 同路径单独一条路由：DELETE 的语义和 GET/PATCH 完全不同，不塞进同一个函数
+        Route(f"{settings.api_prefix}/trackers/{{tracker_id}}", tracker_delete, methods=["DELETE"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/brand", brand_profile),
         Route(f"{settings.api_prefix}/brands/{{brand_id}}/aliases", brand_aliases, methods=["POST"]),
         Route(

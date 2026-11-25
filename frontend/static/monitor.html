@@ -42,6 +42,17 @@
   .mon-tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   .mon-body { flex: 1; min-height: 0; overflow-y: auto; }
 
+  /* 对话框：app.css 里没有，settings.html 用的是它自己的内联表，这里按同一套尺寸重写一份 */
+  dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0;
+    box-shadow: 0 20px 60px rgba(31,36,48,.18); width: min(520px, 94vw); }
+  dialog::backdrop { background: rgba(31,36,48,.32); }
+  dialog h2 { margin: 0; font-size: 14px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
+  dialog .dialog-body { padding: 14px 16px; }
+  dialog .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px;
+    border-top: 1px solid var(--border); background: var(--subtle); }
+  dialog code { background: var(--subtle); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+  dialog .notice { margin-top: 12px; }
+
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; padding: 14px; }
   .kpi { border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; background: var(--panel); }
   .kpi .k { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
@@ -143,9 +154,14 @@
             <div class="line1">
               <h2 id="objName">—</h2>
               <span class="tag" id="objStatus">—</span>
+              <!-- 按钮组按参考系统排序（去掉「表格浏览」，它属于 E1c 的视图切换） -->
               <div class="acts">
+                <button id="reportBtn" type="button">下载报告</button>
+                <button id="exportBtn" type="button">导出</button>
                 <button id="refreshBtn" type="button">刷新</button>
-                <a class="btn" href="/settings">问题设置</a>
+                <button id="pauseBtn" type="button">暂停</button>
+                <button id="deleteBtn" type="button" class="danger">删除</button>
+                <a class="btn" href="/settings">编辑</a>
               </div>
             </div>
             <div class="meta" id="objMeta"></div>
@@ -157,6 +173,25 @@
     </div>
   </main>
 </div>
+
+<!-- 删除确认：要求手打对象名，不是点一下「确定」。
+     一次删除会带走该对象的问题、答案、提及、引用与报告，误点的代价太大。 -->
+<dialog id="delDialog">
+  <form method="dialog">
+    <h2>删除监控对象</h2>
+    <div class="dialog-body">
+      <p id="delSummary" style="margin:0 0 12px;font-size:12.5px;line-height:1.7"></p>
+      <label class="field"><span>输入对象名称以确认：<code id="delName"></code></span>
+        <input id="delInput" type="text" autocomplete="off" placeholder="逐字输入上面的名称" /></label>
+      <div class="notice warn">删除会连带清空该对象的问题、答案、提及、引用与报告，不可恢复。审计日志会留下这次删除的完整快照。</div>
+    </div>
+    <div class="dialog-foot">
+      <button value="cancel">取消</button>
+      <button value="ok" id="delOk" class="danger" disabled>永久删除</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
 (function () {
   var G = window.GEO, $ = G.$, esc = G.esc;
@@ -267,6 +302,15 @@
       "创建于 " + String(t.created_at || "").slice(0, 10),
       qs.total + " 个问题（核心 " + (qs.core || 0) + " / 长尾 " + (qs.long_tail || 0) + "）"
     ].filter(Boolean).map(esc).map(function (v) { return "<span>" + v + "</span>"; }).join("") + kwChips;
+
+    // 按钮跟着状态走：已暂停时显示「恢复」，已归档时既不能暂停也不能删（归档是终态）
+    $("pauseBtn").textContent = t.status === "paused" ? "恢复" : "暂停";
+    $("pauseBtn").disabled = t.status === "archived";
+    $("deleteBtn").disabled = t.status === "archived";
+  }
+
+  function currentTracker() {
+    return state.trackers.filter(function (x) { return x.id === state.trackerId; })[0] || null;
   }
 
   function renderTabs() {
@@ -956,6 +1000,104 @@
   $("newTracker").addEventListener("click", function () { location.href = "/settings"; });
   $("refreshBtn").addEventListener("click", function () { renderTab(); });
   $("load").addEventListener("click", function () { renderTab(); });
+
+  // ---- 对象头按钮组 ----
+
+  // 导出：直接走浏览器下载，不用 fetch——文件可能几万行，塞进内存再拼 Blob 没必要
+  $("exportBtn").addEventListener("click", function () {
+    if (!state.trackerId) return;
+    location.href = "/v1/trackers/" + state.trackerId + "/answers/export?" +
+      G.dates() + "&format=csv";
+    G.toast("正在导出当前日期范围内的答案");
+  });
+
+  $("reportBtn").addEventListener("click", async function () {
+    if (!state.trackerId) return;
+    var from = $("from").value, to = $("to").value;
+    // 报告要算环比，日期范围必须有跨度；同一天生成不出「不可比」以外的结论
+    if (!from || !to || from >= to) {
+      G.toast("报告周期至少 2 天，请把日期范围拉开再试", "warn");
+      return;
+    }
+    $("reportBtn").disabled = true;
+    try {
+      var r = await G.post("/trackers/" + state.trackerId + "/reports", { from: from, to: to });
+      location.href = "/report/" + r.id;
+    } catch (e) {
+      G.toast("生成报告失败：" + e.message, "error");
+      $("reportBtn").disabled = false;
+    }
+  });
+
+  $("pauseBtn").addEventListener("click", async function () {
+    var t = currentTracker();
+    if (!t) return;
+    var next = t.status === "paused" ? "active" : "paused";
+    $("pauseBtn").disabled = true;
+    try {
+      await G.patch("/trackers/" + t.id, { status: next });
+      t.status = next; // 先改本地，省一次列表请求；失败会走 catch 并重新拉
+      renderTrackerList();
+      renderHead();
+      G.toast(next === "paused" ? "已暂停监控，采样计划不再产生新任务" : "已恢复监控");
+    } catch (e) {
+      G.toast("切换状态失败：" + e.message, "error");
+    } finally {
+      $("pauseBtn").disabled = false;
+    }
+  });
+
+  // 删除：弹框 + 手打对象名。点一下「确定」就删掉几千行的设计不该存在。
+  var delTarget = null;
+  $("deleteBtn").addEventListener("click", function () {
+    var t = currentTracker();
+    if (!t) return;
+    delTarget = t;
+    var qs = t.question_summary || {};
+    $("delName").textContent = t.name;
+    $("delSummary").innerHTML =
+      "即将删除 <b>" + esc(t.brand_name || t.name) + "</b>，包含 " +
+      G.num(qs.total) + " 个问题及其全部答案、提及、引用与报告。";
+    $("delInput").value = "";
+    $("delOk").disabled = true;
+    $("delDialog").showModal();
+    $("delInput").focus();
+  });
+
+  $("delInput").addEventListener("input", function () {
+    // 逐字相等才放行：允许前后空格，不允许只打一部分
+    $("delOk").disabled = !delTarget || $("delInput").value.trim() !== delTarget.name;
+  });
+
+  $("delDialog").addEventListener("close", async function () {
+    if ($("delDialog").returnValue !== "ok" || !delTarget) return;
+    var id = delTarget.id;
+    delTarget = null;
+    try {
+      await G.del("/trackers/" + id);
+      G.toast("已删除，可在审计日志里查到这次操作的完整快照");
+      await reloadTrackers();
+    } catch (e) {
+      G.toast("删除失败：" + e.message, "error");
+    }
+  });
+
+  // 删除或新建后重拉列表：不能只从 state 里 splice，问题数、状态都可能已变
+  async function reloadTrackers() {
+    var d = await G.get("/trackers");
+    state.trackers = d.items || [];
+    await G.fillTrackers();
+    if (!state.trackers.some(function (x) { return x.id === state.trackerId; })) {
+      state.trackerId = state.trackers.length ? state.trackers[0].id : "";
+      state.questionId = "";
+      state.questions = [];
+      $("tracker").value = state.trackerId;
+    }
+    syncUrl(true);
+    renderTrackerList();
+    renderHead();
+    renderTab();
+  }
 
   window.addEventListener("popstate", function () {
     var q = readQuery();
