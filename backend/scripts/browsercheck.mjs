@@ -161,6 +161,10 @@ const EXTRA = {
   "/publish": [
     ["发布记录", /<div id="pubs"[^>]*>[\s\S]{0,240}<div class="pub-row"/],
     ["渠道状态", /<div class="body" id="channels"[^>]*>[\s\S]{0,240}<table/],
+    // P2：守渲染后的 DOM，不是源码文本。空格子说人话、失败原因独占一行。
+    // 这两条是行为守门——契约测试只查源码，改坏渲染行它抓不到。
+    ["渠道空值说人话", /class="muted ch-note">未检测 · 去工作室连接</],
+    ["失败原因独立行", /class="pub-fail">失败原因：/],
     ["发布效果对比", /<div id="impact"[^>]*>[\s\S]{0,240}<div class="imp"/],
     ["目标问题口径", /<div class="scope">目标问题：/],
     ["按模型拆", /<th>模型<\/th>/],
