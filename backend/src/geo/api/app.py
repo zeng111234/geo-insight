@@ -40,6 +40,7 @@ from geo.services import (
     audit_service,
     auth_service,
     config_service,
+    credit_service,
     content_service,
     mention_service,
     metric_service,
@@ -1423,6 +1424,27 @@ async def methodology(request: Request):
     return JSONResponse(methodology_module.methodology())
 
 
+async def credits_overview(request: Request):
+    """积分余额与流水。余额只从流水求和，不在别处缓存（决策 009）。"""
+    conn = db.connect()
+    try:
+        tenant_id = _tenant(request)
+        try:
+            limit = min(200, max(1, int(request.query_params.get("limit", 50))))
+        except ValueError:
+            return _error(request, "VALIDATION_ERROR", "limit must be an integer")
+        return JSONResponse(
+            {
+                "balance": credit_service.balance(conn, tenant_id),
+                "entries": credit_service.entries(conn, tenant_id, limit),
+                "unit": "分",
+                "note": "人工发放的账本，不对外收费；余额 = 全部流水求和",
+            }
+        )
+    finally:
+        conn.close()
+
+
 async def meta_channels(request: Request):
     """模型 × 端 16 渠道清单（决策 009 验收点）。不查库，纯口径。"""
     items = channels_domain.channel_list()
@@ -1702,6 +1724,7 @@ def create_app() -> Starlette:
         Route("/health", health),
         Route(f"{settings.api_prefix}/meta/methodology", methodology),
         Route(f"{settings.api_prefix}/meta/channels", meta_channels),
+        Route(f"{settings.api_prefix}/credits", credits_overview),
         Route(
             f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/channels",
             metrics_channels,

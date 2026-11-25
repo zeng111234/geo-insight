@@ -50,6 +50,28 @@
   .tag { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2); }
   .tag.published { color: var(--green-ink); border-color: var(--green-line); background: var(--green-tint); }
   .tag.review { color: var(--amber-ink); border-color: var(--amber-line); background: var(--amber-tint); }
+  /* E4 积分徽章：账本是真的，定价是假的——标签明说，别当计费系统看 */
+  .credit-badge { cursor: pointer; user-select: none; }
+  .credit-badge:hover { border-color: var(--accent); }
+  .credit-badge b { color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+  dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0;
+    box-shadow: 0 20px 60px rgba(31,36,48,.18); }
+  dialog::backdrop { background: rgba(31,36,48,.32); }
+  dialog h2 { margin: 0; font-size: 14px; padding: 13px 16px;
+    border-bottom: 1px solid var(--border); }
+  dialog .dialog-body { padding: 14px 16px; }
+  dialog .dialog-foot { display: flex; justify-content: flex-end; gap: 8px;
+    padding: 12px 16px; border-top: 1px solid var(--border); background: var(--subtle); }
+  dialog#creditDialog { width: min(620px, 94vw); }
+  dialog#creditDialog .balance { font-size: 28px; font-weight: 600; color: var(--text-strong); }
+  dialog#creditDialog table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  dialog#creditDialog th, dialog#creditDialog td { padding: 7px 8px; text-align: left;
+    border-bottom: 1px solid var(--border); }
+  dialog#creditDialog td.num, dialog#creditDialog th.num { text-align: right;
+    font-variant-numeric: tabular-nums; }
+  dialog#creditDialog .pos { color: var(--green-ink); }
+  dialog#creditDialog .neg { color: var(--red-ink); }
+
   /* 六阶段流水线（E3）：步骤条 + 当前阶段操作 */
   .stage-bar { display: flex; flex-wrap: wrap; gap: 0; align-items: stretch;
     border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
@@ -175,6 +197,7 @@ if (location.protocol === "file:") {
       <span class="sub" id="trackerLabel">辽宁辽征律师事务所 · 国内 AI 品牌可见度</span>
       <span class="spacer"></span>
       <span class="pill">人工成稿 · 系统只做事实核对与合规提示</span>
+      <span class="pill credit-badge" id="creditBadge" title="查看积分流水">积分 <b id="creditBalance">—</b></span>
       <button id="newArticle">+ 新建文章</button>
       <a class="plain" href="/" style="font-size:12px">← 返回看板</a>
     </header>
@@ -250,6 +273,18 @@ if (location.protocol === "file:") {
     </div>
   </main>
 </div>
+<dialog id="creditDialog">
+  <h2>积分账本 <span class="badge">账本是真的，定价是假的</span></h2>
+  <div class="dialog-body">
+    <div class="balance" id="creditBig">—</div>
+    <div class="muted" style="font-size:11px;margin:4px 0 14px" id="creditNote"></div>
+    <div id="creditEntries"></div>
+  </div>
+  <div class="dialog-foot">
+    <button type="button" id="creditClose">关闭</button>
+  </div>
+</dialog>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -531,6 +566,46 @@ async function loadChannels() {
   renderChannels();
 }
 
+/* ---------- E4 积分账本：余额 = 流水求和 ---------- */
+function fmtCredit(cents) {
+  return (Number(cents || 0) / 100).toFixed(2) + " 元等值";
+}
+
+async function loadCredits() {
+  try {
+    var d = await api("/credits");
+    $("creditBalance").textContent = d.balance + " 分";
+    state.credits = d;
+  } catch (e) {
+    $("creditBalance").textContent = "—";
+  }
+}
+
+function renderCreditEntries(d) {
+  $("creditBig").textContent = fmtCredit(d.balance);
+  $("creditNote").textContent = d.note || "";
+  var rows = d.entries || [];
+  $("creditEntries").innerHTML = rows.length
+    ? '<div class="table-wrap"><table><thead><tr><th>时间</th><th>方向</th>' +
+      '<th>原因</th><th class="num">变动</th><th class="num">余额贡献</th></tr></thead><tbody>' +
+      rows.map(function (x) {
+        var sign = x.delta > 0 ? "+" : "";
+        var cls = x.delta > 0 ? "pos" : "neg";
+        return "<tr><td>" + esc(String(x.created_at || "").slice(0, 16).replace("T", " ")) + "</td>" +
+          "<td>" + esc(x.direction) + "</td><td>" + esc(x.reason) + "</td>" +
+          '<td class="num ' + cls + '">' + sign + esc(x.amount) + "</td>" +
+          '<td class="num ' + cls + '">' + sign + esc(x.delta) + "</td></tr>";
+      }).join("") + "</tbody></table></div>"
+    : '<div class="empty">还没有流水。用 <code>python backend/scripts/credits.py --grant 10000 --reason "试点初始额度"</code> 发放。</div>';
+}
+
+$("creditBadge").addEventListener("click", async function () {
+  $("creditDialog").showModal();
+  try { renderCreditEntries(await api("/credits")); }
+  catch (e) { $("creditEntries").innerHTML = '<div class="notice error">读取失败：' + esc(e.message) + "</div>"; }
+});
+$("creditClose").addEventListener("click", function () { $("creditDialog").close(); });
+
 /* ---------- 六阶段流水线（E3） ---------- */
 function renderStages() {
   const s = state.stages;
@@ -605,6 +680,7 @@ async function selectArticle(id) {
 }
 
 async function load() {
+  loadCredits();  // 余额和文章列表互不依赖，不必串行等
   try {
     const [list, channels] = await Promise.all([
       api("/trackers/" + TRACKER + "/articles"),

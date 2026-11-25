@@ -426,9 +426,13 @@ def main() -> None:
         # ---- 002 内容工作室 ----
         status, ctype, html = get_html("/studio")
         check("studio page served", status == 200 and "内容工作室" in html, {"status": status})
-        # 决策 003：不复刻参考产品，页面上不允许出现积分与 AI 成稿入口。
-        # 这三条在改动前必然失败，是「假象不能回来」的回归闸门。
-        for forbidden in ("Credits", "5 积分", "AI 生成草稿", "AI 助手"):
+        # 决策 003 曾要求页面不得出现积分/AI 成稿；决策 009 覆盖 003，
+        # 明确要求把积分账本做真（账本是真的，定价是假的）。按决策 009 文档
+        # 第 33 行的要求，这里显式改成正向断言，不悄悄删掉旧断言。
+        # AI 真调仍依赖 key、尚未接入，所以「AI 助手」仍为负向断言——不编造入口。
+        check("studio shows real credit ledger", "creditBalance" in html
+              and "账本是真的" in html, "missing credit ledger badge")
+        for forbidden in ("5 积分", "AI 生成草稿", "AI 助手"):
             check(f"studio has no fake affordance [{forbidden}]", forbidden not in html, {"found": forbidden})
         check("studio states human authorship", "人工成稿" in html, "missing 人工成稿 statement")
 

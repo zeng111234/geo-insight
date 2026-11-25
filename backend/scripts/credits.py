@@ -14,10 +14,17 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
-from geo import db
-from geo.services import credit_service
-from geo.settings import settings
+# 和其它 scripts/*.py 一样：直接 python scripts/credits.py 时，
+# 仓库根不在 sys.path，不插这一行会 ModuleNotFoundError: No module named 'geo'。
+# README 给的三条命令就是这种直跑方式，必须能工作。
+BACKEND = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND / "src"))
+
+from geo import db  # noqa: E402
+from geo.services import credit_service  # noqa: E402
+from geo.settings import settings  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
