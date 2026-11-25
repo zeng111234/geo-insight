@@ -258,8 +258,8 @@ def insert_answer(conn: sqlite3.Connection, payload: dict[str, Any]) -> str:
         """INSERT INTO answer(id, tenant_id, tracker_id, question_id, model_key, model_version,
                               channel, raw_uri, text, text_hash, collected_at, latency_ms,
                               token_in, token_out, cost, is_valid, import_batch_id, row_hash,
-                              search_called, search_count, sample_day, sample_idx)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
+                              search_called, search_count, sample_day, sample_idx, client)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)""",
         (
             answer_id,
             payload["tenant_id"],
@@ -282,6 +282,7 @@ def insert_answer(conn: sqlite3.Connection, payload: dict[str, Any]) -> str:
             _none_if_missing(payload.get("search_count")),
             payload.get("sample_day"),
             payload.get("sample_idx"),
+            payload.get("client") or "web",
         ),
     )
     return answer_id

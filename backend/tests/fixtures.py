@@ -111,6 +111,7 @@ def add_answer(
     question_id: str = QUESTION,
     text: str | None = None,
     channel: str = "api",
+    client: str = "web",
 ) -> str:
     """直接写一条有效答案，绕过导入通道的解析——测试要精确控制时间与条数。"""
     body = text or f"{collected_at} / {model_key} 的答案"
@@ -131,6 +132,7 @@ def add_answer(
             "row_hash": sha(
                 "|".join([TRACKER, question_id, model_key, channel, collected_at, body])
             ),
+            "client": client,
         },
     )
 

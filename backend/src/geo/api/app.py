@@ -28,6 +28,7 @@ from starlette.concurrency import run_in_threadpool
 
 from geo import db
 from geo.api import nav
+from geo.domain import channels as channels_domain
 from geo.domain import citation as citation_domain
 from geo.domain import methodology as methodology_module
 from geo.domain import relevance
@@ -1345,6 +1346,36 @@ async def methodology(request: Request):
     return JSONResponse(methodology_module.methodology())
 
 
+async def meta_channels(request: Request):
+    """模型 × 端 16 渠道清单（决策 009 验收点）。不查库，纯口径。"""
+    items = channels_domain.channel_list()
+    return JSONResponse(
+        {
+            "items": items,
+            "total": len(items),
+            "available": sum(1 for x in items if x["available"]),
+            "unavailable": sum(1 for x in items if not x["available"]),
+        }
+    )
+
+
+async def metrics_channels(request: Request):
+    """16 渠道的实际样本与提及；未接入的格子照实标出来。"""
+    period = _period(request)
+    if isinstance(period, JSONResponse):
+        return period
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        if not repo.get_tracker(conn, tracker_id, _tenant(request)):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        return JSONResponse(
+            metric_service.build_channel_matrix(conn, tracker_id, period[0], period[1])
+        )
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # 001 下钻、答案详情、导出（FR-022 / FR-023 / FR-034）
 # ---------------------------------------------------------------------------
@@ -1593,6 +1624,11 @@ def create_app() -> Starlette:
         Route("/favicon.ico", favicon),
         Route("/health", health),
         Route(f"{settings.api_prefix}/meta/methodology", methodology),
+        Route(f"{settings.api_prefix}/meta/channels", meta_channels),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/channels",
+            metrics_channels,
+        ),
         Route(f"{settings.api_prefix}/trackers", list_trackers, methods=["GET"]),
         Route(f"{settings.api_prefix}/trackers", create_tracker, methods=["POST"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}", tracker_detail, methods=["GET", "PATCH"]),

@@ -10,9 +10,53 @@ Rules enforced here (spec FR-015/016/017/018):
 import sqlite3
 from datetime import date
 
+from geo.domain import channels as channels_domain
 from geo.domain import metrics
 from geo.repositories import sqlite_repository as repo
 from geo.settings import settings
+
+
+def build_channel_matrix(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> dict:
+    """模型 × 端 16 渠道矩阵。
+
+    接入状态和样本数是两件事：未接入的渠道即使库里偶然有样本也照实报数，
+    但 status 仍是 not_available —— 不能用一次性的导入数据冒充「采集线通了」。
+    """
+    counts = {
+        (r["model_key"], r["client"]): r
+        for r in repo.channel_sample_rows(conn, tracker_id, start, end)
+    }
+    items: list[dict] = []
+    for ch in channels_domain.channel_list():
+        row = counts.get((ch["model_key"], ch["client"]))
+        samples = int(row["samples"] or 0) if row else 0
+        mentions = int(row["mentions"] or 0) if row else 0
+        if not ch["available"]:
+            status = "not_available"
+        elif samples == 0:
+            status = "no_samples"
+        elif samples < settings.min_samples:
+            status = "insufficient_samples"
+        else:
+            status = "ok"
+        items.append(
+            {
+                **ch,
+                "samples": samples,
+                "mentions": mentions,
+                "mention_rate": round(mentions / samples, 4) if samples else None,
+                "status": status,
+            }
+        )
+    return {
+        "items": items,
+        "total": len(items),
+        "available": sum(1 for x in items if x["available"]),
+        "unavailable": sum(1 for x in items if not x["available"]),
+        "window": {"from": start, "to": end},
+    }
 
 
 def build_overview(

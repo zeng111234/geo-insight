@@ -21,6 +21,13 @@
   dialog h2 { margin: 0; font-size: 14px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
   dialog .dialog-body { padding: 14px 16px; }
   dialog .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); background: var(--subtle); }
+  .channel-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
+  .channel-cell { border: 1px solid var(--border); border-radius: 8px; padding: 8px 6px; min-width: 0; background: var(--surface); }
+  .channel-cell.off { background: var(--subtle); opacity: .72; }
+  .channel-cell .n { font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .channel-cell .s { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+  .channel-cell .na { font-size: 10px; color: var(--amber, #9a6700); margin-top: 3px; }
+  @media (max-width: 1100px) { .channel-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 </style>
 </head>
 <body>
@@ -172,6 +179,16 @@ if (location.protocol === "file:") {
           </div>
         </section>
       </div>
+
+      <section class="panel" style="margin-top:14px">
+        <h2>采集渠道 <span class="badge" id="channelBadge">模型 × 端</span></h2>
+        <div class="body">
+          <div class="muted" style="font-size:11px;margin-bottom:10px">
+            同一模型网页端与手机端分开统计。13 个未接入的渠道显式标注，不画空图、不填假数字。
+          </div>
+          <div class="channel-grid" id="channelGrid"><div class="empty">加载中…</div></div>
+        </div>
+      </section>
     </div>
   </main>
 </div>
@@ -356,6 +373,20 @@ async function loadQuestions() {
     : '<tr><td colspan="4" class="empty">还没有问题，先在上方导入</td></tr>';
 }
 
+async function loadChannels(id) {
+  const from = $("exportFrom").value, to = $("exportTo").value;
+  const data = await api(`/trackers/${id}/metrics/channels?from=${from}&to=${to}`);
+  $("channelBadge").textContent = `${data.available} 已接入 · ${data.unavailable} 未接入`;
+  $("channelGrid").innerHTML = data.items.map((x) => {
+    const rate = x.samples ? (x.mentions / x.samples * 100).toFixed(1) + "%" : "—";
+    return `<div class="channel-cell ${x.available ? "" : "off"}">
+      <div class="n">${esc(x.label)}</div>
+      <div class="s">${x.samples} 条 · 提及 ${rate}</div>
+      ${x.available ? "" : '<div class="na">未接入</div>'}
+    </div>`;
+  }).join("");
+}
+
 async function load() {
   const id = $("tracker").value;
   if (!id) return;
@@ -363,6 +394,7 @@ async function load() {
   try {
     renderDetail(await api(`/trackers/${id}`));
     await loadQuestions();
+    await loadChannels(id);
   } catch (e) {
     $("hint").innerHTML = `<div class="notice error">读取失败：${esc(e.message)}</div>`;
   }

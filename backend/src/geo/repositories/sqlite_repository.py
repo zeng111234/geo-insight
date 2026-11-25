@@ -879,6 +879,31 @@ def latest_import_at(
     return row["last"] if row and row["last"] else None
 
 
+def channel_sample_rows(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+) -> list[dict]:
+    """按 (model_key, client) 聚合样本与提及。
+
+    两个端各自成一行，同日同模型也不会合并——这正是 E2 的验收点。
+    只返回有数据的组合；没数据的格子由 channels 清单显式补「未接入 / 无样本」，
+    不在 SQL 里造零行，免得把「没有采集线」和「采了但没提到」混成同一个 0。
+    """
+    rows = conn.execute(
+        f"""
+        SELECT a.model_key, a.client,
+               COUNT(*) AS samples,
+               SUM(CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END) AS mentions
+        FROM answer a
+        LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
+        WHERE a.tracker_id = ? AND a.is_valid = 1
+          AND {day_of('a.collected_at')} BETWEEN ? AND ?
+        GROUP BY a.model_key, a.client
+        """,
+        (tracker_id, start, end),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def question_performance_rows(
     conn: sqlite3.Connection, tracker_id: str, start: str, end: str
 ) -> list[dict]:

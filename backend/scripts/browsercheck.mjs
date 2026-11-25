@@ -142,6 +142,10 @@ const EXTRA = {
     ["明细翻页条", /class="pager"/],
   ],
   "/tasks": [["文章明细", /<div class="body" id="articleTable"[^>]*>[\s\S]{0,240}<table/]],
+  "/settings": [
+    ["采集渠道矩阵", /<div class="channel-grid"[^>]*>[\s\S]{0,300}channel-cell/],
+    ["13 个未接入显式标注", /3 已接入 · 13 未接入[\s\S]{0,1800}未接入<\/div>/],
+  ],
   "/pilot": [
     ["结案结论", /<div class="verdict/],
     ["目标问题对比", /目标问题（发布前）/],
