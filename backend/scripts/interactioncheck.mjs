@@ -11,6 +11,7 @@
 //
 // 注意：这一轮会点「暂停」再「恢复」，不留状态；删除弹框点的是「取消」，
 // 不会真的删数据。真删的测试在 tests/integration/test_tracker_delete.py 里用事务回滚做。
+// 首页下钻抽屉是只读交互（点卡片看样本、看口径、关闭），不改任何数据。
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -175,6 +176,50 @@ try {
   await evaluate(`document.getElementById('ntCancel').click()`);
   await sleep(200);
   check(await evaluate(`!document.getElementById('newDrawer').open`) === true, "取消关闭抽屉");
+
+  // 9. 首页下钻抽屉：点指标卡片 → 抽屉打开 → 真加载出样本表（非零行、带分页）
+  await send("Page.navigate", { url: `${BASE}/` });
+  await sleep(4000);
+  const cards = await evaluate(`document.querySelectorAll('#cards [data-metric]').length`);
+  check(cards >= 6, "首页指标卡片可下钻", `${cards} 个`);
+
+  await evaluate(`document.querySelector('#cards [data-metric]').click()`);
+  await sleep(1500);
+  const drill = await evaluate(`({
+    show: document.getElementById('drawer').classList.contains('show'),
+    hidden: document.getElementById('drawer').getAttribute('aria-hidden'),
+    title: document.getElementById('drawerTitle').textContent.trim(),
+    sub: document.getElementById('drawerSub').textContent,
+    rows: document.querySelectorAll('#drawerBody tbody tr').length,
+    hasError: !!document.querySelector('#drawerBody .notice.error'),
+    hasPager: !!document.querySelector('#drawerBody [data-pager], #drawerBody .pager'),
+  })`);
+  check(drill.show === true && drill.hidden === "false", "点卡片打开下钻抽屉");
+  check(drill.title === "提及率", "抽屉标题 = 所点指标", drill.title);
+  check(/分母\s+\d+\s+条/.test(drill.sub) && !drill.hasError,
+    "抽屉加载真接口口径（分母解析成功、无错误条）", drill.sub.slice(0, 50));
+  check(drill.rows > 0, "抽屉渲染出样本行（不是空壳）", `${drill.rows} 行`);
+  check(drill.hasPager === true, "抽屉样本带分页条");
+
+  // 10. 关闭抽屉：按钮关闭后 aria-hidden 复位
+  await evaluate(`document.getElementById('drawerClose').click()`);
+  await sleep(300);
+  check(await evaluate(`document.getElementById('drawer').getAttribute('aria-hidden') === 'true'`) === true,
+    "关闭按钮关掉下钻抽屉");
+
+  // 11. 口径说明抽屉：另一个入口，真加载出定义表与规则清单
+  await evaluate(`document.getElementById('methodBtn').click()`);
+  await sleep(1200);
+  const method = await evaluate(`({
+    show: document.getElementById('drawer').classList.contains('show'),
+    title: document.getElementById('drawerTitle').textContent.trim(),
+    sub: document.getElementById('drawerSub').textContent,
+    rows: document.querySelectorAll('#drawerBody tbody tr').length,
+    rules: document.querySelectorAll('#drawerBody li').length,
+  })`);
+  check(method.show === true && method.title === "口径说明", "口径按钮打开抽屉", method.title);
+  check(/口径版本\s+v?\d/.test(method.sub) && method.rows >= 3 && method.rules >= 3,
+    "口径抽屉加载定义表与规则（非空壳）", `${method.rows} 行 / ${method.rules} 规则`);
 
   check(errors.length === 0, "全程无 JS 异常", errors.join("; "));
 
