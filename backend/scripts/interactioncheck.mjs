@@ -99,6 +99,12 @@ try {
     }
   });
 
+  // 所有后续导航的页面都注入 print 桩：headless 下真弹打印对话框会卡住，
+  // 用可观测的计数桩验证「按钮确实调了 window.print」，而不是只验按钮存在。
+  await send("Page.addScriptToEvaluateOnNewDocument", {
+    source: "window.__printCount = 0; window.print = function () { window.__printCount++; };",
+  });
+
   await send("Page.navigate", { url: `${BASE}/monitor` });
   await sleep(3500);
 
@@ -220,6 +226,34 @@ try {
   check(method.show === true && method.title === "口径说明", "口径按钮打开抽屉", method.title);
   check(/口径版本\s+v?\d/.test(method.sub) && method.rows >= 3 && method.rules >= 3,
     "口径抽屉加载定义表与规则（非空壳）", `${method.rows} 行 / ${method.rules} 规则`);
+
+  // 12. 报告详情打印：动态取一份真报告 id（不写死，换库也能跑）
+  const reportId = await evaluate(`
+    (async function () {
+      var ts = await (await fetch('/v1/trackers')).json();
+      var tid = (ts.items || [])[0].id;
+      var rs = await (await fetch('/v1/trackers/' + tid + '/reports')).json();
+      return (rs.items || rs)[0].id;
+    })()
+  `);
+  await send("Page.navigate", { url: `${BASE}/report/${reportId}` });
+  await sleep(3500);
+  const report = await evaluate(`({
+    panels: document.querySelectorAll('#content .panel').length,
+    cards: document.querySelectorAll('#content .card').length,
+    h2: document.querySelector('#content h2') ? document.querySelector('#content h2').textContent : '',
+    hasError: !!document.querySelector('#content .notice.error'),
+  })`);
+  check(report.panels >= 3 && report.cards >= 3 && !report.hasError,
+    "报告详情加载出真快照（正文 panel + 概览卡）", `${report.panels} panel / ${report.cards} card`);
+  check(report.h2.length > 0, "报告标题非空", report.h2.slice(0, 30));
+
+  const beforePrint = await evaluate(`window.__printCount`);
+  await evaluate(`document.getElementById('printBtn').click()`);
+  await sleep(300);
+  const afterPrint = await evaluate(`window.__printCount`);
+  check(beforePrint === 0 && afterPrint === 1,
+    "点「打印 / 导出 PDF」真的调用 window.print", `计数 ${beforePrint}→${afterPrint}`);
 
   check(errors.length === 0, "全程无 JS 异常", errors.join("; "));
 
