@@ -534,6 +534,8 @@ def main() -> None:
         check("settings page served", status == 200 and "监控配置" in html, {"status": status})
         status, ctype, html = get_html("/reports")
         check("reports page served", status == 200 and "报告中心" in html, {"status": status})
+        status, ctype, html = get_html("/pilot")
+        check("pilot page served", status == 200 and "试点结案" in html, {"status": status})
 
         status, body = get(f"/v1/trackers/{TRACKER}")
         check("tracker detail has aliases", status == 200 and len(body["brand"]["aliases"]) == 3, body.get("brand"))

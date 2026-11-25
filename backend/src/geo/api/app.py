@@ -1547,6 +1547,7 @@ def create_app() -> Starlette:
         Route("/studio", studio_page),
         Route("/settings", _page("settings.html", "monitor")),
         Route("/reports", _page("reports.html", "reports")),
+        Route("/pilot", _page("pilot.html", "reports")),
         Route("/report/{report_id}", _page("report.html", "reports")),
         Route("/answer/{answer_id}", _page("answer.html", "monitor")),
         Route("/monitor", _page("monitor.html", "monitor")),

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<script src="/static/app.js"></script>
+<title>GEO Insight · 试点结案</title>
+<style>
+  .verdict { border: 1px solid var(--border); border-radius: 9px; padding: 14px 16px; margin-bottom: 14px; }
+  .verdict .status { font-size: 20px; font-weight: 600; color: var(--muted); }
+  .verdict.ok { border-color: var(--green-ink); }
+  .verdict.ok .status { color: var(--green-ink); }
+  .verdict.bad { border-color: var(--red-ink); }
+  .verdict.bad .status { color: var(--red-ink); }
+  .verdict .why { margin-top: 8px; font-size: 12px; line-height: 1.75; color: var(--text-body); }
+  .verdict .rule { margin-top: 8px; font-size: 11px; color: var(--muted); }
+  .cmp { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .cmp .cell { border: 1px solid var(--border); border-radius: 8px; padding: 11px 13px; background: var(--subtle); }
+  .cmp .k { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+  .cmp .v { font-size: 19px; font-weight: 600; color: var(--text-strong); }
+  .cmp .s { color: var(--muted); font-size: 11px; margin-top: 4px; line-height: 1.6; }
+  .evi { font-size: 11.5px; line-height: 1.9; }
+  .evi a { color: var(--accent-ink); text-decoration: none; }
+  .evi a:hover { text-decoration: underline; }
+  .sign { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; line-height: 1.9; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .filters select { max-width: 100%; }
+  .filters #article { max-width: 340px; }
+  .up { color: var(--green-ink); }
+  .cmp .v.up { color: var(--green-ink); }
+  .cmp .v.down { color: var(--red-ink); }
+  .down { color: var(--red-ink); }
+  @media print { .filters { display: none !important; } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <main>
+    <header class="top">
+      <h1>试点结案</h1>
+      <span class="sub">这一篇投放，有没有让品牌在这个问题里被提到</span>
+      <span class="spacer"></span>
+      <button id="printBtn" class="primary no-print">打印 / 导出 PDF</button>
+    </header>
+    <div class="content">
+      <div class="filters no-print">
+        <select id="tracker" aria-label="监控对象"></select>
+        <select id="article" aria-label="文章"></select>
+        <select id="control" aria-label="对照问题"></select>
+        <select id="window" aria-label="对比窗口">
+          <option value="7">7 天</option>
+          <option value="14">14 天</option>
+          <option value="30" selected>30 天</option>
+        </select>
+      </div>
+      <div id="verdict"><div class="empty">加载中…</div></div>
+      <div class="panel"><h2>目标问题 vs 对照问题 <span class="badge" id="cmpMeta">—</span></h2><div id="compare" class="body"><div class="empty">加载中…</div></div></div>
+      <div class="panel" style="margin-top:14px"><h2>按模型拆开 <span class="badge">一个平台的变化会掩盖另一个</span></h2><div id="models" class="body"><div class="empty">加载中…</div></div></div>
+      <div class="panel" style="margin-top:14px"><h2>AI 引用我方文章 <span class="badge" id="eveMeta">—</span></h2><div id="evidence" class="body"><div class="empty">加载中…</div></div></div>
+      <div class="sign" id="sign"></div>
+    </div>
+  </main>
+</div>
+<script>
+(function () {
+  var G = window.GEO, $ = G.$, esc = G.esc;
+  var state = { article: "", control: "", window: 30, questions: [], targetId: "" };
+  var STATUS_TEXT = {
+    effective: "有效", negative: "未观察到提升", inconclusive: "不足以判定",
+    insufficient: "样本不足，暂不下结论", not_applicable: "不适用", not_published: "未发布"
+  };
+
+  function pctOf(win) {
+    if (!win || !win.mention_rate) return "—";
+    return G.metricText(win.mention_rate);
+  }
+  function rateSub(win) {
+    if (!win) return "";
+    return win.from + " ~ " + win.to + " · " + win.mention_total + "/" + win.valid_total + " 条提及";
+  }
+  function deltaText(value) {
+    if (value === null || value === undefined) return "—";
+    return (value > 0 ? "+" : "") + value.toFixed(1) + "pp";
+  }
+  function deltaCls(value) {
+    if (value === null || value === undefined) return "";
+    return value > 0 ? ' class="up"' : value < 0 ? ' class="down"' : "";
+  }
+
+  function renderVerdict(p) {
+    var v = p.verdict || {};
+    var cls = v.status === "effective" ? "ok" : (v.status === "negative" ? "bad" : "");
+    var rule = v.rule || {};
+    $("verdict").innerHTML = '<div class="verdict ' + cls + '">' +
+      '<div class="status">' + esc(STATUS_TEXT[v.status] || v.message || "—") + "</div>" +
+      '<div class="why">' + esc((v.reasons || []).join("；") || "还没有可判定的数据") + "</div>" +
+      '<div class="rule">预注册规则：目标问题 ≥ +' + esc(rule.target_lift_pp) + "pp、" +
+      "对照问题变化 < " + esc(rule.control_max_pp) + "pp、每窗口 ≥ " + esc(rule.min_window_samples) + " 条样本" +
+      "（规则写在代码里，看到数据之后不改）</div></div>";
+  }
+
+  function renderCompare(p) {
+    $("cmpMeta").textContent = p.published_at ? "发布 " + String(p.published_at).slice(0, 10) : "未发布";
+    if (p.status !== "ok") {
+      $("compare").innerHTML = G.empty(p.message || "还没有可对比的数据");
+      return;
+    }
+    var c = p.control;
+    var cells = [
+      ["目标问题（发布前）", pctOf(p.before), rateSub(p.before)],
+      ["目标问题（发布后）", pctOf(p.after), rateSub(p.after)],
+      ["变化", deltaText(p.delta_pp), p.comparable ? "可比" : "样本不足，不给涨跌"],
+    ];
+    if (c) {
+      cells.push(["对照问题变化", deltaText(c.delta_pp), c.question_text || c.question_id]);
+      cells.push(["净变化（DiD）", deltaText(p.did_pp), "目标变化 − 对照变化"]);
+    } else {
+      cells.push(["对照问题", "未设置", "没有对照就排除不了平台整体变化"]);
+    }
+    $("compare").innerHTML = '<div class="cmp">' + cells.map(function (it) {
+      return '<div class="cell"><div class="k">' + esc(it[0]) + "</div>" +
+        '<div class="v"' + (it[0] === "变化" || it[0] === "净变化（DiD）" ? deltaCls(it[0] === "变化" ? p.delta_pp : p.did_pp) : "") + ">" +
+        esc(it[1]) + "</div><div class=\"s\">" + esc(it[2]) + "</div></div>";
+    }).join("") + "</div>" +
+      '<div class="notice" style="margin-top:10px">窗口按发布日切：发布前 ' + esc(p.window_days) +
+      " 天、发布后 " + esc(p.window_days) + " 天。目标问题口径只算文章绑定的那个问题。</div>";
+  }
+
+  function renderModels(p) {
+    var rows = p.by_model || [];
+    if (!rows.length) { $("models").innerHTML = G.empty("这个窗口里没有分模型数据"); return; }
+    $("models").innerHTML = '<div class="table-wrap"><table><thead><tr><th>模型</th>' +
+      '<th class="num">发布前</th><th class="num">发布后</th><th class="num">变化</th>' +
+      '<th class="num">引用命中</th></tr></thead><tbody>' +
+      rows.map(function (m) {
+        return "<tr><td>" + esc(m.model_key) + "</td>" +
+          '<td class="num">' + esc(pctOf(m.before)) + "</td>" +
+          '<td class="num">' + esc(pctOf(m.after)) + "</td>" +
+          "<td class=\"num\"><span" + deltaCls(m.delta_pp) + ">" + esc(deltaText(m.delta_pp)) + "</span></td>" +
+          '<td class="num">' + (m.citations_matched || 0) + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+
+  function renderEvidence(p) {
+    var cm = p.citation_match || {};
+    var after = cm.after || {}, before = cm.before || {};
+    $("eveMeta").textContent = "发布后 " + (after.matched_count || 0) + " 次 / " + (after.matched_answers || 0) + " 条答案";
+    if (!(cm.published_urls || []).length) {
+      $("evidence").innerHTML = G.empty("没有已发布回链，无法做引用归因");
+      return;
+    }
+    var head = '<div class="evi">已发布链接：' + cm.published_urls.map(function (u) {
+      return '<a href="' + esc(u) + '" target="_blank" rel="noreferrer">' + esc(u) + "</a>";
+    }).join("、") + "<br />发布前被引 " + (before.matched_count || 0) + " 次，发布后被引 " +
+      (after.matched_count || 0) + " 次。</div>";
+    var samples = (after.samples || []).map(function (s) {
+      return '<div class="evi"><a href="' + esc(s.url) + '" target="_blank" rel="noreferrer">' +
+        esc(s.title || s.domain || s.url) + "</a> · " + esc(s.model_key) + " · " +
+        esc(String(s.collected_at).slice(0, 16).replace("T", " ")) + "</div>";
+    }).join("");
+    $("evidence").innerHTML = head + (samples || '<div class="notice" style="margin-top:8px">发布后窗口里没有匹配到这条链接：可能没被引用，也可能引用的是转载页。</div>');
+  }
+
+  function renderSign(p) {
+    var notes = (p.notes || []).map(function (n) { return "· " + n; }).join("<br />");
+    $("sign").innerHTML = (notes ? notes + "<br />" : "") +
+      "口径：提及率 = 提到本品牌的答案数 / 有效样本数；样本不足时不给百分比。<br />" +
+      "局限：这是单次投放的观测，不排除同期其他内容、平台更新与季节因素；判定只回答「这次变化够不够大」，不构成因果证明。";
+  }
+
+  // 目标问题不能同时当对照：后端会忽略，但下拉里留着只会让人以为设了对照。
+  function fillControl() {
+    var options = state.questions.filter(function (q) { return q.id !== state.targetId; });
+    $("control").innerHTML = '<option value="">不设对照</option>' + options.map(function (q) {
+      return '<option value="' + esc(q.id) + '">' + esc(q.text) + "</option>";
+    }).join("");
+    if (state.control && state.control === state.targetId) state.control = "";
+    $("control").value = state.control;
+  }
+
+  async function loadImpact() {
+    if (!state.article) {
+      $("verdict").innerHTML = G.empty("先选一篇已发布的文章");
+      return;
+    }
+    var q = "?windowDays=" + state.window + "&scope=question" +
+      (state.control ? "&controlQuestionId=" + encodeURIComponent(state.control) : "");
+    try {
+      var p = await G.get("/articles/" + state.article + "/impact" + q);
+      state.targetId = (p.question && p.question.id) || "";
+      fillControl();
+      renderVerdict(p);
+      renderCompare(p);
+      renderModels(p);
+      renderEvidence(p);
+      renderSign(p);
+    } catch (e) { G.fail(e, ["verdict", "compare", "models", "evidence", "sign"]); }
+  }
+
+  async function loadOptions() {
+    var t = G.tracker(); if (!t) return;
+    $("article").innerHTML = '<option value="">加载中…</option>';
+    try {
+      var pair = await Promise.all([
+        G.get("/trackers/" + t + "/articles"),
+        G.get("/trackers/" + t + "/questions")
+      ]);
+      var articles = (pair[0].items || []);
+      var questions = (pair[1].items || []);
+      $("article").innerHTML = articles.length
+        ? articles.map(function (a) {
+            return '<option value="' + esc(a.id) + '">' + esc(a.title) + "</option>";
+          }).join("")
+        : '<option value="">没有文章</option>';
+      state.article = articles.length ? articles[0].id : "";
+      state.questions = questions;
+      state.targetId = "";
+      state.control = "";
+      fillControl();
+    } catch (e) { G.fail(e, ["article", "control"]); }
+    await loadImpact();
+  }
+
+  $("tracker").addEventListener("change", loadOptions);
+  $("article").addEventListener("change", function () { state.article = this.value; loadImpact(); });
+  $("control").addEventListener("change", function () { state.control = this.value; loadImpact(); });
+  $("window").addEventListener("change", function () { state.window = parseInt(this.value, 10) || 30; loadImpact(); });
+  $("printBtn").addEventListener("click", function () { window.print(); });
+
+  (async function () { await G.fillTrackers(); await loadOptions(); })();
+})();
+</script>
+</body>
+</html>

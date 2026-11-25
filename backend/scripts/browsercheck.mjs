@@ -54,7 +54,7 @@ const PAGES = [
   "/monitor?tab=trend", "/monitor?tab=trend&g=week", "/monitor?tab=sources",
   "/monitor?tab=competitors", "/monitor?tab=competitorStats", "/monitor?tab=media",
   "/monitor?tab=sentiment", "/monitor?tab=health",
-  "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources"
+  "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources", "/pilot"
 ];
 
 // 页面专属的关键渲染结果：容器后面必须出现真实表格/图表，而不是占位或报错。
@@ -136,6 +136,11 @@ const EXTRA = {
     ["明细翻页条", /class="pager"/],
   ],
   "/tasks": [["文章明细", /<div class="body" id="articleTable"[^>]*>[\s\S]{0,240}<table/]],
+  "/pilot": [
+    ["结案结论", /<div class="verdict/],
+    ["目标问题对比", /目标问题（发布前）/],
+    ["按模型拆", /<th>模型<\/th>/],
+  ],
   "/publish": [
     ["发布记录", /<div id="pubs"[^>]*>[\s\S]{0,240}<div class="pub-row"/],
     ["渠道状态", /<div class="body" id="channels"[^>]*>[\s\S]{0,240}<table/],
