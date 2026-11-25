@@ -153,6 +153,36 @@ def _verdict(
     return {**base, "status": status, "message": message, "reasons": reasons}
 
 
+def _baseline_preview(
+    conn: sqlite3.Connection,
+    tracker_id: str,
+    question_id: str | None,
+    window_days: int,
+    scope: str,
+) -> dict:
+    """未发布时先看基线够不够。
+
+    判定窗口是「发布日往前 window_days 天」。这段日期一旦过去就不会再长出新样本，
+    所以**发布前样本不足 = 这篇永远判不了**——必须让人在按发布之前看到这件事，
+    而不是等发完了再说「样本不足」。
+    """
+    _, last_data = repo.data_date_range(conn, tracker_id)
+    anchor = last_data or date.today().isoformat()
+    start = _shift(anchor, -(window_days - 1))
+    counts = effect_repo.window_counts(conn, tracker_id, start, anchor, question_id=question_id)
+    needed = PILOT_RULE["min_window_samples"]
+    samples = int(counts["valid_total"])
+    return {
+        "scope": scope,
+        "from": start,
+        "to": anchor,
+        "samples": samples,
+        "needed": needed,
+        "ready": samples >= needed,
+        "shortfall": max(0, needed - samples),
+    }
+
+
 def _norm(url: str) -> str:
     """归一化只用于匹配，落库 hash 仍用原始 URL（与导入通道一致）。"""
     try:
@@ -310,6 +340,9 @@ def publish_impact(
             },
             "control": None,
             "did_pp": None,
+            "baseline": _baseline_preview(
+                conn, article["tracker_id"], target_question_id, window_days, actual_scope
+            ),
             "verdict": _verdict(
                 scope=actual_scope,
                 before=None,

@@ -16,6 +16,11 @@
   .verdict.bad .status { color: var(--red-ink); }
   .verdict .why { margin-top: 8px; font-size: 12px; line-height: 1.75; color: var(--text-body); }
   .verdict .rule { margin-top: 8px; font-size: 11px; color: var(--muted); }
+  .verdict .base { margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border); }
+  .verdict .base .k { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--amber); }
+  .bar.done > i { background: var(--green-ink); }
   .cmp { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
   .cmp .cell { border: 1px solid var(--border); border-radius: 8px; padding: 11px 13px; background: var(--subtle); }
   .cmp .k { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
@@ -66,7 +71,10 @@
 <script>
 (function () {
   var G = window.GEO, $ = G.$, esc = G.esc;
-  var state = { article: "", control: "", window: 30, questions: [], targetId: "" };
+  var state = {
+    article: new URLSearchParams(window.location.search).get("article") || "",
+    control: "", window: 30, questions: [], targetId: ""
+  };
   var STATUS_TEXT = {
     effective: "有效", negative: "未观察到提升", inconclusive: "不足以判定",
     insufficient: "样本不足，暂不下结论", not_applicable: "不适用", not_published: "未发布"
@@ -89,6 +97,20 @@
     return value > 0 ? ' class="up"' : value < 0 ? ' class="down"' : "";
   }
 
+  // 未发布时先把基线摆出来：判定窗口是发布日往前 N 天，日期过去了不会再有新样本。
+  function baselineHtml(p) {
+    var b = p.baseline;
+    if (!b) return "";
+    var ratio = b.needed ? Math.min(100, Math.round((b.samples / b.needed) * 100)) : 0;
+    var hint = b.ready
+      ? "基线够了，可以发布"
+      : "还差 " + b.shortfall + " 条（按 3 次/天约 " + Math.ceil(b.shortfall / 3) + " 天）；不够就发布，这篇永远判不了";
+    return '<div class="base"><div class="k">基线样本（' + esc(b.from) + " ~ " + esc(b.to) + "）" +
+      (b.scope === "tracker" ? " · 文章未绑定问题，按全对象统计" : "") + "</div>" +
+      '<div class="bar ' + (b.ready ? "done" : "") + '"><i style="width:' + ratio + '%"></i></div>' +
+      '<div class="why">' + esc(b.samples) + " / " + esc(b.needed) + " 条 · " + esc(hint) + "</div></div>";
+  }
+
   function renderVerdict(p) {
     var v = p.verdict || {};
     var cls = v.status === "effective" ? "ok" : (v.status === "negative" ? "bad" : "");
@@ -98,7 +120,8 @@
       '<div class="why">' + esc((v.reasons || []).join("；") || "还没有可判定的数据") + "</div>" +
       '<div class="rule">预注册规则：目标问题 ≥ +' + esc(rule.target_lift_pp) + "pp、" +
       "对照问题变化 < " + esc(rule.control_max_pp) + "pp、每窗口 ≥ " + esc(rule.min_window_samples) + " 条样本" +
-      "（规则写在代码里，看到数据之后不改）</div></div>";
+      "（规则写在代码里，看到数据之后不改）</div>" +
+      (p.status === "ok" ? "" : baselineHtml(p)) + "</div>";
   }
 
   function renderCompare(p) {
@@ -214,7 +237,9 @@
             return '<option value="' + esc(a.id) + '">' + esc(a.title) + "</option>";
           }).join("")
         : '<option value="">没有文章</option>';
-      state.article = articles.length ? articles[0].id : "";
+      var found = articles.some(function (a) { return a.id === state.article; });
+      state.article = found ? state.article : (articles.length ? articles[0].id : "");
+      $("article").value = state.article;
       state.questions = questions;
       state.targetId = "";
       state.control = "";
@@ -224,7 +249,12 @@
   }
 
   $("tracker").addEventListener("change", loadOptions);
-  $("article").addEventListener("change", function () { state.article = this.value; loadImpact(); });
+  $("article").addEventListener("change", function () {
+    state.article = this.value;
+    // 链接可分享：客户/同事打开就是同一篇
+    history.replaceState(null, "", "/pilot?article=" + encodeURIComponent(this.value));
+    loadImpact();
+  });
   $("control").addEventListener("change", function () { state.control = this.value; loadImpact(); });
   $("window").addEventListener("change", function () { state.window = parseInt(this.value, 10) || 30; loadImpact(); });
   $("printBtn").addEventListener("click", function () { window.print(); });
