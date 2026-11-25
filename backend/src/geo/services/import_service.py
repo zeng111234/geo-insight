@@ -27,6 +27,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from geo.repositories import import_repository as repo
+from geo.services import audit_service
 from geo.settings import settings
 
 # 无时区的时间按北京时间理解，与 sampling_plan.timezone 的默认值一致
@@ -669,6 +670,18 @@ def rollback_batch(
 
     deleted = repo.delete_batch_data(conn, batch_id)
     repo.mark_batch_rolled_back(conn, batch_id, stamp)
+    # 回滚和审计同一事务：删了没记账比不让删更糟（与删除接口同一口径）。
+    # CLI 没有登录会话，actor_id 留空，不伪造一个系统用户。
+    audit_service.record(
+        conn,
+        tenant_id=tenant,
+        action="import.rollback",
+        object_type="import_batch",
+        object_id=batch_id,
+        before={**batch, "deleted_rows": counts},
+        after={"status": "rolled_back", "deleted_rows": deleted},
+        now=stamp,
+    )
     conn.commit()
     return {
         "batch_id": batch_id,

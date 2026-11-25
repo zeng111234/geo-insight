@@ -419,8 +419,10 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
   校准发布按钮/频道；**本机到 toutiao/xiaohongshu 的 TLS 被重置，两渠道待网络修复后
   登录校准**（疑与本机代理/安全软件有关）；抖音/小红书发图文需要封面图素材（内容侧问题）。
   另：片段级情感聚合；合规命中审计落库（按周聚合已随 H2-5 完成，从本清单移除）
-- **审计只覆盖两类删除**（别名、竞品）。导入批次回滚同样是破坏性操作，还没接审计；
-  也没有审计的查询接口（只有 `scripts/audit_log.py`）
+- **审计覆盖别名/竞品/对象删除与导入批次回滚**（`tracker.delete`、`import.rollback` 已接，
+  删除与记账同一事务）。审计查询走 `scripts/audit_log.py`（`--action import.rollback` 只看回滚），
+  没有 HTTP 查询接口——审计读取只做本地工具，不对外暴露。仍未接审计的破坏性操作：
+  答案删除、问题删除（当前界面不提供这两个动作）
 - 契约 fuzz（Schemathesis）、交互 E2E（表单提交等完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖；删除确认、暂停恢复与新建抽屉已由 `interactioncheck.mjs` 做 CDP 真实点击（12 条，已入库，可重复回归）。但**其余交互（表单提交、下钻抽屉、打印）仍未模拟用户操作**
 - ~~CSRF 防护~~ **已补上（003 US3，2026-11-24）**：双提交 cookie（`geo_csrf` + `X-CSRF-Token`
   头，决策 010 的洞清零）+ 登录限流（连续 5 错锁定，`GEO_LOGIN_MAX_FAILURES`/`GEO_LOGIN_LOCKOUT_S`

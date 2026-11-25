@@ -31,6 +31,8 @@ from geo.settings import settings  # noqa: E402
 SUMMARY_FIELDS = {
     "brand_alias": ("alias", "alias_type"),
     "competitor": ("name",),
+    # 回滚审计靠 source_name + 删前计数一眼认出是哪个批次（before 由 import_service 落）
+    "import_batch": ("source_name",),
 }
 
 
@@ -81,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(rows, ensure_ascii=False, indent=2))
             return 0
         if not rows:
-            print("没有审计记录。删除别名或竞品之后再来看看。")
+            print("没有审计记录。删除对象或回滚导入批次之后再来看看。")
             return 0
 
         print(f"审计日志（最近 {len(rows)} 条）\n")

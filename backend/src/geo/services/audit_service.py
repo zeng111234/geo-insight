@@ -22,12 +22,13 @@ from typing import Any
 
 # 已在使用的动作。新增动作必须先登记在这里，否则 record 直接报错 ——
 # 拼写错误不该悄悄产生一个没人认得的分类。
-# 待接：import.rollback（导入批次回滚）、answer.delete、question.delete。
+# 待接：answer.delete、question.delete。
 ACTIONS = {
     "alias.delete",
     "competitor.delete",
     "mention.recompute",
     "tracker.delete",
+    "import.rollback",
 }
 
 
