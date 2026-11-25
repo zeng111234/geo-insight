@@ -155,10 +155,27 @@ if (location.protocol === "file:") {
       <span class="sub" id="trackerLabel">辽宁辽征律师事务所 · 国内 AI 品牌可见度</span>
       <span class="spacer"></span>
       <span class="pill">人工成稿 · 系统只做事实核对与合规提示</span>
+      <button id="newArticle">+ 新建文章</button>
       <a class="plain" href="/" style="font-size:12px">← 返回看板</a>
     </header>
 
     <div class="content">
+      <div class="panel" id="newPanel" style="display:none;margin-bottom:14px">
+        <h2>新建草稿 <span class="badge">先建骨架，正文可在右侧继续编辑</span></h2>
+        <div class="body">
+          <div class="label">关联问题（决定这篇归因算在谁头上）</div>
+          <select id="newQuestion"><option value="">暂不绑定</option></select>
+          <div class="label">文章标题</div>
+          <input type="text" id="newTitle" placeholder="直接用问题做标题，别用品牌口号" />
+          <div class="label">正文</div>
+          <textarea id="newBody" rows="5" placeholder="开头 100 字先给结论，后面放事实、日期、可核验来源"></textarea>
+          <div style="margin-top:9px">
+            <button class="primary" id="createArticle">创建草稿</button>
+            <button id="cancelNew">取消</button>
+          </div>
+        </div>
+      </div>
+
       <div class="article-bar" id="articleBar">
         <span class="pill">文章</span>
         <span class="empty">加载中…</span>
@@ -603,7 +620,56 @@ async function pollArticleUntilSettled() {
   setTimeout(tick, 5000);
 }
 
+// 从机会分跳过来时带 question，直接展开新建表单并预选那道题
+const query = new URLSearchParams(location.search);
+let questionOptionsLoaded = false;
+
+async function openNew(preferred) {
+  if (!questionOptionsLoaded) {
+    try {
+      const data = await api("/trackers/" + TRACKER + "/questions");
+      $("newQuestion").innerHTML = '<option value="">暂不绑定</option>' +
+        (data.items || []).map(function (q) {
+          return '<option value="' + esc(q.id) + '">' + esc(q.text) + "</option>";
+        }).join("");
+      questionOptionsLoaded = true;
+    } catch (e) { toast("问题列表读取失败：" + e.message, "error"); }
+  }
+  if (preferred) $("newQuestion").value = preferred;
+  $("newPanel").style.display = "";
+  $("newTitle").focus();
+}
+
+$("newArticle").addEventListener("click", function () { openNew(); });
+$("cancelNew").addEventListener("click", function () { $("newPanel").style.display = "none"; });
+$("createArticle").addEventListener("click", async function () {
+  const btn = $("createArticle");
+  btn.disabled = true;
+  try {
+    const created = await api("/trackers/" + TRACKER + "/articles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: $("newTitle").value.trim(),
+        body: $("newBody").value.trim(),
+        question_id: $("newQuestion").value || null,
+      }),
+    });
+    $("newPanel").style.display = "none";
+    $("newTitle").value = "";
+    $("newBody").value = "";
+    state.articles = (await api("/trackers/" + TRACKER + "/articles")).items || [];
+    await selectArticle(created.id);
+    toast("草稿已创建，可以接着改正文");
+  } catch (e) {
+    toast("创建失败：" + e.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 load();
+if (query.get("question")) openNew(query.get("question"));
 </script>
 </body>
 </html>

@@ -14,8 +14,9 @@
 """
 
 import sqlite3
+import uuid
 from collections import Counter
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from geo.collectors.citations import normalize_url
 from geo.domain import metrics
@@ -24,6 +25,69 @@ from geo.repositories import sqlite_repository as repo
 from geo.settings import settings
 
 SCOPES = ("tracker", "question")
+
+
+class ArticleInputError(ValueError):
+    """文章字段不合法。"""
+
+
+class QuestionNotFoundError(ValueError):
+    """文章绑定的问题不属于这个监控对象。"""
+
+
+def create_article(
+    conn: sqlite3.Connection,
+    tracker_id: str,
+    tenant_id: str,
+    payload: dict,
+) -> dict:
+    """新建一篇草稿文章，让试点稿件能真正进入发布/归因链路。
+
+    没有这一步，文章只存在于种子数据里：手写的稿子无法发布，也就无从归因。
+    问题可以晚点再绑，但一旦指定，必须属于本对象的当前问题集——否则归因会
+    拿另一套问题的样本算到这篇文章头上。
+    """
+    title = str(payload.get("title") or "").strip()
+    body = str(payload.get("body") or "").strip()
+    if not title or len(title) > 200:
+        raise ArticleInputError("title must be 1-200 characters")
+    if not body:
+        raise ArticleInputError("body is required")
+
+    question_id = payload.get("question_id") or None
+    if question_id:
+        belongs = conn.execute(
+            """SELECT 1
+               FROM question q
+               JOIN question_set qs ON qs.id = q.question_set_id
+               JOIN tracker t ON t.active_question_set_id = qs.id
+               WHERE q.id = ? AND t.id = ? AND t.tenant_id = ?""",
+            (question_id, tracker_id, tenant_id),
+        ).fetchone()
+        if not belongs:
+            raise QuestionNotFoundError("question not in this tracker's active question set")
+
+    article_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    conn.execute(
+        """INSERT INTO article(id, tenant_id, tracker_id, question_id, title, body,
+                               template_key, status, version, goal, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', 1, ?, ?, ?)""",
+        (
+            article_id,
+            tenant_id,
+            tracker_id,
+            question_id,
+            title,
+            body,
+            payload.get("template_key") or None,
+            payload.get("goal") or None,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return repo.get_article(conn, article_id)
 
 
 def _shift(day: str, delta: int) -> str:

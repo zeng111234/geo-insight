@@ -128,8 +128,13 @@ const EXTRA = {
     ["分问题表现", /<div class="body" id="byQuestion"[^>]*>[\s\S]{0,240}<table/],
     ["明细翻页条", /class="pager"/],
   ],
+  "/studio": [
+    ["新建文章入口", /id="newArticle"/],
+    ["正文编辑器", /<textarea id="body"/],
+  ],
   "/opportunities": [
     ["机会分排序", /<div id="rank"[^>]*>[\s\S]{0,240}<div class="opp"/],
+    ["写这篇入口", /写这篇 →/],
     ["排序理由", /<div class="why">本品牌 \d+\/\d+ 条提及/],
     ["覆盖矩阵", /<div class="body" id="matrix"[^>]*>[\s\S]{0,240}<table/],
     ["样本明细", /<div class="body" id="samples"[^>]*>[\s\S]{0,240}<table/],

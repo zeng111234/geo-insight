@@ -745,6 +745,28 @@ async def list_articles(request: Request):
         conn.close()
 
 
+async def create_article(request: Request):
+    """新建草稿文章：手写的试点稿子也要进系统，才能发布、归因、判定。"""
+    payload = await _json_body(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+    tracker_id = request.path_params["tracker_id"]
+    tenant_id = _tenant(request)
+    conn = db.connect()
+    try:
+        if not repo.get_tracker(conn, tracker_id, tenant_id):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        try:
+            article = content_service.create_article(conn, tracker_id, tenant_id, payload)
+        except content_service.ArticleInputError as exc:
+            return _error(request, "VALIDATION_ERROR", str(exc))
+        except content_service.QuestionNotFoundError as exc:
+            return _error(request, "NOT_FOUND", str(exc), 404)
+        return JSONResponse(article, status_code=201)
+    finally:
+        conn.close()
+
+
 async def article_detail(request: Request):
     conn = db.connect()
     try:
@@ -1630,6 +1652,11 @@ def create_app() -> Starlette:
         Route(f"{settings.api_prefix}/reports/{{report_id}}", report_detail),
         Route(f"{settings.api_prefix}/answers/{{answer_id}}", answer_detail),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/articles", list_articles),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/articles",
+            create_article,
+            methods=["POST"],
+        ),
 Route(f"{settings.api_prefix}/channels", list_channels),
 Route(f"{settings.api_prefix}/channels/{{channel_id}}/connect", connect_channel, methods=["POST"]),
 Route(f"{settings.api_prefix}/channels/{{channel_id}}/check", check_channel, methods=["POST"]),
