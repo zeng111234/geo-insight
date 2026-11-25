@@ -256,6 +256,18 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .sentiment .pos { background: var(--teal); }
 .sentiment .neu { background: #c3c9d8; }
 .sentiment .neg { background: var(--red); }
+/* 情感三段值：每段自带标签与数字，窄卡片折行也只断在段之间，圆点不会悬空。
+   颜色与下方分布条一一对应，扫读时能对上。 */
+.sentiment-split { display: flex; flex-wrap: wrap; gap: 2px 14px;
+  font-size: 15px; font-weight: 600; line-height: 1.25; color: var(--text-strong); }
+.sentiment-split > span { white-space: nowrap; font-weight: 400; }
+.sentiment-split > span.pos { color: var(--green-ink); }
+.sentiment-split > span.neu { color: var(--text-body); }
+.sentiment-split > span.neg { color: var(--red-ink); }
+.sentiment-split b { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* 窄卡片（首页 KPI 约 148px）：三段横排物理上放不下，改为紧凑竖排。
+   关键是收紧行距，让这张卡片不要比同排其它 KPI 高出一大截。 */
+.card .sentiment-split { gap: 0; line-height: 1.35; }
 
 /* 抽屉 */
 .scrim {

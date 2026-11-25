@@ -10,6 +10,9 @@ import unittest
 from geo.settings import PROJECT_ROOT
 
 STUDIO = PROJECT_ROOT / "frontend" / "static" / "studio.html"
+MONITOR = PROJECT_ROOT / "frontend" / "static" / "monitor.html"
+INDEX = PROJECT_ROOT / "frontend" / "static" / "index.html"
+APP_CSS = PROJECT_ROOT / "frontend" / "static" / "app.css"
 
 
 class StudioStageBarContractTest(unittest.TestCase):
@@ -40,6 +43,54 @@ class StudioStageBarContractTest(unittest.TestCase):
     def test_operation_bar_spans_grid(self):
         """操作条必须横跨整行，否则窄屏下会被挤到某列里。"""
         self.assertIn(".stage-act { grid-column: 1 / -1; border-left: none; }", self.html)
+
+
+class MonitorHeadContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.html = MONITOR.read_text(encoding="utf-8")
+
+    def test_actions_own_row_on_narrow_screen(self):
+        """窄屏下按钮组必须独占一行，不能跟标题/状态挤在一起换行。"""
+        self.assertIn(
+            "    .mon-head .acts { flex-basis: 100%; margin-left: 0; justify-content: flex-end; }",
+            self.html,
+        )
+
+    def test_danger_button_visual_weight(self):
+        """删除是危险操作，不能和刷新同视觉权重（实心底 + 深边框）。"""
+        self.assertIn(
+            ".mon-head .acts .danger { background: var(--red-tint); border-color: var(--red-ink); color: var(--red-ink); }",
+            self.html,
+        )
+
+    def test_tab_number_is_visually_separate(self):
+        """tab 数字必须有独立浅底和边框，否则「指标看板1062提及」糊成一串。"""
+        self.assertIn("gap: 8px;", self.html)
+        self.assertIn("border: 1px solid var(--border);", self.html)
+
+
+class SentimentSplitContractTest(unittest.TestCase):
+    """情感三段值：每段自带标签+数字并 nowrap，折行只断在段之间。
+
+    原来的 `正 X% · 中 Y% · 负 Z%` 是纯文本，窄卡片里折行会把圆点甩到行首。
+    """
+
+    def test_shared_component_defined(self):
+        css = APP_CSS.read_text(encoding="utf-8")
+        self.assertIn(".sentiment-split { display: flex; flex-wrap: wrap;", css)
+        self.assertIn(".sentiment-split > span { white-space: nowrap;", css)
+
+    def test_three_colored_segments_in_index(self):
+        html = INDEX.read_text(encoding="utf-8")
+        for cls in ("pos", "neu", "neg"):
+            self.assertIn(f'<span class="{cls}">', html)
+        self.assertNotIn("`正 ${fmtPct(s.pos)} · 中 ${fmtPct(s.neu)} · 负 ${fmtPct(s.neg)}`", html)
+
+    def test_three_colored_segments_in_monitor(self):
+        html = MONITOR.read_text(encoding="utf-8")
+        self.assertIn("'<div class=\"sentiment-split\">' +", html)
+        self.assertNotIn("' · 中 ' + fmtPct(senti.neu)", html)
 
 
 if __name__ == "__main__":

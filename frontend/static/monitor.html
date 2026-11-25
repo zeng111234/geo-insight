@@ -48,7 +48,15 @@
   .mon-head .line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .mon-head h2 { margin: 0; font-size: 15px; }
   .mon-head .meta { font-size: 11px; color: var(--muted); margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
-  .mon-head .acts { display: flex; gap: 6px; margin-left: auto; }
+  .mon-head .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+  /* 危险操作要和常规操作拉开距离：实心底 + 更重边框，不再和「刷新」一个视觉重量。 */
+  .mon-head .acts .danger { background: var(--red-tint); border-color: var(--red-ink); color: var(--red-ink); }
+  .mon-head .acts .danger:hover { background: var(--red-ink); color: #fff; }
+  /* 窄屏下按钮组独占一行右对齐，不跟标题/状态挤在一起换行。 */
+  @media (max-width: 1180px) {
+    .mon-head .line1 { gap: 6px 10px; }
+    .mon-head .acts { flex-basis: 100%; margin-left: 0; justify-content: flex-end; }
+  }
 
   /* 第三栏占掉宽度后 10 个 tab 装不下一行：换行比横向滚动条好用 */
   .mon-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
@@ -57,15 +65,20 @@
     font-size: 11px; color: var(--muted); }
   .mon-filters select { max-width: 190px; font-size: 11.5px; }
   .mon-filters .dates { font-size: 11.5px; color: var(--text); }
-  .mon-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
-  .mon-tabs button { border: 1px solid transparent; background: transparent; border-radius: 999px;
+  .mon-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .mon-tabs button { display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid transparent; background: transparent; border-radius: 999px;
     padding: 5px 11px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
   .mon-tabs button:hover { background: var(--subtle); color: var(--text); }
   .mon-tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .mon-tabs button .n { display: inline-block; margin-left: 5px; padding: 0 5px;
-    border-radius: 999px; background: var(--subtle); color: var(--muted);
-    font-size: 10px; font-variant-numeric: tabular-nums; }
-  .mon-tabs button.on .n { background: rgba(255,255,255,.22); color: #fff; }
+  /* 数字与文字之间留明确空隙并给浅边框，避免「指标看板1062提及」糊成一串。
+     用 inline-flex + gap 而不是 margin：换行时整颗 tab 不拆、行高一致。 */
+  .mon-tabs button .n { display: inline-block; padding: 1px 7px; min-width: 24px;
+    border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text-body); font-size: 11px; font-weight: 500;
+    font-variant-numeric: tabular-nums; text-align: center; }
+  .mon-tabs button.on .n { background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.3); color: #fff; }
   .mon-body { flex: 1; min-height: 0; overflow-y: auto; }
 
   /* 对话框：app.css 里没有，settings.html 用的是它自己的内联表，这里按同一套尺寸重写一份 */
@@ -520,7 +533,10 @@
     var sentiment = '<div class="kpi"><div class="k">情感倾向</div>' +
       (sentiWarn
         ? '<div class="v small">样本不足</div>'
-        : '<div class="v small">正 ' + fmtPct(senti.pos) + " · 中 " + fmtPct(senti.neu) + " · 负 " + fmtPct(senti.neg) + "</div>" +
+        : '<div class="sentiment-split">' +
+          '<span class="pos">正 <b>' + fmtPct(senti.pos) + "</b></span>" +
+          '<span class="neu">中 <b>' + fmtPct(senti.neu) + "</b></span>" +
+          '<span class="neg">负 <b>' + fmtPct(senti.neg) + "</b></span></div>" +
           '<div class="sentiment"><span class="pos" style="width:' + ((senti.pos || 0) * 100) + '%"></span>' +
           '<span class="neu" style="width:' + ((senti.neu || 0) * 100) + '%"></span>' +
           '<span class="neg" style="width:' + ((senti.neg || 0) * 100) + '%"></span></div>') +

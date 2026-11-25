@@ -144,8 +144,10 @@ function sentimentCard(s) {
   const insufficient = s.status === "insufficient_samples";
   return `<div class="card clickable" role="button" tabindex="0" data-metric="sentiment" data-label="情感倾向">
     <div class="label">情感倾向</div>
-    <div class="value ${insufficient ? "small warn-text" : ""}">${
-      insufficient ? "样本不足" : `正 ${fmtPct(s.pos)} · 中 ${fmtPct(s.neu)} · 负 ${fmtPct(s.neg)}`
+    <div class="${insufficient ? "value small warn-text" : "sentiment-split"}">${
+      insufficient ? "样本不足" : `<span class="pos">正 <b>${fmtPct(s.pos)}</b></span>` +
+        `<span class="neu">中 <b>${fmtPct(s.neu)}</b></span>` +
+        `<span class="neg">负 <b>${fmtPct(s.neg)}</b></span>`
     }</div>
     ${insufficient ? "" : `<div class="sentiment">
       <span class="pos" style="width:${(s.pos || 0) * 100}%"></span>
