@@ -133,6 +133,8 @@ const EXTRA = {
     ["明细翻页条", /class="pager"/],
   ],
   "/studio": [
+    ["六阶段步骤条", /class="stage-step[\s\S]{0,900}data-stage="publish"/],
+    ["阶段状态已落库", /stage-step (current|done)/],
     ["新建文章入口", /id="newArticle"/],
     ["正文编辑器", /<textarea id="body"/],
   ],

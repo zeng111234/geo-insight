@@ -22,6 +22,7 @@ from geo.collectors.citations import normalize_url
 from geo.domain import metrics
 from geo.repositories import effect_repository as effect_repo
 from geo.repositories import sqlite_repository as repo
+from geo.services import article_stage_service
 from geo.settings import settings
 
 SCOPES = ("tracker", "question")
@@ -86,6 +87,9 @@ def create_article(
             now,
         ),
     )
+    # E3:文章和六阶段状态同一事务落库。分开写就会留下「有文章没阶段」的
+    # 中间态，前端首次打开读不到进行中的阶段。
+    article_stage_service.ensure_stages(conn, article_id, now)
     conn.commit()
     return repo.get_article(conn, article_id)
 

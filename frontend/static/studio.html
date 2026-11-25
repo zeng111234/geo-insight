@@ -50,6 +50,26 @@
   .tag { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2); }
   .tag.published { color: var(--green-ink); border-color: var(--green-line); background: var(--green-tint); }
   .tag.review { color: var(--amber-ink); border-color: var(--amber-line); background: var(--amber-tint); }
+  /* 六阶段流水线（E3）：步骤条 + 当前阶段操作 */
+  .stage-bar { display: flex; flex-wrap: wrap; gap: 0; align-items: stretch;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
+    box-shadow: var(--shadow); margin-bottom: 14px; overflow: hidden; }
+  .stage-step { flex: 1 1 0; min-width: 92px; display: flex; flex-direction: column; gap: 3px;
+    padding: 9px 10px; border: none; border-right: 1px solid var(--border);
+    border-radius: 0; background: transparent; text-align: left; cursor: pointer; }
+  .stage-step:last-of-type { border-right: none; }
+  .stage-step .no { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stage-step .nm { font-size: 12px; color: var(--text); }
+  .stage-step.done .nm { color: var(--green-ink); }
+  .stage-step.current { background: var(--accent-weak); }
+  .stage-step.current .no, .stage-step.current .nm { color: var(--accent-ink); font-weight: 600; }
+  .stage-step:disabled { cursor: not-allowed; }
+  .stage-act { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    border-left: 1px solid var(--border); background: var(--subtle); white-space: nowrap; }
+  .stage-act .hint { font-size: 11px; color: var(--muted); }
+  @media (max-width: 1180px) { .stage-bar { flex-direction: column; }
+    .stage-step { border-right: none; border-bottom: 1px solid var(--border); }
+    .stage-act { border-left: none; } }
   /* 三栏 */
   .studio { display: grid; grid-template-columns: 300px minmax(0, 1fr) 300px; gap: 14px; align-items: start; }
   @media (max-width: 1180px) { .studio { grid-template-columns: 1fr; } }
@@ -181,6 +201,8 @@ if (location.protocol === "file:") {
         <span class="empty">加载中…</span>
       </div>
 
+      <div class="stage-bar" id="stageBar"><div class="stage-act"><span class="hint">阶段加载中…</span></div></div>
+
       <div class="studio">
         <section class="col">
           <h2>创作要求 <span class="badge" id="reqMeta"></span></h2>
@@ -248,7 +270,7 @@ const PUB_TEXT = {
   draft_saved: "已存草稿", blocked: "被平台拦", failed: "失败", unknown: "待人工确认",
 };
 
-const state = { articles: [], articleId: null, article: null, channels: [], impact: null, selected: new Set() };
+const state = { articles: [], articleId: null, article: null, channels: [], impact: null, selected: new Set(), stages: null };
 
 let toastTimer = null;
 function toast(msg, kind = "") {
@@ -509,18 +531,77 @@ async function loadChannels() {
   renderChannels();
 }
 
+/* ---------- 六阶段流水线（E3） ---------- */
+function renderStages() {
+  const s = state.stages;
+  const bar = $("stageBar");
+  if (!s) { bar.innerHTML = '<div class="stage-act"><span class="hint">阶段加载中…</span></div>'; return; }
+  const steps = s.items.map((x, i) => {
+    const cls = x.status === "done" ? " done" : (x.key === s.current ? " current" : "");
+    const disabled = x.status === "done" ? " disabled" : "";
+    return '<button type="button" class="stage-step' + cls + '" data-stage="' + x.key + '"' + disabled +
+      ' title="' + esc(x.label) + '：' + esc(x.status) + '">' +
+      '<span class="no">' + (i + 1) + ' · ' + (x.status === "done" ? "完成" : x.key === s.current ? "进行中" : "待办") + '</span>' +
+      '<span class="nm">' + esc(x.label) + "</span></button>";
+  }).join("");
+  const done = s.completed === s.total;
+  bar.innerHTML = steps + '<div class="stage-act">' +
+    (done
+      ? '<span class="hint">六阶段已完成，可以发布</span>'
+      : '<button type="button" id="stageComplete" class="primary">完成本阶段 →</button>' +
+        '<span class="hint">' + s.completed + " / " + s.total + " 步</span>") +
+    "</div>";
+  bar.querySelectorAll("[data-stage]").forEach(function (btn) {
+    btn.addEventListener("click", function () { setStage(btn.dataset.stage); });
+  });
+  var complete = $("stageComplete");
+  if (complete) complete.addEventListener("click", completeStage);
+}
+
+async function loadStages(articleId) {
+  state.stages = await api("/articles/" + articleId + "/stages");
+  renderStages();
+}
+
+async function setStage(key) {
+  try {
+    state.stages = await api("/articles/" + state.articleId + "/stages", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set", stage: key }),
+    });
+    renderStages();
+  } catch (e) { toast("切换阶段失败：" + e.message, "error"); }
+}
+
+async function completeStage() {
+  try {
+    state.stages = await api("/articles/" + state.articleId + "/stages", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "complete" }),
+    });
+    renderStages();
+  } catch (e) { toast("完成阶段失败：" + e.message, "error"); }
+}
+
 async function selectArticle(id) {
   state.articleId = id;
+  // 文章 id 进 URL：刷新停在同一篇，阶段状态跟着文章恢复
+  var url = new URL(location.href);
+  url.searchParams.set("article", id);
+  history.replaceState({}, "", url);
   renderArticleBar();
-  const [article, impact] = await Promise.all([
+  const [article, impact, stages] = await Promise.all([
     api("/articles/" + id),
     api("/articles/" + id + "/impact"),
+    api("/articles/" + id + "/stages"),
   ]);
   state.article = article;
+  state.stages = stages;
   renderRequirements(article);
   renderEditor(article);
   renderFacts(article);
   renderImpact(impact);
+  renderStages();
 }
 
 async function load() {
@@ -536,7 +617,9 @@ async function load() {
       return;
     }
     renderChannels();
-    const first = state.articles[0].id;
+    const wanted = new URLSearchParams(location.search).get("article");
+    const first = state.articles.some(function (a) { return a.id === wanted; })
+      ? wanted : state.articles[0].id;
     await selectArticle(first);
   } catch (e) {
     $("articleBar").innerHTML = '<span class="err" style="color:var(--red)">读取失败：' + esc(e.message) + "</span>";

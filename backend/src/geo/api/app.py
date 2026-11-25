@@ -36,6 +36,7 @@ from geo.repositories import config_repository as config_repo
 from geo.repositories import report_repository as report_repo
 from geo.repositories import sqlite_repository as repo
 from geo.services import (
+    article_stage_service,
     audit_service,
     auth_service,
     config_service,
@@ -843,6 +844,38 @@ async def article_detail(request: Request):
             article = repo.update_article(conn, article_id, title.strip(), body, _now())
 
         return JSONResponse(article)
+    finally:
+        conn.close()
+
+
+async def article_stages(request: Request):
+    """六阶段流水线状态：GET 读，POST 切换/完成（action=set/complete）。"""
+    article_id = request.path_params["article_id"]
+    conn = db.connect()
+    try:
+        article = repo.get_article(conn, article_id)
+        if not article or article["tenant_id"] != _tenant(request):
+            return _error(request, "NOT_FOUND", "article not found", 404)
+
+        if request.method == "GET":
+            return JSONResponse(article_stage_service.get_stages(conn, article_id))
+
+        payload = await _json_body(request)
+        if isinstance(payload, JSONResponse):
+            return payload
+        action = payload.get("action")
+        try:
+            if action == "set":
+                data = article_stage_service.set_current(conn, article_id, payload.get("stage"))
+            elif action == "complete":
+                data = article_stage_service.complete_current(conn, article_id)
+            else:
+                return _error(request, "VALIDATION_ERROR", "action must be set or complete")
+        except article_stage_service.StageError as exc:
+            code = 404 if exc.code == "UNKNOWN_STAGE" else 409
+            return _error(request, exc.code, exc.message, code)
+        conn.commit()
+        return JSONResponse(data)
     finally:
         conn.close()
 
@@ -1755,6 +1788,11 @@ Route(f"{settings.api_prefix}/channels", list_channels),
 Route(f"{settings.api_prefix}/channels/{{channel_id}}/connect", connect_channel, methods=["POST"]),
 Route(f"{settings.api_prefix}/channels/{{channel_id}}/check", check_channel, methods=["POST"]),
         Route(f"{settings.api_prefix}/articles/{{article_id}}", article_detail, methods=["GET", "PATCH"]),
+        Route(
+            f"{settings.api_prefix}/articles/{{article_id}}/stages",
+            article_stages,
+            methods=["GET", "POST"],
+        ),
         Route(f"{settings.api_prefix}/articles/{{article_id}}/publish", publish_article, methods=["POST"]),
         Route(f"{settings.api_prefix}/articles/{{article_id}}/impact", article_impact),
     ]
