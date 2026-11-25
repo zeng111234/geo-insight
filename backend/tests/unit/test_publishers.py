@@ -75,6 +75,19 @@ class ChromeDiscoveryTests(unittest.TestCase):
             result = _base.find_chrome()
         self.assertNotEqual(result, "/definitely/not/here/chrome")
 
+    def test_returns_none_when_nothing_installed(self):
+        """什么浏览器都没有时必须返回 None，而不是抛异常。
+
+        返回 None 是调用方能降级的契约：launch() 会把 executable_path 省略，
+        退回 Playwright 自带的 chromium。如果这里改成抛异常，
+        一台没装 Chrome 的机器上发布功能会直接崩在启动那一步。
+        """
+        with mock.patch.dict(os.environ, {"GEO_CHROME": ""}), \
+             mock.patch("shutil.which", return_value=None), \
+             mock.patch("pathlib.Path.is_file", return_value=False), \
+             mock.patch("pathlib.Path.exists", return_value=False):
+            self.assertIsNone(_base.find_chrome())
+
 
 class TitleValidationTests(unittest.TestCase):
     """标题校验必须发生在开浏览器之前(返回 rejected,不碰登录态)。"""
