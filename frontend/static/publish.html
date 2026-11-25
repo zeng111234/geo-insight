@@ -18,6 +18,10 @@
     font-size: var(--fs-label); line-height: 1.7; }
   /* 渠道表空值提示：状态驱动的下一步动作，比一列破折号有用。 */
   .ch-note { max-width: 300px; line-height: 1.6; }
+  /* 窄屏下 5 列挤在半屏面板里会把「未连接」拆成两行。
+     给表格最小宽度触发 .table-wrap 的横向滚动，状态标签本身不拆字。 */
+  #channels table { min-width: 560px; }
+  #channels td .tag { white-space: nowrap; }
   .imp { border-bottom: 1px solid var(--border); padding: 11px 14px; }
   .imp:last-child { border-bottom: none; }
   .imp .h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }

@@ -162,6 +162,14 @@ class PublishTableContractTest(unittest.TestCase):
         self.assertIn('class="pub-fail"', self.html)
         self.assertNotIn("'<span class=\"tag bad\">' + esc(p.failure_reason)", self.html)
 
+    def test_channel_table_scrolls_instead_of_crushing_cells(self):
+        """窄屏下 5 列挤在半屏面板会把「未连接」拆成两行。
+
+        给表格最小宽度触发 .table-wrap 的横向滚动，状态标签本身 nowrap。
+        """
+        self.assertIn("#channels table { min-width: 560px; }", self.html)
+        self.assertIn("#channels td .tag { white-space: nowrap; }", self.html)
+
 
 if __name__ == "__main__":
     unittest.main()
