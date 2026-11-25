@@ -1362,6 +1362,9 @@
       state.questionId = "";
       state.questions = [];
       state.tabCounts = {};
+      // 下拉的 option 只在 G.fillTrackers() 里生成；不重建就直接给新 id 设 value，
+      // select 上没有对应 option 会静默变成空值——新建成功却切不到新对象。
+      await G.fillTrackers();
       $("tracker").value = created.id;
       renderTrackerList();
       renderHead();

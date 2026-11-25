@@ -183,6 +183,49 @@ try {
   await sleep(200);
   check(await evaluate(`!document.getElementById('newDrawer').open`) === true, "取消关闭抽屉");
 
+  // 8b. 表单提交真建对象 + 下拉同步（E1e 真 bug：建完 select 没重建，选不中新对象）
+  // 会写库，用产品自己的 DELETE 接口清理，finally 兜底保证不留脏数据。
+  const TEMP_NAME = "CDP交互检查临时对象";
+  let createdId = null;
+  const optionsBefore = await evaluate(`document.querySelectorAll('#tracker option').length`);
+  try {
+    await evaluate(`document.getElementById('newTracker').click()`);
+    await sleep(200);
+    await evaluate(`(function () {
+      document.getElementById('ntName').value = ${JSON.stringify(TEMP_NAME)};
+      document.getElementById('ntBrand').value = '交互检查品牌';
+      document.getElementById('ntIndustry').value = '检查行业';
+      document.getElementById('ntRegion').value = '检查地区';
+    })()`);
+    // 真实点击「创建」，不是 dispatchEvent——与用户动作一致
+    await evaluate(`document.querySelector('#newTrackerForm button[type=submit]').click()`);
+    await sleep(1800);
+
+    const list = await (await fetch(`${BASE}/v1/trackers`)).json();
+    const created = (list.items || []).find((t) => t.name === TEMP_NAME);
+    createdId = created ? created.id : null;
+    check(!!createdId, "表单提交真建出对象（接口可查）", createdId || "未创建");
+
+    const afterSubmit = await evaluate(`({
+      options: document.querySelectorAll('#tracker option').length,
+      selected: document.getElementById('tracker').value,
+      drawerOpen: document.getElementById('newDrawer').open,
+    })`);
+    check(afterSubmit.options === optionsBefore + 1, "创建后下拉新增一个选项",
+      `${optionsBefore}→${afterSubmit.options}`);
+    check(afterSubmit.selected === createdId, "创建后下拉自动选中新对象",
+      `${afterSubmit.selected} / ${createdId}`);
+    check(afterSubmit.drawerOpen === false, "创建后抽屉关闭");
+  } finally {
+    if (createdId) {
+      const del = await fetch(`${BASE}/v1/trackers/${createdId}`, { method: "DELETE" });
+      check(del.status === 204, "清理临时对象（DELETE 204）", `HTTP ${del.status}`);
+      const finalList = await (await fetch(`${BASE}/v1/trackers`)).json();
+      check((finalList.items || []).length === optionsBefore,
+        "清理后 tracker 数回到原值", `${(finalList.items || []).length} 个`);
+    }
+  }
+
   // 9. 首页下钻抽屉：点指标卡片 → 抽屉打开 → 真加载出样本表（非零行、带分页）
   await send("Page.navigate", { url: `${BASE}/` });
   await sleep(4000);

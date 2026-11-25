@@ -353,7 +353,7 @@ GEO_AUTH_REQUIRED=0 python run.py --no-browser &
 node scripts/pagecheck.mjs                                    # 77 条页面字段契约 + 侧栏结构 + 样式契约
 node scripts/browsercheck.mjs                                 # 75 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
-node scripts/interactioncheck.mjs                             # 24 条 CDP 真实点击（删除确认/暂停恢复/新建抽屉/首页下钻+口径/报告打印，需 Chrome/Edge）
+node scripts/interactioncheck.mjs                             # 29 条 CDP 真实点击（删除确认/暂停恢复/新建抽屉+表单提交/首页下钻+口径/报告打印，需 Chrome/Edge）
 ```
 
 合计 438 条，全部通过。
@@ -363,7 +363,7 @@ node scripts/interactioncheck.mjs                             # 24 条 CDP 真�
 
 `smoke.py` 自建临时库、在**自动挑选的空闲端口**启动 uvicorn、逐个请求断言后关闭进程，不碰演示数据，也不会误连到正在运行的开发服务（显式指定 `GEO_SMOKE_PORT` 且端口被占用时直接报错）。
 
-`pagecheck.mjs` 按页面请求顺序逐字段校验（77 条，含 13 页单侧栏/单高亮/无死链、详情接口 `data_range` 类型，以及 13 页必须引入统一样式表、不得隐藏侧栏的样式契约）。`browsercheck.mjs` 调系统 Chrome/Edge 的 `--dump-dom`，验证 **JS 真的在浏览器里跑完**：22 个 URL 无报错、无「加载中」残留，关键表格/图表与**明细翻页条**确实渲染出来（问题监控按 tab 拆成 10 个 URL 分别断言）。这一层不装 Playwright、不加依赖 —— HTTP 200 和 `node --check` 都拦不住「页面读了接口里不存在的字段」。找不到浏览器时会明确打印 SKIP，不假装通过。`pagercheck.mjs` 在桩 DOM 里加载真实 `app.js` 模拟点击翻页（22 条），验证 10 行/页、边界禁用、换查询回第 1 页、页码直达跳转。`interactioncheck.mjs` 走 CDP 真点按钮（24 条）：删除弹框的禁用态、输错名称不放行、取消不删、暂停与恢复、新建抽屉的开合与字段、首页指标卡下钻抽屉（真加载样本表+分页）、口径说明抽屉（真加载定义表与规则）、报告详情加载真快照并点「打印」真调用 `window.print`（注入计数桩，headless 下不弹原生对话框）；按决策要求，跟只读 DOM 检查分开——不可逆操作必须真点一遍。另对每个 `<script>` 块跑 `node --check`。测试库为 `%TEMP%\geo_test_suite.db`。
+`pagecheck.mjs` 按页面请求顺序逐字段校验（77 条，含 13 页单侧栏/单高亮/无死链、详情接口 `data_range` 类型，以及 13 页必须引入统一样式表、不得隐藏侧栏的样式契约）。`browsercheck.mjs` 调系统 Chrome/Edge 的 `--dump-dom`，验证 **JS 真的在浏览器里跑完**：22 个 URL 无报错、无「加载中」残留，关键表格/图表与**明细翻页条**确实渲染出来（问题监控按 tab 拆成 10 个 URL 分别断言）。这一层不装 Playwright、不加依赖 —— HTTP 200 和 `node --check` 都拦不住「页面读了接口里不存在的字段」。找不到浏览器时会明确打印 SKIP，不假装通过。`pagercheck.mjs` 在桩 DOM 里加载真实 `app.js` 模拟点击翻页（22 条），验证 10 行/页、边界禁用、换查询回第 1 页、页码直达跳转。`interactioncheck.mjs` 走 CDP 真点按钮（29 条）：删除弹框的禁用态、输错名称不放行、取消不删、暂停与恢复、新建抽屉的开合与字段、表单提交真建对象（下拉同步选中新对象 + 用 DELETE 接口清理）、首页指标卡下钻抽屉（真加载样本表+分页）、口径说明抽屉（真加载定义表与规则）、报告详情加载真快照并点「打印」真调用 `window.print`（注入计数桩，headless 下不弹原生对话框）；按决策要求，跟只读 DOM 检查分开——不可逆操作必须真点一遍。写库的用例（表单提交）用产品自己的 DELETE 接口在 finally 里清理，跑完 tracker 数回到原值。另对每个 `<script>` 块跑 `node --check`。测试库为 `%TEMP%\geo_test_suite.db`。
 
 关键断言都做过**变异自检**（把实现改错，确认检查会变红）：迁移 checksum、导入幂等、dry-run 回滚、竞品识别四处均已验证「不是摆设」。
 
@@ -423,7 +423,7 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
   删除与记账同一事务）。审计查询走 `scripts/audit_log.py`（`--action import.rollback` 只看回滚），
   没有 HTTP 查询接口——审计读取只做本地工具，不对外暴露。仍未接审计的破坏性操作：
   答案删除、问题删除（当前界面不提供这两个动作）
-- 契约 fuzz（Schemathesis）、交互 E2E（表单提交等完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖；删除确认、暂停恢复、新建抽屉、首页下钻/口径抽屉与报告打印已由 `interactioncheck.mjs` 做 CDP 真实点击（24 条，已入库，可重复回归）。但**其余交互（表单提交）仍未模拟用户操作**
+- 契约 fuzz（Schemathesis）、交互 E2E（完整用户流）、200 条黄金样本回归。页面渲染层已由 `browsercheck.mjs` 覆盖、分页翻页点击已由 `pagercheck.mjs` 覆盖；删除确认、暂停恢复、新建抽屉与表单提交、首页下钻/口径抽屉、报告打印已由 `interactioncheck.mjs` 做 CDP 真实点击（29 条，已入库，可重复回归）。其余交互（答案编辑弹框、问题设置）仍未模拟用户操作
 - ~~CSRF 防护~~ **已补上（003 US3，2026-11-24）**：双提交 cookie（`geo_csrf` + `X-CSRF-Token`
   头，决策 010 的洞清零）+ 登录限流（连续 5 错锁定，`GEO_LOGIN_MAX_FAILURES`/`GEO_LOGIN_LOCKOUT_S`
   可调）。注意 `GEO_AUTH_REQUIRED=0` 时鉴权与 CSRF 一并跳过（自动化检查专用）
