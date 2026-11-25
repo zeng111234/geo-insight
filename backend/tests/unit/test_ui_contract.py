@@ -171,6 +171,31 @@ class PublishTableContractTest(unittest.TestCase):
         self.assertIn("#channels td .tag { white-space: nowrap; }", self.html)
 
 
+class BrandFilterContractTest(unittest.TestCase):
+    """品牌筛选是真实维度：下拉由 tracker 列表生成，选中即切对象。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = MONITOR.read_text(encoding="utf-8")
+
+    def test_brand_options_are_dynamic(self):
+        """守渲染语句本身：下拉内容必须由 tracker 列表赋值，不能只查声明。"""
+        self.assertNotIn('<option value="own">本品牌</option>', self.html)
+        self.assertIn("bsel.innerHTML = (state.trackers || []).map(function (t)", self.html)
+        self.assertIn("bsel.value = state.trackerId;", self.html)
+
+    def test_brand_switch_reuses_single_path(self):
+        """品牌下拉与左栏列表必须共用 switchTracker，避免两份逻辑漂移。"""
+        self.assertIn("function switchTracker(id)", self.html)
+        self.assertIn('$("brandFilter").addEventListener("change", function () {\n    switchTracker(this.value);', self.html)
+        self.assertIn("if (el) switchTracker(el.dataset.tracker);", self.html)
+
+    def test_table_browse_button_wired(self):
+        self.assertIn('id="tableBrowseBtn"', self.html)
+        self.assertIn('$("tableBrowseBtn").addEventListener("click"', self.html)
+        self.assertIn('state.answerView = "table";', self.html)
+
+
 class HomeKpiGridContractTest(unittest.TestCase):
     """首页 KPI 卡：8 张要在宽屏排 4+4，情感卡不再独占一行。"""
 

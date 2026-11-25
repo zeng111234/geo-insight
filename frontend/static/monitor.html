@@ -102,9 +102,14 @@
   dialog#newDrawer form { display: flex; flex-direction: column; height: 100%; }
   dialog#newDrawer .field { display: block; margin-bottom: 12px; font-size: var(--fs-label); }
   dialog#newDrawer .field span { display: block; color: var(--muted); margin-bottom: 5px; }
-  dialog#newDrawer .field input { width: 100%; }
+  dialog#newDrawer .field input, dialog#newDrawer .field textarea { width: 100%; }
+  dialog#newDrawer .field textarea { resize: vertical; min-height: 64px; }
   dialog#newDrawer .row { display: flex; gap: 8px; }
   dialog#newDrawer .row .field { flex: 1; min-width: 0; }
+  dialog#newDrawer .nt-channels { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; max-height: 132px; overflow-y: auto; }
+  dialog#newDrawer .nt-channels label { display: flex; align-items: center; gap: 5px; font-size: var(--fs-label); }
+  dialog#newDrawer .nt-channels label.off { color: var(--muted); }
+  dialog#newDrawer .nt-channels input { width: auto; }
 
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; padding: 14px; }
   .kpi { border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; background: var(--panel); }
@@ -220,9 +225,10 @@
             <div class="line1">
               <h2 id="objName">—</h2>
               <span class="tag" id="objStatus">—</span>
-              <!-- 按钮组按参考系统排序（去掉「表格浏览」，它属于 E1c 的视图切换） -->
+              <!-- 按钮组按参考系统排序：7 个动作齐全，表格浏览直达问答明细表格视图 -->
               <div class="acts">
                 <button id="reportBtn" type="button">下载报告</button>
+                <button id="tableBrowseBtn" type="button">表格浏览</button>
                 <button id="exportBtn" type="button">导出</button>
                 <button id="refreshBtn" type="button">刷新</button>
                 <button id="pauseBtn" type="button">暂停</button>
@@ -233,7 +239,7 @@
             <div class="meta" id="objMeta"></div>
           </div>
           <div class="mon-filters" id="filterBar">
-            <label>品牌 <select id="brandFilter" aria-label="品牌"><option value="own">本品牌</option></select></label>
+            <label>品牌 <select id="brandFilter" aria-label="品牌"><option value="">加载中…</option></select></label>
             <label>问题 <select id="questionFilter" aria-label="问题"><option value="">全部问题</option></select></label>
             <label>模型 <select id="modelFilter" aria-label="模型"><option value="">全部模型</option></select></label>
             <label>日期 <span class="dates" id="filterDates"></span></label>
@@ -266,10 +272,14 @@
   <form id="newTrackerForm">
     <h2>新建监控对象 <span class="badge">建后再导入问题</span></h2>
     <div class="dialog-body">
+      <label class="field"><span>官网地址（可选）</span>
+        <input id="ntWebsite" type="text" placeholder="https://（选填，答案中出现的官网）" /></label>
       <label class="field"><span>监控名称 *</span>
         <input id="ntName" type="text" required placeholder="例：大连示例医美" /></label>
       <label class="field"><span>品牌名称 *</span>
         <input id="ntBrand" type="text" required placeholder="答案中出现的正式名称" /></label>
+      <label class="field"><span>核心词（逗号分隔）</span>
+        <input id="ntKeywords" type="text" placeholder="律师, 律所  —— 用逗号分隔简称或产品词" /></label>
       <div class="row">
         <label class="field"><span>行业</span><input id="ntIndustry" type="text" /></label>
         <label class="field"><span>地区</span><input id="ntRegion" type="text" /></label>
@@ -278,12 +288,16 @@
         <input id="ntAliases" type="text" placeholder="简称, 英文名" /></label>
       <label class="field"><span>竞品（逗号分隔）</span>
         <input id="ntCompetitors" type="text" /></label>
-      <div class="notice warn">保存后不会自动产生数据：先导入问题集，系统才按核心 3 次 / 长尾 1 次安排采样。</div>
+      <label class="field"><span>监控问题（每行一个，* 开头设为核心问题）</span>
+        <textarea id="ntQuestions" rows="3" placeholder="武汉火锅哪家好吃？&#10;*哪家律所比较专业？"></textarea></label>
+      <div class="field"><span>采集渠道（建后按已接入渠道安排）</span>
+        <div id="ntChannels" class="nt-channels">加载中…</div></div>
+      <div class="notice warn">保存后按已接入渠道安排采样：核心 3 次 / 长尾 1 次。未接入渠道不会画空图、不填假数据。</div>
       <div id="ntError"></div>
     </div>
     <div class="dialog-foot">
       <button type="button" id="ntCancel">取消</button>
-      <button type="submit" class="primary">创建</button>
+      <button type="submit" class="primary">创建并继续</button>
     </div>
   </form>
 </dialog>
@@ -381,6 +395,17 @@
   function syncFilterControls() {
     if (!$("filterDates")) return;
     $("filterDates").textContent = $("from").value + " ~ " + $("to").value;
+    // 品牌是真实筛选维度：一个监控对象对应一个品牌，选中即切对象。
+    // 之前写死「本品牌」是假筛选——下拉里根本选不出第二个值。
+    var bsel = $("brandFilter");
+    if (bsel) {
+      bsel.innerHTML = (state.trackers || []).map(function (t) {
+        return '<option value="' + esc(t.id) + '"' +
+          (t.id === state.trackerId ? " selected" : "") + ">" +
+          esc(t.brand_name || t.name) + "</option>";
+      }).join("") || '<option value="">无监控对象</option>';
+      bsel.value = state.trackerId;
+    }
     var qs = state.questions || [];
     var qsel = $("questionFilter");
     if (qsel) {
@@ -1342,18 +1367,31 @@
     }
   });
 
-  $("trackerList").addEventListener("click", function (e) {
-    var el = e.target.closest("[data-tracker]");
-    if (!el || el.dataset.tracker === state.trackerId) return;
-    state.trackerId = el.dataset.tracker;
-    $("tracker").value = state.trackerId;
+  // 切换监控对象＝切换品牌。左栏点击与品牌下拉共用，避免两份逻辑漂移。
+  function switchTracker(id) {
+    if (!id || id === state.trackerId) return;
+    state.trackerId = id;
+    $("tracker").value = id;
+    // 问题列表属于旧对象，必须清空；模型和日期是可跨对象继承的筛选，保留。
     state.questionId = "";
     state.questions = [];
+    state.filterQuestion = "";
     G.pagerReset("mon-answers");
     syncUrl(true);
     renderTrackerList();
     renderHead();
+    syncFilterControls();
+    loadTabCounts().catch(function (e) { G.fail(e, ["tabBody"]); });
     renderTab();
+  }
+
+  $("trackerList").addEventListener("click", function (e) {
+    var el = e.target.closest("[data-tracker]");
+    if (el) switchTracker(el.dataset.tracker);
+  });
+
+  $("brandFilter").addEventListener("change", function () {
+    switchTracker(this.value);
   });
 
   $("questionFilter").addEventListener("change", function () {
@@ -1375,10 +1413,22 @@
   var splitNames = function (v) {
     return (v || "").split(/[,，]/).map(function (x) { return x.trim(); }).filter(Boolean);
   };
-  $("newTracker").addEventListener("click", function () {
+  $("newTracker").addEventListener("click", async function () {
     $("ntError").innerHTML = "";
     $("newTrackerForm").reset();
     $("newDrawer").showModal();
+    // 渠道是只读清单：只有注册了采集器的通道可勾，未接入的照实禁用标注，
+    // 不画空图也不让用户以为选了就能采（决策009的诚实口径）。
+    try {
+      var meta = await G.get("/meta/channels");
+      $("ntChannels").innerHTML = (meta.items || []).map(function (ch) {
+        return '<label class="' + (ch.available ? '' : 'off') + '">' +
+          '<input type="checkbox" ' + (ch.available ? 'checked' : 'disabled') + ' />' +
+          esc(ch.label) + (ch.available ? '' : '（未接入）') + '</label>';
+      }).join("");
+    } catch (err) {
+      $("ntChannels").textContent = "渠道清单暂时加载不到，可先创建对象";
+    }
   });
   $("ntCancel").addEventListener("click", function () { $("newDrawer").close(); });
   $("newTrackerForm").addEventListener("submit", async function (e) {
@@ -1386,13 +1436,27 @@
     var body = {
       name: $("ntName").value.trim(),
       brand_name: $("ntBrand").value.trim(),
+      website: $("ntWebsite").value.trim(),
       industry: $("ntIndustry").value.trim(),
       region: $("ntRegion").value.trim(),
       brand_aliases: splitNames($("ntAliases").value),
       competitor_names: splitNames($("ntCompetitors").value),
     };
+    var keywords = splitNames($("ntKeywords").value);
+    var questionText = $("ntQuestions").value.trim();
     try {
+      // 三步串成一次「创建并继续」：建对象 → 写核心词 → 导入问题。
+      // 任何一步失败都留在抽屉里、显示已做到哪步，不让用户以为全成了。
       var created = await G.post("/trackers", body);
+      var id = created.id || created.tracker_id;
+      if (keywords.length) {
+        try { await G.patch("/trackers/" + id, { keywords: keywords }); }
+        catch (ke) { throw new Error("对象已建，但核心词保存失败：" + ke.message); }
+      }
+      if (questionText) {
+        try { await G.post("/trackers/" + id + "/questions", { text: questionText }); }
+        catch (qe) { throw new Error("对象已建，但问题导入失败：" + qe.message); }
+      }
       $("newDrawer").close();
       state.trackers.push(created);
       state.trackerId = created.id;
@@ -1416,6 +1480,14 @@
     }
   });
   $("refreshBtn").addEventListener("click", function () { renderTab(); });
+  // 「表格浏览」直达问答明细的表格视图——与 tab 内的阅读/表格切换同一份状态。
+  $("tableBrowseBtn").addEventListener("click", function () {
+    state.tab = "answers";
+    state.answerView = "table";
+    syncUrl(true);
+    renderTabs();
+    renderTab();
+  });
   $("load").addEventListener("click", function () { renderTab(); });
 
   // ---- 对象头按钮组 ----
@@ -1513,6 +1585,7 @@
     syncUrl(true);
     renderTrackerList();
     renderHead();
+    syncFilterControls();  // 品牌下拉依赖 tracker 列表，列表刷新后要重建选项
     renderTab();
   }
 

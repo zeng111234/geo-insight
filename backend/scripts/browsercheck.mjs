@@ -67,6 +67,8 @@ const EXTRA = {
   // 问题监控是工作台：默认 tab 是指标看板，分页条在问答明细 tab 上，
   // 所以拆成两个 URL 各查各的，而不是笼统要求"这页必须有分页"。
   "/monitor": [
+    ["品牌真筛选", /id="brandFilter"[^>]*>[\s\S]{0,400}option value="11111111-1111-1111-1111-111111111111"/],
+    ["表格浏览按钮", /id="tableBrowseBtn"/],
     ["折线虚线缺口", /stroke-dasharray="4 4"/],
     ["标签页导航", /id="tabs"[^>]*>[\s\S]{0,600}data-tab="dashboard"/],
     ["指标看板卡", /class="kpi[\s\S]{0,300}提问次数/],
@@ -81,7 +83,7 @@ const EXTRA = {
     ["问题下拉", /id="qSelect"/],
     ["筛选条在 tab 之上", /id="filterBar"[\s\S]{0,2200}id="tabs"/],
     ["10 个 tab 带数字", /role="tab"[^>]*>指标看板<span class="n">/],
-    ["新建右侧抽屉", /id="newDrawer"[\s\S]{0,300}id="ntName"/],
+    ["新建右侧抽屉", /id="newDrawer"[\s\S]{0,500}id="ntName"/],
     ["引用信源第三栏", /id="citeBody"[\s\S]{0,400}cite-item/],
     ["全部/已监控筛选", /id="citeView"[\s\S]{0,160}已监控/],
     ["明细翻页条", /class="pager"/],
