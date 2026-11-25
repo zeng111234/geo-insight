@@ -69,6 +69,18 @@ class AuthHttpTest(unittest.TestCase):
         self.assertIn("GEO Insight", response.text)
         self.assertIn('action="/login"', response.text)
 
+    def test_login_hint_is_for_viewers_not_operators(self):
+        """登录页是演示观众看到的，不是运维文档。
+
+        环境变量名、README 路径、重启后重登这类实现细节出现在登录页上，
+        观众既用不上又会困惑；观众需要知道的只有「密码去哪找」。
+        """
+        response = self.client.get("/login")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("密码见启动时终端打印的提示", response.text)
+        for internal in ("GEO_ADMIN_PASSWORD", "README", "服务重启后需要重新登录"):
+            self.assertNotIn(internal, response.text)
+
     # --- 登录 ---
     def test_wrong_password_does_not_set_cookie(self):
         response = self.login("definitely-wrong")
