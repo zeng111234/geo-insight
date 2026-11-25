@@ -424,4 +424,19 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
 - ~~CSRF 防护~~ **已补上（003 US3，2026-11-24）**：双提交 cookie（`geo_csrf` + `X-CSRF-Token`
   头，决策 010 的洞清零）+ 登录限流（连续 5 错锁定，`GEO_LOGIN_MAX_FAILURES`/`GEO_LOGIN_LOCKOUT_S`
   可调）。注意 `GEO_AUTH_REQUIRED=0` 时鉴权与 CSRF 一并跳过（自动化检查专用）
-- **AI 成稿与积分**：按决策 003 整体取消；决策 009 已改判为 H2.5 阶段恢复（只做账本，不做对外收费）
+- **AI 成稿与 AI 助手面板**：按决策 003 取消；决策 009 改判为 H2.5 恢复，但**真调 LLM 尚未接**（额度由脚本人工发放）。
+  积分账本本身已落地，见下。
+
+### 积分账本（决策 009：账本是真的，定价是假的）
+
+`credit_ledger` 已落库：**余额 = 流水求和**，不另存"当前余额"字段；金额是整数分，不用浮点。
+同一 `(ref_type, ref_id)` 只能记一笔，网络重试不会重复扣；冲正记反向流水，不删原记录。
+
+```bash
+python backend/scripts/credits.py --grant 10000 --reason "试点初始额度"
+python backend/scripts/credits.py --balance
+python backend/scripts/credits.py --list
+```
+
+**这个账本不用于收费**：额度由脚本人工发放，没有支付入口，界面上的数字只是演示"每次调用有成本"。
+不要把它当计费系统接支付——决策 009 明确"账本真、定价假"。
