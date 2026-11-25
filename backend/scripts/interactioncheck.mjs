@@ -298,6 +298,40 @@ try {
   check(beforePrint === 0 && afterPrint === 1,
     "点「打印 / 导出 PDF」真的调用 window.print", `计数 ${beforePrint}→${afterPrint}`);
 
+  // 13. 设置页删除确认：点别名 × → 弹框说清后果 → 取消不掉数据（只读，不写库）
+  await send("Page.navigate", { url: `${BASE}/settings` });
+  await sleep(3500);
+  const aliasButtons = await evaluate(`document.querySelectorAll('#aliases [data-alias]').length`);
+  check(aliasButtons > 0, "设置页加载出别名删除按钮", `${aliasButtons} 个`);
+  const aliasBefore = await evaluate(`
+    Array.from(document.querySelectorAll('#aliases [data-alias]'))
+      .map(function (b) { return b.getAttribute('aria-label'); })
+  `);
+  await evaluate(`document.querySelector('#aliases [data-alias]').click()`);
+  await sleep(400);
+  const dialog = await evaluate(`({
+    open: document.getElementById('confirmDialog').open,
+    title: document.getElementById('confirmTitle').textContent.trim(),
+    text: document.getElementById('confirmText').textContent,
+  })`);
+  check(dialog.open === true && dialog.title === "删除别名", "点别名 × 弹出确认框", dialog.title);
+  check(/历史提及不会改变/.test(dialog.text),
+    "确认框说清后果（历史提及不变）", dialog.text.slice(0, 40));
+  await evaluate(`
+    (function () {
+      var b = document.querySelector('#confirmDialog button[value=cancel]');
+      if (b) b.click(); else document.getElementById('confirmDialog').close('cancel');
+    })()
+  `);
+  await sleep(300);
+  const aliasAfter = await evaluate(`
+    Array.from(document.querySelectorAll('#aliases [data-alias]'))
+      .map(function (b) { return b.getAttribute('aria-label'); })
+  `);
+  const dialogClosed = await evaluate(`!document.getElementById('confirmDialog').open`);
+  check(JSON.stringify(aliasAfter) === JSON.stringify(aliasBefore) && dialogClosed === true,
+    "取消后别名不变、弹框关闭（零写库）");
+
   check(errors.length === 0, "全程无 JS 异常", errors.join("; "));
 
   const failed = results.filter((x) => !x).length;
