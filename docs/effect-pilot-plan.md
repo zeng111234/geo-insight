@@ -20,9 +20,17 @@
 - **发布渠道（知乎 / 公众号 / 搜狐）**：文章发到这里，用现有的 publisher CLI；这一步和 DeepSeek 无关。
 - **内容**：人写，或用 LLM 辅助；系统里的采集器只负责"问 + 收答案"，不负责写稿。
 
-- 平台：DeepSeek（个人实名可开通，flash 错峰约 ¥100/月，研究结论见 `docs/platform-access-research.md`）。
-  **前提：它的 API 必须能反映公开网页内容（联网检索/引用）。** D1 先验证；不通过就换豆包/元宝/Kimi，
-  或改网页版人工采样。**平台选型第一标准是"能被内容影响"，不是"便宜"。**
+- 平台：**DeepSeek 和豆包都已有官方联网 API，且都返回引用**（2026-11-25 核对官方文档）：
+
+| 平台 | 联网方式 | 引用字段 | 计费 | 结论 |
+|---|---|---|---|---|
+| DeepSeek | `deepseek-flash` + `deepseek_web_search` | Messages `citations[]`；Chat/Responses `annotations[]` | 服务端搜索不计费，只算 token（约 ¥100/月） | **首选：成本最低、字段最全** |
+| 豆包/火山方舟 | Chat API `web_search_options`，或 Responses `tools:[{"type":"web_search"}]` | `annotations` 的 `url_citation`（url/title/site_name/publish_time） | 搜索按次计费 | **主平台候选：用户量大、答案级引用** |
+| Kimi | Responses `tools:[{"type":"web_search"}]` | `web_search_call.action.sources` | $0.005/次 + 模型较贵 | 备选 |
+| 千问 | DashScope 原生协议 | `search_info`（检索面，非答案级） | — | 暂不用 |
+
+  D1 用同一个问题各跑 DeepSeek / 豆包 3 次，比较「是否触发搜索、引用条数、是否提到品牌」，选一个主平台，另一个做交叉验证。
+  **不要用人工采样做主路径**；人工只在 API 触发不了搜索、或要核对产品端差异时做兜底。
 - 问题：目标问题 1 个 + 对照问题 1 个（同类、但本次不投放）
 - 渠道：知乎 / 公众号 / 搜狐 中选一个已登录、能发文的
 - 样本：目标与对照各 3 次/天；发布前至少 5 天基线，发布后观察 14–30 天

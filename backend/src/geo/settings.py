@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+# 项目根（backend 的上一级）。路径必须从这里推，不能靠 cwd。
+PROJECT_ROOT = BACKEND_DIR.parent
 
 
 @dataclass(frozen=True)
@@ -15,7 +17,12 @@ class Settings:
     the repository implementation changes when that happens.
     """
 
-    database_path: str = os.getenv("GEO_DB_PATH", "geo.db")
+    # 数据库固定在项目根，**不跟着 cwd 走**。
+    # 曾经是相对路径 "geo.db"：双击 start.bat（脚本先 cd backend）写到 backend/geo.db，
+    # 而命令行在项目根启动写到 geo/geo.db，于是同一台机器上长出两个库，
+    # 数据看起来"丢了"，其实只是看错了文件（2026-11-25 实际踩到）。
+    # 换机器、换启动方式都必须指向同一个文件，这条比"方便"重要。
+    database_path: str = os.getenv("GEO_DB_PATH", str(PROJECT_ROOT / "geo.db"))
     default_tenant_id: str = os.getenv("GEO_TENANT_ID", "00000000-0000-0000-0000-000000000001")
     api_prefix: str = "/v1"
     metric_version: str = "v1"

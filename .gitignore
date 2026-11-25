@@ -3,6 +3,8 @@
 *.db-journal
 *.db-wal
 *.db-shm
+# 归档出来的旧库快照（geo.db.archive-2026-11-12 这种）
+geo.db.*
 
 # 导入失败报告
 import_reports/

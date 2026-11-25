@@ -12,11 +12,13 @@
 """
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from geo.publishers import _base, wechat, zhihu
 
@@ -30,6 +32,48 @@ def _draft(tmp: Path, title: str) -> str:
         encoding="utf-8",
     )
     return str(p)
+
+
+def _chrome_or_skip(case: unittest.TestCase) -> str:
+    """拿这台机器上的 Chrome/Edge 路径，没有就 skip。
+
+    不写死路径：同一个仓库会在不同电脑上跑，装在哪台机器的哪里都不一定。
+    """
+    chrome = _base.find_chrome()
+    if not chrome:
+        case.skipTest("这台机器上找不到 Chrome/Edge，跳过需要真实浏览器的用例")
+    return chrome
+
+
+class ChromeDiscoveryTests(unittest.TestCase):
+    """浏览器路径必须靠探测，不能写死。
+
+    背景：这个仓库会在两台电脑上轮流跑，Chrome 的安装位置因机器而异
+    （系统安装 / 用户目录安装 / 只有 Edge / macOS / Linux）。写死
+    ``C:\\Program Files\\...`` 的后果是其中一台机器发布功能直接崩，
+    而且崩在启动浏览器那一步，报错完全看不出原因。
+    """
+
+    def test_returns_existing_file_or_none(self):
+        """返回的路径必须真的存在，或者明确返回 None——不能给出一个不存在的路径。"""
+        chrome = _base.find_chrome()
+        if chrome is not None:
+            self.assertTrue(Path(chrome).is_file(), f"返回了不存在的路径: {chrome}")
+
+    def test_env_override_wins(self):
+        """GEO_CHROME 指向真实文件时优先用它（装在非常规位置时的逃生口）。
+
+        这里故意用 python 解释器路径而不是「探测到的 Chrome 路径」——
+        两者相同时，删掉 override 逻辑测试照样绿，等于什么都没验。
+        """
+        with mock.patch.dict(os.environ, {"GEO_CHROME": sys.executable}):
+            self.assertEqual(_base.find_chrome(), sys.executable)
+
+    def test_env_override_ignored_when_path_missing(self):
+        """GEO_CHROME 指了个不存在的路径时，不能返回它去害人，要退回正常探测。"""
+        with mock.patch.dict(os.environ, {"GEO_CHROME": "/definitely/not/here/chrome"}):
+            result = _base.find_chrome()
+        self.assertNotEqual(result, "/definitely/not/here/chrome")
 
 
 class TitleValidationTests(unittest.TestCase):
@@ -68,12 +112,11 @@ class PasteHtmlTests(unittest.TestCase):
     """
 
     def test_paste_html_writes_contenteditable(self):
-        if not Path(_base.CHROME_PATH).exists():
-            self.skipTest(f"系统 Chrome 不存在: {_base.CHROME_PATH}")
+        chrome = _chrome_or_skip(self)
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(executable_path=_base.CHROME_PATH, headless=True)
+            browser = pw.chromium.launch(executable_path=chrome, headless=True)
             try:
                 page = browser.new_page()
                 page.set_content("<div id='ed' contenteditable='true'></div>")
@@ -85,12 +128,11 @@ class PasteHtmlTests(unittest.TestCase):
         self.assertIn("world", text)
 
     def test_paste_html_reports_missing_element(self):
-        if not Path(_base.CHROME_PATH).exists():
-            self.skipTest(f"系统 Chrome 不存在: {_base.CHROME_PATH}")
+        chrome = _chrome_or_skip(self)
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(executable_path=_base.CHROME_PATH, headless=True)
+            browser = pw.chromium.launch(executable_path=chrome, headless=True)
             try:
                 page = browser.new_page()
                 page.set_content("<div id='x'></div>")
@@ -191,12 +233,11 @@ class PasswordLoginTests(unittest.TestCase):
     """
 
     def test_fills_and_submits(self):
-        if not Path(_base.CHROME_PATH).exists():
-            self.skipTest(f"系统 Chrome 不存在: {_base.CHROME_PATH}")
+        chrome = _chrome_or_skip(self)
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(executable_path=_base.CHROME_PATH, headless=True)
+            browser = pw.chromium.launch(executable_path=chrome, headless=True)
             try:
                 page = browser.new_page()
                 page.set_content(self.FORM)
@@ -213,12 +254,11 @@ class PasswordLoginTests(unittest.TestCase):
         self.assertEqual(values["p"], "s3cret!")
 
     def test_reports_missing_password_field(self):
-        if not Path(_base.CHROME_PATH).exists():
-            self.skipTest(f"系统 Chrome 不存在: {_base.CHROME_PATH}")
+        chrome = _chrome_or_skip(self)
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(executable_path=_base.CHROME_PATH, headless=True)
+            browser = pw.chromium.launch(executable_path=chrome, headless=True)
             try:
                 page = browser.new_page()
                 page.set_content("<input type='text' />")

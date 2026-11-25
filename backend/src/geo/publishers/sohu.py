@@ -34,14 +34,20 @@ from typing import Any
 
 from playwright.sync_api import sync_playwright
 
-from geo.publishers._base import credentials, paste_html, switch_to_password_login, try_password_login
+from geo.publishers._base import (
+    credentials,
+    find_chrome,
+    paste_html,
+    switch_to_password_login,
+    try_password_login,
+)
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 PROFILE_DIR = Path(__file__).resolve().parents[2] / ".browser-profiles" / "sohu"
-CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+# 浏览器路径不写死:靠 _base.find_chrome() 在每台机器上探测(见该函数的说明)
 # 2026-11-24 实测(登录态下逐页探测):
 # - 老地址 mp/post/createArticle 已 404(改版),新后台在 mpfe/v4 下
 # - 编辑器 URL 直连一律被弹回内容管理页,必须从「发布内容」按钮点进去(SPA 路由)
@@ -83,14 +89,21 @@ def _dismiss_dialogs(page) -> None:
 
 
 def _launch(pw: sync_playwright, headless: bool = False):
-    """用系统 Chrome 启动持久化上下文。首登需要 headless=False(要扫码)。"""
+    """用系统 Chrome 启动持久化上下文。首登需要 headless=False(要扫码)。
+
+    浏览器路径靠 find_chrome 探测,不写死——同一个仓库要在多台电脑上跑。
+    探测不到就退回 Playwright 自带的 chromium,至少功能不会整个不可用。
+    """
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    return pw.chromium.launch_persistent_context(
-        user_data_dir=str(PROFILE_DIR),
-        executable_path=CHROME_PATH,
-        headless=headless,
-        viewport={"width": 1440, "height": 900},
-    )
+    kwargs = {
+        "user_data_dir": str(PROFILE_DIR),
+        "headless": headless,
+        "viewport": {"width": 1440, "height": 900},
+    }
+    chrome = find_chrome()
+    if chrome:
+        kwargs["executable_path"] = chrome
+    return pw.chromium.launch_persistent_context(**kwargs)
 
 
 def login_flow() -> bool:

@@ -19,15 +19,60 @@ sohu.py 先于本文件存在,保持自包含不迁移;新渠道(zhihu/wechat/�
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
-CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 PROFILE_ROOT = Path(__file__).resolve().parents[2] / ".browser-profiles"
 # 与 baijiahao.local.json 同目录、同一安全等级:明文本地文件,已 gitignore
 CHANNEL_CREDENTIALS_PATH = Path(__file__).resolve().parents[3] / "data" / "channels.local.json"
+
+
+def find_chrome() -> str | None:
+    """找这台机器上能用的 Chrome/Edge,找不到返回 None。
+
+    为什么不再写死路径:同一个仓库会在不同机器上跑,而 Chrome 的安装位置因机器而异
+    (系统装 / 用户目录装 / 只有 Edge / macOS / Linux)。写死 ``C:\\Program Files\\...``
+    的后果是那台机器上发布功能直接崩,而且崩在启动浏览器那一步,报错信息完全看不出原因。
+
+    顺序:环境变量 ``GEO_CHROME`` → PATH → 常见安装位置。全都没有时返回 None,
+    由调用方决定是退回 Playwright 自带的 chromium 还是直接报错。
+    """
+    override = os.getenv("GEO_CHROME")
+    if override and Path(override).is_file():
+        return override
+
+    for name in ("chrome", "google-chrome", "chromium", "chromium-browser", "msedge", "microsoft-edge"):
+        found = shutil.which(name)
+        if found:
+            return found
+
+    local_app = os.getenv("LOCALAPPDATA") or ""
+    candidates = [
+        # Windows:系统安装
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        # Windows:当前用户安装(不需要管理员权限的那种安装包会装到这里)
+        str(Path(local_app) / "Google/Chrome/Application/chrome.exe") if local_app else "",
+        # Windows:只有 Edge 的机器
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        # macOS
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        # Linux
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+    ]
+    for path in candidates:
+        if path and Path(path).is_file():
+            return path
+    return None
 
 
 def ensure_utf8() -> None:
@@ -44,13 +89,21 @@ def profile_dir(name: str) -> Path:
 
 
 def launch(pw: sync_playwright, name: str, headless: bool = False):
-    """用系统 Chrome 启动持久化上下文。首登需要 headless=False(要扫码)。"""
-    return pw.chromium.launch_persistent_context(
-        user_data_dir=str(profile_dir(name)),
-        executable_path=CHROME_PATH,
-        headless=headless,
-        viewport={"width": 1440, "height": 900},
-    )
+    """用系统 Chrome 启动持久化上下文。首登需要 headless=False(要扫码)。
+
+    找不到系统 Chrome/Edge 时退回 Playwright 自带的 chromium——它跟项目一起装,
+    哪台机器都有。用系统浏览器的理由是登录态和风控表现更接近真人,
+    但没有它也不该让功能整个不可用。
+    """
+    kwargs = {
+        "user_data_dir": str(profile_dir(name)),
+        "headless": headless,
+        "viewport": {"width": 1440, "height": 900},
+    }
+    chrome = find_chrome()
+    if chrome:
+        kwargs["executable_path"] = chrome
+    return pw.chromium.launch_persistent_context(**kwargs)
 
 
 # 往 contenteditable 写富文本:两条路都不依赖编辑器内部 API。
