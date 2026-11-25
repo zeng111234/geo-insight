@@ -345,7 +345,7 @@ curl "$B/articles/55555555-5555-5555-5555-555555555551/impact"
 
 ```bash
 cd backend
-python -m unittest discover -s tests -t . -p "test_*.py" -v   # 178 条（含 HTTP 层鉴权、审计、核心词、周聚合，需 starlette）
+python -m unittest discover -s tests -t . -p "test_*.py" -v   # 476 条（2026-11-25 实测，系统 Python 3.12；含 HTTP 层鉴权、审计、核心词、周聚合）
 python scripts/smoke.py                                        # 86 条真实 HTTP 断言（自己登录，自动选空闲端口）
 
 # 后三个不看登录态：启动服务时显式关掉鉴权
@@ -356,7 +356,16 @@ node scripts/pagercheck.mjs                                   # 22 条分页组�
 node scripts/interactioncheck.mjs                             # 29 条 CDP 真实点击（删除确认/暂停恢复/新建抽屉+表单提交/首页下钻+口径/报告打印，需 Chrome/Edge）
 ```
 
-合计 438 条，全部通过。
+全部通过。各脚本精确条数以 `specs/003-next-stage-roadmap/tasks.md` 的「验证状态」为准
+（单测 476，2026-11-25 干净检出实测全绿；测试数只增不减）。
+
+**检查红了先重启服务**：`browsercheck` / `interactioncheck` 打的是正在运行的 8123 进程。
+后端 Python 代码和 E3/T025 那批前端页面是在服务启动**之后**才改的，旧进程不会自动加载——
+表现是 `/studio` 六阶段步骤条、`/monitor?tab=health` 失败率告警这类断言失败，
+但接口和代码都是对的。先 `Ctrl+C` 停掉服务再双击 `start.bat` 重开，然后重跑检查。
+快速自证：用 `GEO_BASE=http://127.0.0.1:8124 node scripts/browsercheck.mjs`
+打一个刚启动的新实例（记得 `GEO_DB_PATH` 指一份库副本，别和 8123 同时写同一个库），
+新实例全绿就说明是旧进程，不是代码坏。
 
 用**系统 Python** 跑（`start.bat` 用的也是它）：`backend/.venv` 是历史残留，里面只有 pip，
 `starlette` 装在系统环境。空 venv 里跑单测不会报错，HTTP 层那 10 条会自动跳过并说明原因。
