@@ -171,6 +171,25 @@ class PublishTableContractTest(unittest.TestCase):
         self.assertIn("#channels td .tag { white-space: nowrap; }", self.html)
 
 
+class CollectionRunsContractTest(unittest.TestCase):
+    """采集任务列表：真 run 记录，无记录说人话，不编进度。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = MONITOR.read_text(encoding="utf-8")
+
+    def test_runs_endpoint_is_fetched(self):
+        self.assertIn('"/trackers/" + state.trackerId + "/runs?" + datesF()', self.html)
+
+    def test_empty_state_says_no_runs(self):
+        self.assertIn("本周期尚无采集任务", self.html)
+        self.assertIn("采集任务列表暂时读取失败", self.html)
+
+    def test_progress_from_real_counts(self):
+        """条目进度必须用 succeeded/failed/total，不能用 run.stats 的空对象。"""
+        self.assertIn('r.succeeded + r.failed) + "/" + r.total', self.html)
+
+
 class BrandFilterContractTest(unittest.TestCase):
     """品牌筛选是真实维度：下拉由 tracker 列表生成，选中即切对象。"""
 

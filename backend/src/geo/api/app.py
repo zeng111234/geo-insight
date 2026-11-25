@@ -371,6 +371,27 @@ async def list_trackers(request: Request):
         conn.close()
 
 
+async def collection_runs(request: Request):
+    """采集任务列表：真实 run 记录 + 从 run_item 聚合的条目数。无记录返回空数组。"""
+    period = _period(request)
+    if isinstance(period, JSONResponse):
+        return period
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        if not repo.get_tracker(conn, tracker_id, _tenant(request)):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        try:
+            limit = min(200, max(1, int(request.query_params.get("limit", 50))))
+        except ValueError:
+            return _error(request, "VALIDATION_ERROR", "limit must be an integer")
+        return JSONResponse(
+            {"items": config_repo.run_list(conn, tracker_id, period[0], period[1], limit)}
+        )
+    finally:
+        conn.close()
+
+
 async def collection_health(request: Request):
     """采集健康：计划应采 vs 实际已采。没配采样计划时返回 configured=false。"""
     period = _period(request)
@@ -1786,7 +1807,10 @@ def create_app() -> Starlette:
         Route(f"{settings.api_prefix}/questions/{{question_id}}", question_tier, methods=["PATCH"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/sampling-plan", sampling_plan),
         Route(
-            f"{settings.api_prefix}/trackers/{{tracker_id}}/collection-health", collection_health
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/collection-health", collection_health,
+        ),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/runs", collection_runs
         ),
         Route(
             f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/by-question",

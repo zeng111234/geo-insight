@@ -1170,13 +1170,51 @@
       "失败率无从计算（不按 0% 处理）。</div>";
   }
 
+  // 采集任务列表：真实 run 记录；runs 请求失败不拖垮整个健康页。
+  async function loadRuns() {
+    try {
+      var d = await G.get("/trackers/" + state.trackerId + "/runs?" + datesF());
+      return d.items || [];
+    } catch (e) { return null; }
+  }
+
+  function runsHtml(runs) {
+    var head = '<div class="rule" style="margin-top:16px">采集任务' +
+      (runs ? '（' + runs.length + ' 次）' : '') + "</div>";
+    if (runs === null) {
+      return head + '<div class="notice warn">采集任务列表暂时读取失败。</div>';
+    }
+    if (!runs.length) {
+      return head + '<div class="empty">本周期尚无采集任务</div>';
+    }
+    var RUN_TEXT = { completed: "完成", failed: "失败", running: "进行中", queued: "排队中" };
+    var rows = runs.map(function (r) {
+      var prog = r.total ? (r.succeeded + r.failed) + "/" + r.total : "—";
+      var when = String(r.scheduled_for || "").slice(0, 16).replace("T", " ");
+      return "<tr><td>" + esc(when) + "</td>" +
+        '<td><span class="tag ' + (r.status === "completed" ? "ok" : r.status === "failed" ? "bad" : "") + '">' +
+          esc(RUN_TEXT[r.status] || r.status) + "</span></td>" +
+        "<td>" + esc(r.trigger || "—") + "</td>" +
+        '<td class="num">' + prog + "</td>" +
+        '<td class="num">' + G.num(r.succeeded) + "</td>" +
+        '<td class="num">' + G.num(r.failed) + "</td></tr>";
+    }).join("");
+    return head + '<div class="table-wrap"><table><thead><tr><th>排期时间</th><th>状态</th>' +
+      '<th>触发</th><th class="num">条目进度</th><th class="num">成功</th><th class="num">失败</th>' +
+      "</tr></thead><tbody>" + rows + "</tbody></table></div>";
+  }
+
   async function renderHealthTab() {
-    var d = await G.get("/trackers/" + state.trackerId + "/collection-health?" + datesF());
+    var results = await Promise.all([
+      G.get("/trackers/" + state.trackerId + "/collection-health?" + datesF()),
+      loadRuns(),
+    ]);
+    var d = results[0], runs = results[1];
     if (!d.configured) {
       $("tabBody").innerHTML = '<div class="tab-pad"><div class="notice warn">' +
         esc(d.message || "采样计划还没配置，无从计算应采数") +
         '<br />去 <a class="plain" href="/settings">设置</a> 配好采样计划与问题后，这里才有可比较的分母。</div>' +
-        '<div style="height:12px"></div>' + failureAlertHtml(d) + "</div>";
+        '<div style="height:12px"></div>' + failureAlertHtml(d) + runsHtml(runs) + "</div>";
       return;
     }
 
@@ -1245,7 +1283,7 @@
       "</tr></thead><tbody>" + dayRows + "</tbody></table></div>" +
       '<div class="note-line">' + esc(source) +
       " · 没有自动采集调度，缺口需人工补采：<code>python scripts/sample_gaps.py --export gaps.csv</code>" +
-      "</div></div>";
+      "</div>" + runsHtml(runs) + "</div>";
   }
 
   // 还没接数据的 tab：写清缺什么，不画假图。

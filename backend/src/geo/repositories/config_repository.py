@@ -470,6 +470,54 @@ def latest_plan(conn: sqlite3.Connection, tracker_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def run_list(
+    conn: sqlite3.Connection,
+    tracker_id: str,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """采集任务列表：每个 run 的条目按状态聚合，不编造进度。
+
+    run.stats 在种子里是空 {}，所以成功/失败数从 run_item 真算。
+    周期过滤按 scheduled_for（任务何时排期），和失败率统计口径一致。
+    """
+    clauses = ["r.tracker_id = ?"]
+    params: list = [tracker_id]
+    if start and end:
+        clauses.append(f"{day_of('r.scheduled_for')} BETWEEN ? AND ?")
+        params.extend([start, end])
+    params.append(limit)
+    rows = conn.execute(
+        f"""
+        SELECT r.id, r.trigger, r.status, r.scheduled_for, r.started_at, r.finished_at,
+               COUNT(ri.id) AS total,
+               SUM(CASE WHEN ri.status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded,
+               SUM(CASE WHEN ri.status = 'failed' THEN 1 ELSE 0 END) AS failed
+        FROM run r LEFT JOIN run_item ri ON ri.run_id = r.id
+        WHERE {' AND '.join(clauses)}
+        GROUP BY r.id
+        ORDER BY r.scheduled_for DESC, r.id DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "trigger": r["trigger"],
+            "status": r["status"],
+            "scheduled_for": r["scheduled_for"],
+            "started_at": r["started_at"],
+            "finished_at": r["finished_at"],
+            "total": int(r["total"] or 0),
+            "succeeded": int(r["succeeded"] or 0),
+            "failed": int(r["failed"] or 0),
+        }
+        for r in rows
+    ]
+
+
 def failure_reasons(
     conn: sqlite3.Connection, tracker_id: str, start: str | None = None, end: str | None = None
 ) -> list[dict]:
