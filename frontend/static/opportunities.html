@@ -13,6 +13,9 @@
   .opp .h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 7px; }
   .opp .q { font-size: 12.5px; font-weight: 500; }
   .models { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .opp .score { font-size: 15px; font-weight: 600; color: var(--accent-ink); font-variant-numeric: tabular-nums; }
+  .opp .act { font-size: 12px; color: var(--text); margin-top: 2px; }
+  .opp .why { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.65; }
 </style>
 </head>
 <body>
@@ -28,9 +31,9 @@
       <button id="load" class="primary">查询</button>
     </header>
     <div class="content">
-      <div class="notice warn">这是<strong>基于采样样本的描述性统计</strong>，不是因果诊断：真实采集、答案语义解析与信源归因尚未接入，下面只列出「观测到未提及」的组合，不给出原因或效果承诺。</div>
+      <div class="notice warn">这是<strong>基于采样样本的描述性统计</strong>，不是因果诊断：机会分只回答「先写哪一篇」，不预测效果，也不构成对客户的承诺。</div>
       <div class="cards" id="stats" style="margin-bottom:14px"></div>
-      <div class="panel"><h2>未提及组合 <span class="badge" id="oppMeta">—</span></h2><div id="list"><div class="empty">加载中…</div></div></div>
+      <div class="panel"><h2>先写哪一篇 <span class="badge" id="rankMeta">—</span><span class="badge" id="rankFormula">—</span></h2><div id="rank"><div class="empty">加载中…</div></div></div>
       <div class="panel" style="margin-top:14px"><h2>问题 × 模型覆盖矩阵 <span class="badge">提及数 / 样本数</span></h2><div class="body" id="matrix"><div class="empty">加载中…</div></div></div>
       <div class="panel" style="margin-top:14px"><h2>样本明细 <span class="badge" id="sampleMeta">—</span></h2><div class="body" id="samples"><div class="empty">加载中…</div></div></div>
     </div>
@@ -41,6 +44,36 @@
   var G = window.GEO, $ = G.$, esc = G.esc;
   var stat = function (l, v, s) { return '<div class="card"><div class="label">' + esc(l) + '</div><div class="value">' + esc(v) + '</div><div class="sub">' + esc(s) + "</div></div>"; };
   var SENTI = { pos: "正面", neu: "中性", neg: "负面" };
+  function topScore(payload) {
+    var items = (payload && payload.items) || [];
+    for (var i = 0; i < items.length; i += 1) {
+      if (items[i].score !== null && items[i].score !== undefined) return items[i].score.toFixed(1);
+    }
+    return "—";
+  }
+
+  function renderRank(payload) {
+    var items = (payload && payload.items) || [];
+    var w = (payload && payload.weights) || {};
+    $("rankFormula").textContent = "gap " + Math.round((w.gap || 0) * 100) + "% · 竞品 " +
+      Math.round((w.competitor || 0) * 100) + "% · 可发 " + Math.round((w.publishable || 0) * 100) + "%";
+    $("rankMeta").textContent = items.length + " 个问题";
+    if (!items.length) { $("rank").innerHTML = G.empty("当前周期没有问题数据"); return; }
+    $("rank").innerHTML = items.map(function (x) {
+      var score = (x.score === null || x.score === undefined) ? "—" : x.score.toFixed(1);
+      var statusText = x.status === "ok"
+        ? "样本 " + G.num(x.samples)
+        : x.status === "insufficient_samples" ? "样本不足 " + G.num(x.samples) : "无样本";
+      return '<div class="opp"><div class="h"><span class="score">' + esc(score) + "</span>" +
+        '<span class="q">' + esc(x.text) + "</span>" +
+        '<span class="tag ' + (x.tier === "core" ? "core" : "") + '">' +
+        (x.tier === "core" ? "核心" : "长尾") + "</span>" +
+        '<span class="tag ' + (x.status === "ok" ? "" : "warn") + '">' + esc(statusText) + "</span>" +
+        '<span class="spacer"></span></div>' +
+        '<div class="act">' + esc(x.next_action) + "</div>" +
+        '<div class="why">' + esc((x.reasons || []).join("；")) + "</div></div>";
+    }).join("");
+  }
 
   function renderMatrix(byQ, models) {
     var keys = Object.keys(byQ);
@@ -89,9 +122,10 @@
     G.pagerReset("matrix"); G.pagerReset("samples");
     var q = G.dates();
     try {
-      var [samples, plan] = await Promise.all([
+      var [samples, plan, opp] = await Promise.all([
         G.get("/trackers/" + t + "/metrics/mention_rate/samples?" + q),
-        G.get("/trackers/" + t + "/sampling-plan")
+        G.get("/trackers/" + t + "/sampling-plan"),
+        G.get("/trackers/" + t + "/opportunities?" + q + "&limit=20")
       ]);
       var models = (plan.models && plan.models.length) ? plan.models : ["doubao", "deepseek", "kimi"];
       var items = (samples.items || []).filter(function (x) { return x.in_denominator; });
@@ -105,35 +139,14 @@
         if (x.mentioned) m.mentioned += 1;
         byQ[key].models[x.model_key] = m;
       });
-      var rows = [];
-      Object.keys(byQ).forEach(function (k) {
-        var r = byQ[k];
-        var missing = models.filter(function (m) {
-          var v = r.models[m];
-          return !v || v.mentioned === 0;
-        });
-        var total = Object.values(r.models).reduce(function (s, v) { return s + v.total; }, 0);
-        var hits = Object.values(r.models).reduce(function (s, v) { return s + v.mentioned; }, 0);
-        if (missing.length) rows.push({ text: r.text, tier: r.tier, missing: missing, total: total, hits: hits });
-      });
-      rows.sort(function (a, b) { return b.missing.length - a.missing.length || b.total - a.total; });
-
       $("stats").innerHTML = stat("监控问题", Object.keys(byQ).length, "当前周期有样本的问题") +
         stat("有效样本", items.length, "计入提及率分母") +
         stat("提及样本", items.filter(function (x) { return x.mentioned; }).length, "本品牌被提到") +
-        stat("存在缺口的问题", rows.length, "至少一个模型未提及");
-      $("oppMeta").textContent = rows.length + " 条";
-      $("list").innerHTML = rows.length ? rows.map(function (r) {
-        return '<div class="opp"><div class="h"><span class="q">' + esc(r.text) + "</span>" +
-          '<span class="tag ' + (r.tier === "core" ? "core" : "") + '">' + (r.tier === "core" ? "核心" : "长尾") + "</span>" +
-          '<span class="muted">' + r.hits + " / " + r.total + " 次提及</span></div>" +
-          '<div class="models"><span class="muted" style="align-self:center">未提及模型：</span>' +
-          r.missing.map(function (m) { return '<span class="tag bad">' + esc(m) + "</span>"; }).join("") +
-          "</div></div>";
-      }).join("") : G.empty("当前周期每个问题在所有模型里都至少被提及一次");
+        stat("最高机会分", topScore(opp), "先写这一篇");
+      renderRank(opp);
       renderMatrix(byQ, models);
       renderSamples(items);
-    } catch (e) { G.fail(e, ["stats", "list", "matrix", "samples"]); }
+    } catch (e) { G.fail(e, ["stats", "rank", "matrix", "samples"]); }
   }
 
   $("load").addEventListener("click", load);

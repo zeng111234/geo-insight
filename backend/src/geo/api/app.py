@@ -41,6 +41,7 @@ from geo.services import (
     content_service,
     mention_service,
     metric_service,
+    opportunity_service,
     publish_service,
     report_service,
     sampling_service,
@@ -371,6 +372,34 @@ async def metrics_by_question(request: Request):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
         return JSONResponse(
             metric_service.build_question_performance(conn, tracker_id, period[0], period[1])
+        )
+    finally:
+        conn.close()
+
+
+async def tracker_opportunities(request: Request):
+    """按机会分排序：先写哪个问题（排序依据，不是效果预测）。"""
+    period = _period(request)
+    if isinstance(period, JSONResponse):
+        return period
+    limit = None
+    raw_limit = request.query_params.get("limit")
+    if raw_limit is not None:
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            return _error(request, "VALIDATION_ERROR", "limit must be an integer")
+        if not 1 <= limit <= 100:
+            return _error(request, "VALIDATION_ERROR", "limit must be between 1 and 100")
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        if not repo.get_tracker(conn, tracker_id, _tenant(request)):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        return JSONResponse(
+            opportunity_service.build_opportunities(
+                conn, tracker_id, period[0], period[1], limit=limit
+            )
         )
     finally:
         conn.close()
@@ -1568,6 +1597,9 @@ def create_app() -> Starlette:
         Route(
             f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/by-question",
             metrics_by_question,
+        ),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/opportunities", tracker_opportunities
         ),
         Route(
             f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/sentiment-by-model",
