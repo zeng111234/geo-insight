@@ -99,6 +99,22 @@
   .cite-item a:hover { text-decoration: underline; }
   .cite-item .sub { color: var(--muted); font-size: 10.5px; }
   .answer.sel { background: var(--accent-weak); }
+  /* E1c：视图切换 + 表格视图 + 行内复制 */
+  .ans-view { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .ans-view button { border: 0; background: transparent; padding: 4px 12px; font-size: 11.5px;
+    color: var(--muted); cursor: pointer; }
+  .ans-view button + button { border-left: 1px solid var(--border); }
+  .ans-view button.on { background: var(--accent); color: #fff; }
+  button.copy-answer { border: 1px solid var(--border); background: var(--panel); color: var(--accent-ink);
+    border-radius: 6px; padding: 3px 9px; font-size: 11px; cursor: pointer; }
+  button.copy-answer:hover { background: var(--accent-weak); }
+  .ans-table { font-size: 12px; }
+  .ans-table td { vertical-align: top; }
+  .ans-table tr.sel { background: var(--accent-weak); }
+  .ans-table th, .ans-table td { padding: 9px 10px; }
+  .ans-table td:nth-child(4) { max-width: 340px; word-break: break-word; }
+  .ans-table td:last-child { white-space: nowrap; }
+  .ans-table td:last-child a { margin-left: 8px; }
 
   /* 指标明细 / 趋势 / 信源 共用 */
   .tab-pad { padding: 12px 14px; }
@@ -245,6 +261,7 @@
     answerPages: 1,
     selectedAnswer: "",
     citeView: "all",
+    answerView: "reading",
     monitoringAvailable: false,
     metric: "mention_rate",
     mediaType: "video",
@@ -273,6 +290,7 @@
       tab: validTab(tab) ? tab : "dashboard",
       tracker: q.get("tracker") || "",
       citeView: q.get("citeView") === "monitored" ? "monitored" : "all",
+      answerView: q.get("view") === "table" ? "table" : "reading",
       granularity: q.get("g") === "week" ? "week" : "day"
     };
   }
@@ -282,6 +300,8 @@
     if (state.trackerId) url.searchParams.set("tracker", state.trackerId);
     if (state.tab === "trend" && state.granularity === "week") url.searchParams.set("g", "week");
     else url.searchParams.delete("g");
+    if (state.tab === "answers" && state.answerView === "table") url.searchParams.set("view", "table");
+    else url.searchParams.delete("view");
     if (push) history.pushState({ tab: state.tab }, "", url);
     else history.replaceState({ tab: state.tab }, "", url);
   }
@@ -470,9 +490,13 @@
       return '<option value="' + esc(q.id) + '"' + (q.id === state.questionId ? " selected" : "") + ">" +
         esc(q.text) + (q.tier === "core" ? "（核心）" : "（长尾）") + "</option>";
     }).join("");
+    var viewBtn = '<span class="ans-view" role="group" aria-label="明细视图">' +
+      '<button type="button" data-view="reading" class="' + (state.answerView === "reading" ? "on" : "") + '">阅读</button>' +
+      '<button type="button" data-view="table" class="' + (state.answerView === "table" ? "on" : "") + '">表格</button>' +
+      "</span>";
     box.innerHTML = '<div class="ans-toolbar"><span class="muted">监控问题</span>' +
       '<select id="qSelect" aria-label="监控问题">' + (opts || '<option value="">没有问题</option>') + "</select>" +
-      '<span class="spacer"></span><span class="muted" id="ansMeta">—</span></div>' +
+      '<span class="spacer"></span>' + viewBtn + '<span class="muted" id="ansMeta">—</span></div>' +
       '<div class="ans-split">' +
         '<div class="ans-main" id="ansList"><div class="empty">加载中…</div></div>' +
       "</div>";
@@ -513,7 +537,83 @@
     }).join("");
   }
 
+  // 复制全文：正文只从 state.answers 取，绝不读 DOM 里那段截断的显示文本。
+  // clipboard API 在 http/iframe/权限拒绝时都可能失败，所以要有 textarea 兜底。
+  async function copyAnswerText(answerId) {
+    var a = state.answers.filter(function (x) { return x.id === answerId; })[0];
+    if (!a) { G.toast("找不到这条回答"); return; }
+    var text = a.text || "";
+    var done = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        done = true;
+      }
+    } catch (_) { /* 落到下面的兜底 */ }
+    if (!done) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { done = document.execCommand("copy"); } catch (_) { done = false; }
+      document.body.removeChild(ta);
+    }
+    G.toast(done ? "已复制全文（" + text.length + " 字）" : "复制失败，请手动选择正文");
+  }
+
   var PAGE_SIZE = 10;
+
+  // 一条回答的「标签区」：阅读视图与表格视图共用，避免两处各自维护导致口径分叉。
+  function answerTags(a) {
+    var own = (a.mentions || []).filter(function (m) { return m.subject_type === "own"; })[0];
+    return '<span class="tag">' + esc(a.model_key) + "</span>" +
+      (own ? '<span class="tag ok">本品牌 · 第 ' + G.num(own.position) + " 位</span>" : '<span class="tag">未提及</span>') +
+      (own && own.sentiment ? '<span class="tag">' + esc(SENTI_TEXT[own.sentiment] || own.sentiment) + "</span>" : "") +
+      (a.off_topic === true ? '<span class="tag warn" title="正文没有任何核心词">疑似跑题</span>' : "");
+  }
+
+  // 复制按钮复制接口返回的全文，不是页面上截断后的显示文本。
+  // 全文放在 data 属性里而不是重新请求——点一次复制不该多发一次 API。
+  function copyButton(a) {
+    return '<button type="button" class="plain copy-answer" data-copy="' + esc(a.id) +
+      '" title="复制这条回答全文">复制</button>';
+  }
+
+  function renderAnswerReading() {
+    return state.answers.map(function (a) {
+      return '<div class="answer' + (a.id === state.selectedAnswer ? " sel" : "") +
+        '" data-answer="' + esc(a.id) + '"><div class="head">' +
+        answerTags(a) +
+        '<span class="muted">' + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</span>" +
+        '<span class="spacer"></span>' + copyButton(a) +
+        '<a class="plain" href="/answer/' + esc(a.id) + '">证据详情 →</a></div>' +
+        '<div class="text">' + esc((a.text || "").slice(0, 320)) + ((a.text || "").length > 320 ? "…" : "") + "</div>" +
+        '<div class="cite">引用 ' + (a.citations || []).length + " 条 · 通道 " + esc(a.channel) + "</div></div>";
+    }).join("");
+  }
+
+  // 表格视图：一行一条，与阅读视图行数相同（同一份 state.answers）。
+  // 正文只给摘要，全文靠「复制」——复制的仍是接口返回的完整文本。
+  function renderAnswerTable() {
+    return '<div class="table-wrap"><table class="ans-table"><thead><tr>' +
+      "<th>时间</th><th>模型</th><th>本品牌</th><th>正文摘要</th><th>引用</th><th>操作</th>" +
+      "</tr></thead><tbody>" +
+      state.answers.map(function (a) {
+        var own = (a.mentions || []).filter(function (m) { return m.subject_type === "own"; })[0];
+        return '<tr data-answer="' + esc(a.id) + '"' +
+          (a.id === state.selectedAnswer ? ' class="sel"' : "") + ">" +
+          "<td>" + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</td>" +
+          "<td>" + esc(a.model_key) + "</td>" +
+          "<td>" + (own ? "第 " + G.num(own.position) + " 位" : "未提及") + "</td>" +
+          "<td>" + esc((a.text || "").slice(0, 90)) + ((a.text || "").length > 90 ? "…" : "") + "</td>" +
+          "<td>" + (a.citations || []).length + "</td>" +
+          '<td>' + copyButton(a) + '<a class="plain" href="/answer/' + esc(a.id) + '">详情</a></td>' +
+          "</tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+
   async function loadAnswerPage() {
     var listBox = $("ansList");
     if (!listBox) return;
@@ -522,6 +622,7 @@
       return;
     }
     var st = G.pagerInit("mon-answers", loadAnswerPage);
+    state.answerPage = st.page;
     listBox.innerHTML = '<div class="empty">加载中…</div>';
     var d = await G.get("/trackers/" + state.trackerId + "/answers?" + G.dates() +
       "&questionId=" + encodeURIComponent(state.questionId) + "&limit=" + PAGE_SIZE + "&page=" + st.page +
@@ -544,20 +645,9 @@
     if (!state.selectedAnswer || !state.answers.some(function (a) { return a.id === state.selectedAnswer; })) {
       state.selectedAnswer = state.answers[0].id;
     }
-    listBox.innerHTML = state.answers.map(function (a) {
-      var own = (a.mentions || []).filter(function (m) { return m.subject_type === "own"; })[0];
-      var cites = (a.citations || []).length;
-      return '<div class="answer' + (a.id === state.selectedAnswer ? " sel" : "") +
-        '" data-answer="' + esc(a.id) + '"><div class="head">' +
-        '<span class="tag">' + esc(a.model_key) + "</span>" +
-        '<span class="muted">' + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</span>" +
-        (own ? '<span class="tag ok">本品牌 · 第 ' + G.num(own.position) + " 位</span>" : '<span class="tag">未提及</span>') +
-        (own && own.sentiment ? '<span class="tag">' + esc(SENTI_TEXT[own.sentiment] || own.sentiment) + "</span>" : "") +
-        (a.off_topic === true ? '<span class="tag warn" title="正文没有任何核心词">疑似跑题</span>' : "") +
-        '<span class="spacer"></span><a class="plain" href="/answer/' + esc(a.id) + '">证据详情 →</a></div>' +
-        '<div class="text">' + esc((a.text || "").slice(0, 320)) + ((a.text || "").length > 320 ? "…" : "") + "</div>" +
-        '<div class="cite">引用 ' + cites + " 条 · 通道 " + esc(a.channel) + "</div></div>";
-    }).join("") + G.pagerNav("mon-answers", st.page, pages, total);
+    listBox.innerHTML = (state.answerView === "table" ? renderAnswerTable() : renderAnswerReading()) +
+      G.pagerNav("mon-answers", st.page, pages, total);
+    listBox.dataset.page = String(st.page);
 
     renderCitations(state.answers.filter(function (a) { return a.id === state.selectedAnswer; })[0]);
   }
@@ -994,6 +1084,33 @@
   // 问答明细点一条回答，第三栏换成它的引用；指标明细切指标。
   // 委托在 tabBody 上：tab 内容每次整体重建，逐个绑定会漏掉重建后的节点。
   $("tabBody").addEventListener("click", function (e) {
+    // 复制要先拦住：它也在 [data-answer] 行内，不能冒成"选中这条回答"
+    var cp = e.target.closest("[data-copy]");
+    if (cp) {
+      e.preventDefault();
+      e.stopPropagation();
+      copyAnswerText(cp.dataset.copy);
+      return;
+    }
+    var vb = e.target.closest("[data-view]");
+    if (vb) {
+      if (vb.dataset.view === state.answerView) return;
+      state.answerView = vb.dataset.view;
+      // 同步按钮高亮：只换数据不换 class，用户会以为点击没生效
+      Array.prototype.forEach.call(document.querySelectorAll(".ans-view [data-view]"), function (b) {
+        b.classList.toggle("on", b.dataset.view === state.answerView);
+      });
+      syncUrl(false);
+      var old = $("ansList");
+      if (old) {
+        var page = Number(old.dataset.page || 1);
+        // 只用已缓存的 state.answers 重渲染，不发请求——切换视图不该重新取数
+        old.innerHTML = (state.answerView === "table" ? renderAnswerTable() : renderAnswerReading()) +
+          G.pagerNav("mon-answers", page, state.answerPages, state.answerTotal);
+        old.dataset.page = String(page);
+      }
+      return;
+    }
     var ans = e.target.closest("[data-answer]");
     if (ans) {
       state.selectedAnswer = ans.dataset.answer;
@@ -1148,6 +1265,7 @@
     state.tab = q.tab;
     state.granularity = q.granularity;
     state.citeView = q.citeView;
+    state.answerView = q.answerView;
     if ($("citeView")) $("citeView").value = state.citeView;
     if (q.tracker && q.tracker !== state.trackerId) {
       state.trackerId = q.tracker;
@@ -1166,6 +1284,7 @@
     state.tab = q.tab;
     state.granularity = q.granularity;
     state.citeView = q.citeView;
+    state.answerView = q.answerView;
     if ($("citeView")) $("citeView").value = state.citeView;
     await G.fillTrackers();
     try {
