@@ -33,6 +33,26 @@ def record(level: str, item: str, detail: str) -> None:
     _rows.append((level, item, detail))
 
 
+def stray_verdict(db_path: Path, stray: Path) -> tuple[str, str, str]:
+    """判断历史分叉库该怎么报。纯函数，便于测试——这是决策 013 的守门逻辑。
+
+    三种情况分清楚：
+    - 没有分叉文件，或它其实就是当前库（同一路径的不同写法）→ OK
+    - 分叉文件是 0 字节（连上没写过留下的空壳）→ WARN，说清可以直接删
+    - 分叉文件有内容 → WARN「数据库分叉」，让人确认哪份最新，不能含糊
+    """
+    if not stray.is_file() or stray.resolve() == db_path.resolve():
+        return OK, "数据库位置", str(db_path)
+    if stray.stat().st_size == 0:
+        return WARN, "数据库", "backend/geo.db 是个空文件（0 字节），可以直接删掉"
+    return (
+        WARN,
+        "数据库分叉",
+        "backend/geo.db 也有内容：老版本按 cwd 建库留下的。确认哪份是最新后删掉另一份，"
+        "否则换启动方式会看到不同数据",
+    )
+
+
 def check_python() -> None:
     v = sys.version_info
     if v >= (3, 10):
@@ -95,21 +115,8 @@ def check_database() -> None:
     # 命令行在项目根启动写 geo/geo.db，长出两个库，数据看起来"丢了"。
     # 现在路径已固定，但这个检查留着——老机器上那份历史分叉不会自己消失。
     stray = ROOT / "backend" / "geo.db"
-    if stray.is_file() and stray.resolve() != db_path.resolve():
-        # 空文件和有数据的库要分开说。0 字节的 geo.db 是"连上就建文件、从没写过"的
-        # 残留（某次在 backend 目录里跑脚本留下的），删了毫发无损；
-        # 对它喊"确认哪份是最新"，只会让人以为真有数据在两份之间分叉。
-        if stray.stat().st_size == 0:
-            record(WARN, "数据库", "backend/geo.db 是个空文件（0 字节），可以直接删掉")
-        else:
-            record(
-                WARN,
-                "数据库分叉",
-                "backend/geo.db 也有内容：老版本按 cwd 建库留下的。确认哪份是最新后删掉另一份，"
-                "否则换启动方式会看到不同数据",
-            )
-    else:
-        record(OK, "数据库位置", str(db_path))
+    level, item, detail = stray_verdict(db_path, stray)
+    record(level, item, detail)
 
     try:
         conn = sqlite3.connect(db_path)
