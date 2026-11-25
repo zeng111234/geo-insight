@@ -134,5 +134,34 @@ class FontScaleContractTest(unittest.TestCase):
             self.assertIn("var(--fs-", text, f"{name} 没有引用字号 token")
 
 
+class PublishTableContractTest(unittest.TestCase):
+    """发布页渠道表：空值不给破折号，失败原因不挤在行内。
+
+    此前 7 个渠道 × 5 列里有约 21 个「—」——真实数据就是没连过，
+    但一屏破折号既没信息又难扫；失败原因塞在行尾胶囊里读不下去。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = (PROJECT_ROOT / "frontend" / "static" / "publish.html").read_text(encoding="utf-8")
+
+    def test_empty_values_have_status_hints(self):
+        self.assertIn("var CH_HINT = {", self.html)
+        for state in ("disconnected", "needs_config", "connected", "expired"):
+            self.assertIn(f"{state}:", self.html)
+
+    def test_no_dash_placeholder_in_channel_cells(self):
+        # 渲染 channels 的三列不许再输出裸「—」；login 兜底保留（无 support 时确实未知）
+        self.assertNotIn('c.last_check_note || "—"', self.html)
+        self.assertNotIn('|| "—") + "</td></tr>"', self.html)
+
+    def test_login_mode_derived_from_support(self):
+        self.assertIn('c.support === "browser" ? "扫码登录" : c.support === "api" ? "API 密钥"', self.html)
+
+    def test_failure_reason_own_row(self):
+        self.assertIn('class="pub-fail"', self.html)
+        self.assertNotIn("'<span class=\"tag bad\">' + esc(p.failure_reason)", self.html)
+
+
 if __name__ == "__main__":
     unittest.main()

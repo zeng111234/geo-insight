@@ -10,6 +10,14 @@
 <style>
   .pub-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--border); }
   .pub-row:last-child { border-bottom: none; }
+  .pub-row.has-fail { padding-bottom: 11px; }
+  /* 失败原因独占整行：左边框标识语义，长文本自然换行，不再挤在行尾胶囊里。 */
+  .pub-fail { flex-basis: 100%; margin-top: 3px; padding: 6px 10px;
+    border-left: 3px solid var(--red-ink); border-radius: 0 6px 6px 0;
+    background: var(--red-tint); color: var(--red-ink);
+    font-size: var(--fs-label); line-height: 1.7; }
+  /* 渠道表空值提示：状态驱动的下一步动作，比一列破折号有用。 */
+  .ch-note { max-width: 300px; line-height: 1.6; }
   .imp { border-bottom: 1px solid var(--border); padding: 11px 14px; }
   .imp:last-child { border-bottom: none; }
   .imp .h { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
@@ -98,6 +106,17 @@
   };
   var CH_TAG = { connected: "ok", expired: "warn", disconnected: "", connecting: "warn" };
   var LOGIN_TEXT = { scan_qr: "扫码登录", oauth: "OAuth 授权", password: "账号密码", browser: "浏览器登录态", api: "API 密钥" };
+  // 空值不写「—」：未连接渠道的三列全空，一屏二十个破折号既没信息又难扫。
+  // 改为按状态给「现在是什么情况 / 下一步做什么」，全部来自已有字段，不编造事实。
+  // 文案控制在 12 字内：这列在半屏面板里只有约 130px，长了会断得七零八落。
+  var CH_HINT = {
+    disconnected: "未检测 · 去工作室连接",
+    needs_config: "需配 API 密钥",
+    connected: "登录态有效",
+    expired: "已过期 · 需重连",
+    connecting: "正在扫码登录",
+    not_implemented: "暂无发布器",
+  };
 
   function renderStats(rows, channels) {
     var pubs = [];
@@ -125,7 +144,7 @@
     }
     $("pubs").innerHTML = pubs.map(function (x) {
       var p = x.p;
-      return '<div class="pub-row"><span class="tag">' + esc(p.platform_name || p.platform_key) + "</span>" +
+      return '<div class="pub-row' + (p.failure_reason ? " has-fail" : "") + '"><span class="tag">' + esc(p.platform_name || p.platform_key) + "</span>" +
         '<span class="tag ' + (p.status === "published" || p.status === "draft_saved" ? "ok" : p.status === "failed" || p.status === "blocked" ? "bad" : "warn") + '">' +
         esc(PUB_TEXT[p.status] || p.status) + "</span>" +
         '<span class="muted">' + esc(x.r.title) + "</span>" +
@@ -133,7 +152,8 @@
         '<span class="muted">' + esc((p.published_at || "").slice(0, 16).replace("T", " ")) + "</span>" +
         (p.published_url ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链 →</a>'
                          : '<span class="muted">无回链</span>') +
-        (p.failure_reason ? '<span class="tag bad">' + esc(p.failure_reason) + "</span>" : "") + "</div>";
+        // 失败原因单独占一行：长文本塞进行内胶囊会被挤成一条读不下去的红字。
+        (p.failure_reason ? '<div class="pub-fail">失败原因：' + esc(p.failure_reason) + "</div>" : "") + "</div>";
     }).join("");
   }
 
@@ -142,11 +162,18 @@
     $("channels").innerHTML = '<div class="table-wrap"><table><thead><tr><th>渠道</th><th>状态</th>' +
       "<th>登录方式</th><th>检测附注</th><th class=\"nowrap\">最后检查</th></tr></thead><tbody>" +
       channels.map(function (c) {
+        // 登录方式：优先用接口给的 login_mode；没有时按发布器类型说明，
+        // browser/api 是 support 字段的真实值，不是猜的登录态。
+        var login = c.login_mode ? (LOGIN_TEXT[c.login_mode] || c.login_mode)
+          : (c.support === "browser" ? "扫码登录" : c.support === "api" ? "API 密钥" : "—");
+        // 检测附注：有服务端原文就显示原文；没有就给状态对应的下一步动作。
+        var note = c.last_check_note || CH_HINT[c.status] || "—";
+        var checked = (c.last_checked_at || "").slice(0, 16).replace("T", " ") || "未检测";
         return "<tr><td>" + esc(c.platform_name) + "</td><td>" +
           '<span class="tag ' + (CH_TAG[c.status] || "") + '">' + esc(CH_TEXT[c.status] || c.status) + "</span></td>" +
-          "<td>" + esc(LOGIN_TEXT[c.login_mode] || "—") + "</td>" +
-          '<td class="muted" style="max-width:260px;word-break:break-all">' + esc(c.last_check_note || "—") + "</td>" +
-          '<td class="nowrap">' + esc((c.last_checked_at || "").slice(0, 16).replace("T", " ") || "—") + "</td></tr>";
+          "<td>" + esc(login) + "</td>" +
+          '<td class="muted ch-note">' + esc(note) + "</td>" +
+          '<td class="nowrap muted">' + esc(checked) + "</td></tr>";
       }).join("") + "</tbody></table></div>";
   }
 
