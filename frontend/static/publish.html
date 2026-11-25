@@ -26,6 +26,13 @@
   .imp .hit { font-size: 11px; margin-top: 7px; color: var(--text-body); line-height: 1.7; }
   .imp .hit a { color: var(--accent-ink); text-decoration: none; }
   .imp .hit a:hover { text-decoration: underline; }
+  .imp .verdict { margin-top: 7px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 7px; font-size: 11.5px; line-height: 1.6; color: var(--text-body); }
+  .imp .verdict b { font-weight: 600; margin-right: 6px; }
+  .imp .verdict.effective { border-color: var(--green-ink); }
+  .imp .verdict.effective b { color: var(--green-ink); }
+  .imp .verdict.negative { border-color: var(--red-ink); }
+  .imp .verdict.negative b { color: var(--red-ink); }
+  .imp .verdict.inconclusive b, .imp .verdict.insufficient b, .imp .verdict.not_applicable b, .imp .verdict.not_published b { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -72,7 +79,12 @@
 <script>
 (function () {
   var G = window.GEO, $ = G.$, esc = G.esc;
-  var state = { impactWindow: 14 };
+  var state = {
+    impactWindow: 14,
+    // 对照问题从 URL 带进来（?control=<question_id>）：试点协议里只有一个对照问题，
+    // 不做成下拉，避免每次列表刷新都要多请求一轮问题集。
+    control: new URLSearchParams(window.location.search).get("control") || ""
+  };
   var stat = function (l, v, s) {
     return '<div class="card"><div class="label">' + esc(l) + '</div><div class="value">' + esc(v) + '</div><div class="sub">' + esc(s) + "</div></div>";
   };
@@ -200,6 +212,12 @@
           "</div>";
       }
 
+      var vd = im.verdict || {};
+      var verdictHtml = vd.status
+        ? '<div class="verdict ' + esc(vd.status) + '"><b>' + esc(vd.message || "") + "</b>" +
+          esc((vd.reasons || []).join("；")) + "</div>"
+        : "";
+
       return '<div class="imp"><div class="h"><span class="t">' + esc(r.title) + "</span>" +
         '<span class="tag ' + (im.comparable === true ? "ok" : "warn") + '">' +
         (im.comparable === true ? "可比" : "不可比") + "</span>" +
@@ -213,6 +231,7 @@
         modelTable +
         '<div class="hit">' + esc(hitText) + (samples ? "<br />" + samples : "") + "</div>" +
         controlText +
+        verdictHtml +
         ((im.notes || []).length ? '<div class="m" style="margin-top:5px">说明：' + esc(im.notes.join("；")) + "</div>" : "") +
         "</div>";
     }).join("");
@@ -230,7 +249,9 @@
       var rows = await Promise.all(items.map(function (a) {
         return Promise.all([
           G.get("/articles/" + a.id).catch(function () { return null; }),
-          G.get("/articles/" + a.id + "/impact?windowDays=" + state.impactWindow + "&scope=question").catch(function () { return null; })
+          G.get("/articles/" + a.id + "/impact?windowDays=" + state.impactWindow + "&scope=question" +
+            (state.control ? "&controlQuestionId=" + encodeURIComponent(state.control) : ""))
+            .catch(function () { return null; })
         ]).then(function (d) {
           return { article: a, title: a.title, publications: (d[0] && d[0].publications) || [], impact: d[1] };
         });

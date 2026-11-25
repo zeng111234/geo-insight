@@ -58,6 +58,101 @@ def _delta_pp(before: dict, after: dict) -> tuple[float | None, bool]:
     return round((after["mention_rate"]["value"] - before["mention_rate"]["value"]) * 100, 1), True
 
 
+# 试点判定规则（预注册）。看到数据之后再调阈值，任何结论都不可信；
+# 要改就开一次新试点，并在 docs/decisions 留记录。
+PILOT_RULE = {
+    "target_lift_pp": 20.0,
+    "control_max_pp": 10.0,
+    "min_window_samples": 21,
+}
+
+
+def _verdict(
+    *,
+    scope: str,
+    before: dict | None,
+    after: dict | None,
+    delta_pp: float | None,
+    comparable: bool,
+    control: dict | None,
+    did_pp: float | None,
+) -> dict:
+    """按预注册规则给一句话结论，不让看数的人各自解释。
+
+    effective    目标问题达到门槛，且对照问题没跟着动
+    inconclusive 有提升但不够，或对照同期也在动（排除不了平台整体变化）
+    negative     目标问题没涨
+    insufficient 样本不够，不下结论
+    """
+    rule = dict(PILOT_RULE)
+    floor = rule["min_window_samples"]
+    observed = {
+        "delta_pp": delta_pp,
+        "control_delta_pp": (control or {}).get("delta_pp"),
+        "did_pp": did_pp,
+        "before_samples": (before or {}).get("valid_total", 0),
+        "after_samples": (after or {}).get("valid_total", 0),
+    }
+    base = {"rule": rule, "observed": observed}
+
+    if before is None or after is None:
+        return {**base, "status": "not_published", "message": "未发布，无处判定", "reasons": []}
+    if scope != "question":
+        return {
+            **base,
+            "status": "not_applicable",
+            "message": "全对象口径，不判定",
+            "reasons": ["结果混入了其他问题，判不出这一篇带来的变化"],
+        }
+    if not comparable:
+        return {
+            **base,
+            "status": "insufficient",
+            "message": "样本不足，暂不下结论",
+            "reasons": ["存在样本不足的窗口，按约定不输出结论"],
+        }
+    if observed["before_samples"] < floor or observed["after_samples"] < floor:
+        return {
+            **base,
+            "status": "insufficient",
+            "message": "样本不足，暂不下结论",
+            "reasons": [
+                f"发布前 {observed['before_samples']} 条 / 发布后 {observed['after_samples']} 条，"
+                f"判定需要各 ≥ {floor} 条"
+            ],
+        }
+
+    reasons: list[str] = []
+    target = rule["target_lift_pp"]
+    reached = delta_pp >= target
+    reasons.append(f"目标问题 {delta_pp:+.1f}pp，{'达到' if reached else '未达'} +{target:.1f}pp 门槛")
+
+    control_ok = False
+    if control is None:
+        # 没有对照就不给「有效」：目标问题涨了也可能是平台整体在变。
+        reasons.append("未设置对照问题，排除不了平台整体变化")
+    else:
+        control_delta = observed["control_delta_pp"]
+        if control_delta is None or not control.get("comparable"):
+            reasons.append("对照问题样本不足，排除不了平台整体变化")
+        elif abs(control_delta) >= rule["control_max_pp"]:
+            reasons.append(
+                f"对照问题同期 {control_delta:+.1f}pp，超过 {rule['control_max_pp']:.1f}pp，"
+                "排除不了平台整体变化"
+            )
+        else:
+            control_ok = True
+            reasons.append(f"对照问题 {control_delta:+.1f}pp，变化在 {rule['control_max_pp']:.1f}pp 内")
+
+    if delta_pp <= 0:
+        status, message = "negative", "未观察到提升"
+    elif reached and control_ok:
+        status, message = "effective", "有效"
+    else:
+        status, message = "inconclusive", "不足以判定"
+    return {**base, "status": status, "message": message, "reasons": reasons}
+
+
 def _norm(url: str) -> str:
     """归一化只用于匹配，落库 hash 仍用原始 URL（与导入通道一致）。"""
     try:
@@ -215,6 +310,15 @@ def publish_impact(
             },
             "control": None,
             "did_pp": None,
+            "verdict": _verdict(
+                scope=actual_scope,
+                before=None,
+                after=None,
+                delta_pp=None,
+                comparable=False,
+                control=None,
+                did_pp=None,
+            ),
             "notes": [],
         }
 
@@ -301,5 +405,14 @@ def publish_impact(
         "citation_match": citation_match,
         "control": control,
         "did_pp": did_pp,
+        "verdict": _verdict(
+            scope=actual_scope,
+            before=before,
+            after=after,
+            delta_pp=delta_pp,
+            comparable=comparable,
+            control=control,
+            did_pp=did_pp,
+        ),
         "notes": notes,
     }

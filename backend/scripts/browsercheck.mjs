@@ -140,6 +140,7 @@ const EXTRA = {
     ["发布效果对比", /<div id="impact"[^>]*>[\s\S]{0,240}<div class="imp"/],
     ["目标问题口径", /<div class="scope">目标问题：/],
     ["按模型拆", /<th>模型<\/th>/],
+    ["预注册判定", /<div class="verdict [a-z_]+"><b>/],
   ],
   "/assets": [["问题覆盖", /<div class="body" id="questions"[^>]*>[\s\S]{0,240}<table/]],
   "/sources": [["明细翻页条", /class="pager"/]],
