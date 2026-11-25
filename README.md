@@ -345,7 +345,7 @@ curl "$B/articles/55555555-5555-5555-5555-555555555551/impact"
 
 ```bash
 cd backend
-python -m unittest discover -s tests -t . -p "test_*.py" -v   # 476 条（2026-11-25 实测，系统 Python 3.12；含 HTTP 层鉴权、审计、核心词、周聚合）
+python -m unittest discover -s tests -t . -p "test_*.py" -v   # 全量（系统 Python 3.12；含 HTTP 层鉴权、审计、核心词、周聚合、畸形输入 fuzz）
 python scripts/smoke.py                                        # 86 条真实 HTTP 断言（自己登录，自动选空闲端口）
 
 # 后三个不看登录态：启动服务时显式关掉鉴权
@@ -376,7 +376,9 @@ node scripts/freshcheck.mjs                                   # 服务/工作区
 
 `pagecheck.mjs` 按页面请求顺序逐字段校验（77 条，含 13 页单侧栏/单高亮/无死链、详情接口 `data_range` 类型，以及 13 页必须引入统一样式表、不得隐藏侧栏的样式契约）。`browsercheck.mjs` 调系统 Chrome/Edge 的 `--dump-dom`，验证 **JS 真的在浏览器里跑完**：22 个 URL 无报错、无「加载中」残留，关键表格/图表与**明细翻页条**确实渲染出来（问题监控按 tab 拆成 10 个 URL 分别断言）。这一层不装 Playwright、不加依赖 —— HTTP 200 和 `node --check` 都拦不住「页面读了接口里不存在的字段」。找不到浏览器时会明确打印 SKIP，不假装通过。`pagercheck.mjs` 在桩 DOM 里加载真实 `app.js` 模拟点击翻页（22 条），验证 10 行/页、边界禁用、换查询回第 1 页、页码直达跳转。`interactioncheck.mjs` 走 CDP 真点按钮（33 条）：删除弹框的禁用态、输错名称不放行、取消不删、暂停与恢复、新建抽屉的开合与字段、表单提交真建对象（下拉同步选中新对象 + 用 DELETE 接口清理）、首页指标卡下钻抽屉（真加载样本表+分页）、口径说明抽屉（真加载定义表与规则）、报告详情加载真快照并点「打印」真调用 `window.print`（注入计数桩，headless 下不弹原生对话框）、设置页别名删除确认（弹框文案说清后果 + 取消不掉数据，只读不写库）；按决策要求，跟只读 DOM 检查分开——不可逆操作必须真点一遍。写库的用例（表单提交）用产品自己的 DELETE 接口在 finally 里清理，跑完 tracker 数回到原值。另对每个 `<script>` 块跑 `node --check`。测试库为 `%TEMP%\geo_test_suite.db`。
 
-关键断言都做过**变异自检**（把实现改错，确认检查会变红）：迁移 checksum、导入幂等、dry-run 回滚、竞品识别四处均已验证「不是摆设」。
+`test_input_validation.py` 是 Schemathesis 装不了之后的**手写契约 fuzz**：用 TestClient 对真接口打畸形日期/整数/枚举/超长串/特殊字符，断言不 500、错误带 `request_id` 可追溯、分页 limit 被钳制、合法参数仍 200。它守的是「新增接口漏一个 `try/except` 就打出 500」这类回归——变异自检时删掉分页的异常保护，畸形整数当场 500、测试红，证明断言抓的是真漏洞。
+
+关键断言都做过**变异自检**（把实现改错，确认检查会变红）：迁移 checksum、导入幂等、dry-run 回滚、竞品识别、畸形输入四处均已验证「不是摆设」。
 
 ## 实现范围与偏差
 
