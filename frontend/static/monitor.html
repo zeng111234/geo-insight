@@ -1082,12 +1082,39 @@
   }
 
   // ---- 采集健康：计划应采 vs 实际已采。数据和「缺口清单」是同一套口径 ----
+  // 失败告警在「未配计划」时也显示——采集失败是事实，不因为没计划就藏起来
+  function failureAlertHtml(d) {
+    var failure = d.failure || {};
+    var fstatus = d.failure_status || "insufficient_data";
+    var reasons = (d.failure_reasons || []).map(function (r) {
+      return esc(r.code) + " " + G.num(r.count) + " 次" + (r.known ? "" : "（未知码）");
+    }).join("、");
+    var reasonLine = reasons
+      ? '<div style="margin-top:6px">失败原因：' + reasons + "</div>"
+      : "";
+    if (fstatus === "over_threshold") {
+      return '<div class="notice warn" style="margin:0 0 12px">' +
+        "<strong>失败率超阈值</strong>：" + fmtPct(failure.rate) +
+        "，高于 " + fmtPct(d.failure_threshold) +
+        "。按原因处理：AUTH 类查 key，RATE_LIMITED 降频，TIMEOUT 调大超时。" +
+        reasonLine + "</div>";
+    }
+    if (fstatus === "ok") {
+      return '<div class="notice" style="margin:0 0 12px">采集失败率 ' +
+        fmtPct(failure.rate) + "，在 " + fmtPct(d.failure_threshold) + " 阈值内。" +
+        reasonLine + "</div>";
+    }
+    return '<div class="notice" style="margin:0 0 12px">本周期没有采集尝试，' +
+      "失败率无从计算（不按 0% 处理）。</div>";
+  }
+
   async function renderHealthTab() {
     var d = await G.get("/trackers/" + state.trackerId + "/collection-health?" + datesF());
     if (!d.configured) {
       $("tabBody").innerHTML = '<div class="tab-pad"><div class="notice warn">' +
         esc(d.message || "采样计划还没配置，无从计算应采数") +
-        '<br />去 <a class="plain" href="/settings">设置</a> 配好采样计划与问题后，这里才有可比较的分母。</div></div>';
+        '<br />去 <a class="plain" href="/settings">设置</a> 配好采样计划与问题后，这里才有可比较的分母。</div>' +
+        '<div style="height:12px"></div>' + failureAlertHtml(d) + "</div>";
       return;
     }
 
@@ -1123,13 +1150,27 @@
       ? "本周期最后一次导入：" + String(d.last_import_at).slice(0, 16).replace("T", " ")
       : "本周期没有导入批次（数据可能来自种子或更早的导入）";
 
+    // T025 告警闭环：失败率来自与 config_service 共用的口径，三态各有说法。
+    // 没采过不显示 0%——0/0 不是 0%，那会让人以为「很健康」。
+    var failure = d.failure || {};
+    var fstatus = d.failure_status || "insufficient_data";
+    var fcard;
+    if (fstatus === "insufficient_data") {
+      fcard = kpi("采集失败率", "—", "本周期没有采集尝试");
+    } else {
+      fcard = kpi("采集失败率", fmtPct(failure.rate),
+        G.num(failure.failed) + " / " + G.num(failure.attempted) + " 次失败");
+    }
+    var alert = failureAlertHtml(d);
+
     $("tabBody").innerHTML = '<div class="tab-pad">' +
       '<div class="kpis" style="padding:0 0 12px">' +
       kpi("应采", G.num(tot.expected), "计划 × 问题 × 模型 × 天数") +
       kpi("已采", G.num(tot.actual), "超出计划的部分不计入") +
       kpi("缺口", G.num(tot.missing), "可导出成待采清单") +
       kpi("达成率", fmtPct(tot.rate), "已采 ÷ 应采") +
-      "</div>" +
+      fcard +
+      "</div>" + alert +
       '<div class="rule">计划：核心 ' + G.num(plan.core_times) + " 次/天 · 长尾 " +
       G.num(plan.long_tail_times) + " 次/天 · " + G.num(plan.question_count) +
       " 个启用问题 · " + (d.by_model || []).length + " 个模型 · 通道 " + esc(plan.channel || "—") + "</div>" +

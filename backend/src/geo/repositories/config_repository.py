@@ -450,6 +450,42 @@ def latest_plan(conn: sqlite3.Connection, tracker_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def failure_reasons(
+    conn: sqlite3.Connection, tracker_id: str, start: str | None = None, end: str | None = None
+) -> list[dict]:
+    """按错误码统计失败原因，供采集健康页归因。
+
+    和 failure_stats 共用同一套表与周期谓词，两者分母必须一致：
+    「失败 214 次」和下面各原因加起来必须是同一个数。
+
+    未知错误码（如种子里的 AUTH_EXPIRED 不在 ErrorCode 枚举）不隐藏，
+    照实列出并标 known=false——把数据不一致暴露出来，比悄悄归到「其它」诚实。
+    """
+    from geo.domain.enums import ErrorCode
+
+    clauses = ["r.tracker_id = ?", "ri.status = 'failed'"]
+    params: list = [tracker_id]
+    if start and end:
+        clauses.append(f"{day_of('COALESCE(ri.attempted_at, r.scheduled_for)')} BETWEEN ? AND ?")
+        params.extend([start, end])
+    rows = conn.execute(
+        f"""
+        SELECT ri.error_code AS code, COUNT(*) AS count
+        FROM run_item ri JOIN run r ON r.id = ri.run_id
+        WHERE {' AND '.join(clauses)}
+        GROUP BY ri.error_code
+        ORDER BY count DESC, code
+        """,
+        params,
+    ).fetchall()
+    known = {code.value for code in ErrorCode}
+    return [
+        {"code": r["code"] or "UNKNOWN", "count": r["count"],
+         "known": (r["code"] or "") in known}
+        for r in rows
+    ]
+
+
 def failure_stats(
     conn: sqlite3.Connection, tracker_id: str, start: str | None = None, end: str | None = None
 ) -> dict:

@@ -16,7 +16,9 @@ import json
 import sqlite3
 from datetime import date, timedelta
 
+from geo.repositories import config_repository as config_repo
 from geo.repositories import sqlite_repository as repo
+from geo.settings import settings
 
 MAX_DAYS = 366
 
@@ -149,6 +151,19 @@ def collection_health(conn: sqlite3.Connection, tracker_id: str, start: str, end
     没有采样计划或没有问题时不抛错，返回 ``configured=False`` + 说明，
     因为「还没配」本身就是要展示的健康状态之一。
     """
+    # T025：失败率是采集事实，跟采样计划配没配无关。放在 try 外面，
+    # 未配置时也能告诉用户「这段时间采集失败了几次」——否则页面上只有一句
+    # 「没配计划」，把真正该处理的失败藏起来了。
+    failure = config_repo.failure_stats(conn, tracker_id, start, end)
+    failure_reasons = config_repo.failure_reasons(conn, tracker_id, start, end)
+    threshold = settings.sampling_failure_threshold
+    if failure["attempted"] == 0:
+        failure_status = "insufficient_data"
+    elif failure["rate"] is not None and failure["rate"] > threshold:
+        failure_status = "over_threshold"
+    else:
+        failure_status = "ok"
+
     try:
         gaps = compute_gaps(conn, tracker_id, start, end)
     except ValueError as exc:
@@ -161,6 +176,10 @@ def collection_health(conn: sqlite3.Connection, tracker_id: str, start: str, end
             "by_model": [],
             "by_day": [],
             "plan": None,
+            "failure": failure,
+            "failure_reasons": failure_reasons,
+            "failure_status": failure_status,
+            "failure_threshold": threshold,
         }
 
     by_model: dict[str, dict] = {}
@@ -197,6 +216,10 @@ def collection_health(conn: sqlite3.Connection, tracker_id: str, start: str, end
         "totals": totals,
         "by_model": models,
         "by_day": days,
+        "failure": failure,
+        "failure_reasons": config_repo.failure_reasons(conn, tracker_id, start, end),
+        "failure_status": failure_status,
+        "failure_threshold": threshold,
         "last_import_at": repo.latest_import_at(conn, tracker_id, start, end),
         "message": None,
     }
