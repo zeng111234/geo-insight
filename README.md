@@ -354,18 +354,20 @@ node scripts/pagecheck.mjs                                    # 77 条页面字�
 node scripts/browsercheck.mjs                                 # 75 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 node scripts/interactioncheck.mjs                             # 33 条 CDP 真实点击（删除确认/暂停恢复/新建抽屉+表单提交/首页下钻+口径/报告打印/设置删除确认，需 Chrome/Edge）
+node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）
 ```
 
 全部通过。各脚本精确条数以 `specs/003-next-stage-roadmap/tasks.md` 的「验证状态」为准
 （单测 476，2026-11-25 干净检出实测全绿；测试数只增不减）。
 
-**检查红了先重启服务**：`browsercheck` / `interactioncheck` 打的是正在运行的 8123 进程。
-后端 Python 代码和 E3/T025 那批前端页面是在服务启动**之后**才改的，旧进程不会自动加载——
-表现是 `/studio` 六阶段步骤条、`/monitor?tab=health` 失败率告警这类断言失败，
-但接口和代码都是对的。先 `Ctrl+C` 停掉服务再双击 `start.bat` 重开，然后重跑检查。
-快速自证：用 `GEO_BASE=http://127.0.0.1:8124 node scripts/browsercheck.mjs`
-打一个刚启动的新实例（记得 `GEO_DB_PATH` 指一份库副本，别和 8123 同时写同一个库），
-新实例全绿就说明是旧进程，不是代码坏。
+**检查红了先查服务新旧**：`browsercheck` / `interactioncheck` 打的是正在运行的 8123 进程。
+改完代码不重启，旧进程不会加载新版本——表现是 `/studio` 六阶段步骤条、
+`/monitor?tab=health` 失败率告警这类断言假红，但代码是对的。
+先跑 `node scripts/freshcheck.mjs`：它比 `/health` 的 `code_rev`（服务启动时读一次 HEAD）
+与工作区 HEAD——一致就 PASS，不一致明确报「旧进程，请重启」，退出码 1。
+旧服务没有 `code_rev` 字段时会说「无法判断」而不是误报通过（那说明服务早于本检查启动，
+更该重启）。`Ctrl+C` 停掉再双击 `start.bat` 重开即可。
+换端口用 `GEO_BASE=http://127.0.0.1:8124 node scripts/freshcheck.mjs`。
 
 用**系统 Python** 跑（`start.bat` 用的也是它）：`backend/.venv` 是历史残留，里面只有 pip，
 `starlette` 装在系统环境。空 venv 里跑单测不会报错，HTTP 层那 10 条会自动跳过并说明原因。

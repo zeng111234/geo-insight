@@ -26,7 +26,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from geo import db
+from geo import code_rev, db
 from geo.api import nav
 from geo.domain import channels as channels_domain
 from geo.domain import citation as citation_domain
@@ -330,7 +330,13 @@ async def studio_page(request: Request):
 
 
 async def health(request: Request):
-    return JSONResponse({"status": "ok", "metric_version": settings.metric_version})
+    # code_rev 是进程启动时读到的 HEAD，代表这个进程加载的代码版本；
+    # 与工作区 HEAD 不一致就说明服务是旧进程，检查脚本据此提示重启。
+    return JSONResponse({
+        "status": "ok",
+        "metric_version": settings.metric_version,
+        "code_rev": code_rev.code_rev(),
+    })
 
 
 async def list_trackers(request: Request):
