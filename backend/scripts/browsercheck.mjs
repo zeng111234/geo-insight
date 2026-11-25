@@ -78,7 +78,8 @@ const EXTRA = {
   ],
   "/monitor?tab=answers": [
     ["问题下拉", /id="qSelect"/],
-    ["引用信源栏", /id="ansCite"[\s\S]{0,400}cite-item/],
+    ["引用信源第三栏", /id="citeBody"[\s\S]{0,400}cite-item/],
+    ["全部/已监控筛选", /id="citeView"[\s\S]{0,160}已监控/],
     ["明细翻页条", /class="pager"/],
   ],
   "/monitor?tab=metrics": [

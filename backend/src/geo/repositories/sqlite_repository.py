@@ -238,6 +238,8 @@ def list_answers(
     citation_scope: str,
     page: int,
     limit: int,
+    cite_type: str | None = None,
+    cite_view: str = "all",
 ) -> tuple[list[dict], int]:
     where, params = _filters(tracker_id, start, end, model, None)
     if question_id:
@@ -270,15 +272,24 @@ def list_answers(
         scope_clause = ""
         scope_params: list[Any] = [r["id"]]
         if citation_scope in {"brand", "competitor", "media"}:
-            scope_clause = " AND owner_type = ?"
+            scope_clause += " AND owner_type = ?"
             scope_params.append(citation_scope)
-        item["citations"] = [
-            dict(c)
-            for c in conn.execute(
-                f"SELECT * FROM citation WHERE answer_id = ?{scope_clause} ORDER BY position",
-                scope_params,
-            ).fetchall()
-        ]
+        if cite_type:  # 合法值由 domain.citation.citation_type_filter 保证（T005 同一份口径）
+            scope_clause += " AND cite_type = ?"
+            scope_params.append(cite_type)
+        # 已监控视图依赖「已监控信源名单」，这套名单还没接入；
+        # 宁可返回空并在响应里说明，也不能拿全部引用冒充「监控到的引用」。
+        item["citations"] = (
+            [
+                dict(c)
+                for c in conn.execute(
+                    f"SELECT * FROM citation WHERE answer_id = ?{scope_clause} ORDER BY position",
+                    scope_params,
+                ).fetchall()
+            ]
+            if cite_view == "all"
+            else []
+        )
         items.append(item)
     return items, total
 

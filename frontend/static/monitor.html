@@ -10,10 +10,25 @@
 <style>
   /* 让工作台撑满可视高度：内容少时面板也要到底，否则下方会露出大片页面底色 */
   .content { display: flex; flex-direction: column; }
+  /* E1b：引用栏是工作台第三栏，不进 #tabBody——切 tab 时选中态与滚动位置都不丢 */
   .mon-grid { display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 12px;
     align-items: stretch; flex: 1 1 auto; min-height: 0; }
+  .mon-grid.with-cite { grid-template-columns: 252px minmax(0, 1fr) 340px; }
   .mon-grid > .panel { display: flex; flex-direction: column; min-width: 0; }
-  @media (max-width: 1100px) { .mon-grid { grid-template-columns: 1fr; } }
+  .mon-cite { display: none; }
+  .mon-grid.with-cite > .mon-cite { display: flex; }
+  .mon-cite .cite-head { display: flex; gap: 8px; align-items: center; padding: 11px 12px;
+    border-bottom: 1px solid var(--border); font-size: 12px; }
+  .mon-cite .cite-head select { margin-left: auto; font-size: 11px; padding: 3px 6px; }
+  .mon-cite .cite-body { flex: 1; min-height: 0; overflow-y: auto; }
+  .mon-cite .cite-body .hd { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--muted); }
+  @media (max-width: 1280px) {
+    .mon-grid.with-cite { grid-template-columns: 220px minmax(0, 1fr) 320px; }
+  }
+  @media (max-width: 1100px) {
+    .mon-grid, .mon-grid.with-cite { grid-template-columns: 1fr; }
+    .mon-grid.with-cite > .mon-cite { display: none; }
+  }
 
   .mon-list { overflow: hidden; }
   /* 左栏标题里多了一个「新建」按钮：badge 仍然靠右，按钮接在它后面 */
@@ -35,7 +50,8 @@
   .mon-head .meta { font-size: 11px; color: var(--muted); margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
   .mon-head .acts { display: flex; gap: 6px; margin-left: auto; }
 
-  .mon-tabs { display: flex; gap: 4px; overflow-x: auto; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  /* 第三栏占掉宽度后 10 个 tab 装不下一行：换行比横向滚动条好用 */
+  .mon-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
   .mon-tabs button { border: 1px solid transparent; background: transparent; border-radius: 999px;
     padding: 5px 11px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
   .mon-tabs button:hover { background: var(--subtle); color: var(--text); }
@@ -73,11 +89,9 @@
   .answer .cite { font-size: 11px; color: var(--muted); margin-top: 7px; }
   .todo { padding: 22px 16px; }
 
-  /* 问答明细：左回答、右引用。窄屏堆成上下，引用不至于挤成一条 */
-  .ans-split { display: grid; grid-template-columns: minmax(0, 1fr) 318px; flex: 1 1 auto; min-height: 0; }
+  /* 问答明细：引用已提到工作台第三栏，这里只留回答列表 */
+  .ans-split { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
   .ans-main { overflow-y: auto; min-height: 0; }
-  .ans-cite { border-left: 1px solid var(--border); overflow-y: auto; min-height: 0; }
-  .ans-cite .hd { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--muted); }
   .cite-item { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
   .cite-item .top { display: flex; gap: 5px; align-items: baseline; margin-bottom: 3px; }
   .cite-item .idx { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -85,7 +99,6 @@
   .cite-item a:hover { text-decoration: underline; }
   .cite-item .sub { color: var(--muted); font-size: 10.5px; }
   .answer.sel { background: var(--accent-weak); }
-  @media (max-width: 1280px) { .ans-split { grid-template-columns: 1fr; } .ans-cite { border-left: none; border-top: 1px solid var(--border); } }
 
   /* 指标明细 / 趋势 / 信源 共用 */
   .tab-pad { padding: 12px 14px; }
@@ -169,6 +182,17 @@
           <nav class="mon-tabs" id="tabs" role="tablist"></nav>
           <div class="mon-body" id="tabBody"><div class="empty">加载中…</div></div>
         </section>
+
+        <section class="panel mon-cite" id="citeRail">
+          <div class="cite-head">
+            <span>引用信源</span>
+            <select id="citeView" aria-label="引用视图">
+              <option value="all">全部</option>
+              <option value="monitored">已监控</option>
+            </select>
+          </div>
+          <div class="cite-body" id="citeBody"><div class="empty">选一条回答看它的引用</div></div>
+        </section>
       </div>
     </div>
   </main>
@@ -220,6 +244,8 @@
     answerTotal: 0,
     answerPages: 1,
     selectedAnswer: "",
+    citeView: "all",
+    monitoringAvailable: false,
     metric: "mention_rate",
     mediaType: "video",
     granularity: "day"
@@ -246,6 +272,7 @@
     return {
       tab: validTab(tab) ? tab : "dashboard",
       tracker: q.get("tracker") || "",
+      citeView: q.get("citeView") === "monitored" ? "monitored" : "all",
       granularity: q.get("g") === "week" ? "week" : "day"
     };
   }
@@ -448,7 +475,6 @@
       '<span class="spacer"></span><span class="muted" id="ansMeta">—</span></div>' +
       '<div class="ans-split">' +
         '<div class="ans-main" id="ansList"><div class="empty">加载中…</div></div>' +
-        '<div class="ans-cite" id="ansCite"><div class="empty" style="padding:14px 0">选一条回答看它的引用</div></div>' +
       "</div>";
     $("qSelect").addEventListener("change", function () {
       state.questionId = this.value;
@@ -464,11 +490,15 @@
     wiki: "百科", wechat: "公众号", blog: "博客"
   };
 
-  // 右栏只显示当前选中那条回答的引用。一条回答的引用本来就是它自己的证据，
+  // 第三栏只显示当前选中那条回答的引用。一条回答的引用本来就是它自己的证据，
   // 混在一起看反而分不清哪条引用支撑哪条回答。
   function renderCitations(a) {
-    var box = $("ansCite");
+    var box = $("citeBody");
     if (!box) return;
+    if (state.citeView === "monitored" && !state.monitoringAvailable) {
+      box.innerHTML = '<div class="notice warn" style="margin:10px">文章监控尚未接入，这里不能把全部引用冒充「已监控」。切回「全部」看当前样本里保存的引用证据。</div>';
+      return;
+    }
     if (!a) { box.innerHTML = '<div class="empty" style="padding:14px 0">选一条回答看它的引用</div>'; return; }
     var cites = a.citations || [];
     var head = '<div class="hd">引用信源 · ' + cites.length + " 条</div>";
@@ -494,7 +524,9 @@
     var st = G.pagerInit("mon-answers", loadAnswerPage);
     listBox.innerHTML = '<div class="empty">加载中…</div>';
     var d = await G.get("/trackers/" + state.trackerId + "/answers?" + G.dates() +
-      "&questionId=" + encodeURIComponent(state.questionId) + "&limit=" + PAGE_SIZE + "&page=" + st.page);
+      "&questionId=" + encodeURIComponent(state.questionId) + "&limit=" + PAGE_SIZE + "&page=" + st.page +
+      "&citeView=" + encodeURIComponent(state.citeView));
+    state.monitoringAvailable = d.monitoring_available === true;
     var total = (d.page && d.page.total) || 0;
     var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     if (st.page > pages) { st.page = pages; return loadAnswerPage(); }
@@ -927,6 +959,8 @@
   };
 
   async function renderTab() {
+    // 引用栏挂在工作台层级：只在问答明细 tab 展开，其余 tab 收起，避免看板被挤窄
+    document.querySelector(".mon-grid").classList.toggle("with-cite", state.tab === "answers");
     if (!state.trackerId) { $("tabBody").innerHTML = G.empty("先选择一个监控对象"); return; }
     $("tabBody").innerHTML = '<div class="empty">加载中…</div>';
     try {
@@ -947,7 +981,17 @@
     renderTab();
   });
 
-  // 问答明细点一条回答，右栏换成它的引用；指标明细切指标。
+  // 引用视图在第三栏顶部，不在 tabBody 里：切 tab 不会重建它，选中态留着
+  $("citeView").addEventListener("change", function () {
+    state.citeView = this.value;
+    var url = new URL(location.href);
+    url.searchParams.set("citeView", state.citeView);
+    history.replaceState(null, "", url);
+    if (state.tab === "answers") loadAnswerPage();
+    else renderCitations(null);
+  });
+
+  // 问答明细点一条回答，第三栏换成它的引用；指标明细切指标。
   // 委托在 tabBody 上：tab 内容每次整体重建，逐个绑定会漏掉重建后的节点。
   $("tabBody").addEventListener("click", function (e) {
     var ans = e.target.closest("[data-answer]");
@@ -1103,6 +1147,8 @@
     var q = readQuery();
     state.tab = q.tab;
     state.granularity = q.granularity;
+    state.citeView = q.citeView;
+    if ($("citeView")) $("citeView").value = state.citeView;
     if (q.tracker && q.tracker !== state.trackerId) {
       state.trackerId = q.tracker;
       $("tracker").value = state.trackerId;
@@ -1119,6 +1165,8 @@
     var q = readQuery();
     state.tab = q.tab;
     state.granularity = q.granularity;
+    state.citeView = q.citeView;
+    if ($("citeView")) $("citeView").value = state.citeView;
     await G.fillTrackers();
     try {
       var d = await G.get("/trackers");

@@ -483,6 +483,11 @@ async def list_answers(request: Request):
         limit = min(100, max(1, int(request.query_params.get("limit", 20))))
     except ValueError:
         return _error(request, "VALIDATION_ERROR", "page/limit must be integers")
+    try:
+        cite_type = citation_domain.citation_type_filter(request.query_params.get("citeType"))
+        cite_view = citation_domain.citation_view_filter(request.query_params.get("citeView"))
+    except ValueError as e:
+        return _error(request, "VALIDATION_ERROR", str(e))
 
     conn = db.connect()
     try:
@@ -500,6 +505,8 @@ async def list_answers(request: Request):
             scope,
             page,
             limit,
+            cite_type=cite_type,
+            cite_view=cite_view,
         )
         # 没有核心词时 off_topic 为 None（未判定），不能当成 False;
         # H2-6:核心词取当前生效问题集(切换问题集,跑题判定跟随)
@@ -510,6 +517,9 @@ async def list_answers(request: Request):
             {
                 "items": items,
                 "keywords": keywords,
+                "cite_type": cite_type,
+                "cite_view": cite_view,
+                "monitoring_available": citation_domain.MONITORING_AVAILABLE,
                 "page": {"page": page, "limit": limit, "total": total},
             }
         )
