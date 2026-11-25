@@ -113,8 +113,8 @@ try {
     Array.from(document.querySelectorAll('.mon-head .acts > *')).map(e => e.textContent.trim())
   `);
   check(
-    JSON.stringify(labels) === JSON.stringify(["下载报告", "导出", "刷新", "暂停", "删除", "编辑"]),
-    "对象头 6 个按钮，顺序同参考系统", labels.join(" | ")
+    JSON.stringify(labels) === JSON.stringify(["下载报告", "表格浏览", "导出", "刷新", "暂停", "删除", "编辑"]),
+    "对象头 7 个按钮，顺序同参考系统", labels.join(" | ")
   );
 
   // 2. 点删除 → 弹框出现，确认按钮初始禁用
@@ -173,10 +173,10 @@ try {
   await sleep(300);
   check(await evaluate(`document.getElementById('newDrawer').open`) === true, "点新建打开右侧抽屉");
   const fields = await evaluate(`
-    ['ntName','ntBrand','ntIndustry','ntRegion','ntAliases','ntCompetitors']
+    ['ntWebsite','ntName','ntBrand','ntKeywords','ntIndustry','ntRegion','ntAliases','ntCompetitors','ntQuestions']
       .map(function (i) { return !!document.getElementById(i); })
   `);
-  check(fields.every(Boolean), "抽屉字段齐全（名称/品牌/行业/地区/别名/竞品）", fields.join(","));
+  check(fields.every(Boolean), "抽屉字段齐全（官网/名称/品牌/核心词/行业/地区/别名/竞品/问题）", fields.join(","));
 
   // 8. 取消关闭抽屉，不新建对象
   await evaluate(`document.getElementById('ntCancel').click()`);
@@ -190,12 +190,21 @@ try {
   const optionsBefore = await evaluate(`document.querySelectorAll('#tracker option').length`);
   try {
     await evaluate(`document.getElementById('newTracker').click()`);
-    await sleep(200);
+    await sleep(600);
+    const channels = await evaluate(`({
+      total: document.querySelectorAll('#ntChannels label').length,
+      enabled: document.querySelectorAll('#ntChannels input:not([disabled])').length,
+      offLabel: document.getElementById('ntChannels').textContent.indexOf('未接入') >= 0,
+    })`);
+    check(channels.total === 16, "渠道清单渲染 16 格", `${channels.total} 格`);
+    check(channels.enabled === 3 && channels.offLabel, "已接入 3 个可勾、未接入照实标注",
+      `可勾 ${channels.enabled} / 标注未接入 ${channels.offLabel}`);
     await evaluate(`(function () {
       document.getElementById('ntName').value = ${JSON.stringify(TEMP_NAME)};
       document.getElementById('ntBrand').value = '交互检查品牌';
-      document.getElementById('ntIndustry').value = '检查行业';
-      document.getElementById('ntRegion').value = '检查地区';
+      document.getElementById('ntWebsite').value = 'https://example.com/check';
+      document.getElementById('ntKeywords').value = '检查词A, 检查词B';
+      document.getElementById('ntQuestions').value = '检查问题一？\\n*核心检查问题？';
     })()`);
     // 真实点击「创建」，不是 dispatchEvent——与用户动作一致
     await evaluate(`document.querySelector('#newTrackerForm button[type=submit]').click()`);
@@ -205,6 +214,21 @@ try {
     const created = (list.items || []).find((t) => t.name === TEMP_NAME);
     createdId = created ? created.id : null;
     check(!!createdId, "表单提交真建出对象（接口可查）", createdId || "未创建");
+
+    // P1：新字段真落库——从接口详情读回，不是只看输入框填过
+    if (createdId) {
+      const detail = await (await fetch(`${BASE}/v1/trackers/${createdId}`)).json();
+      check(detail.website === "https://example.com/check", "官网地址落库并可回显", detail.website || "空");
+      const kw = (detail.keywords || []).map((x) => (typeof x === "string" ? x : x.text || "")).join(",");
+      check(kw.indexOf("检查词A") >= 0 && kw.indexOf("检查词B") >= 0, "核心词落库", kw || "空");
+      const qs = await (await fetch(`${BASE}/v1/trackers/${createdId}/questions`)).json();
+      const texts = (qs.items || []).map((q) => q.text).join("|");
+      check(texts.indexOf("检查问题一") >= 0 && texts.indexOf("核心检查问题") >= 0,
+        "监控问题落库", `${(qs.items || []).length} 条`);
+      const core = (qs.items || []).some((q) => q.text.indexOf("核心检查") >= 0 && q.tier === "core");
+      check(core, "* 开头的问题设为核心",
+        (qs.items || []).map((q) => `${q.text}:${q.tier}`).join(" | "));
+    }
 
     const afterSubmit = await evaluate(`({
       options: document.querySelectorAll('#tracker option').length,
@@ -216,6 +240,21 @@ try {
     check(afterSubmit.selected === createdId, "创建后下拉自动选中新对象",
       `${afterSubmit.selected} / ${createdId}`);
     check(afterSubmit.drawerOpen === false, "创建后抽屉关闭");
+
+    // P4：对象头「表格浏览」直达问答明细表格视图
+    await evaluate(`document.getElementById('tableBrowseBtn').click()`);
+    await sleep(900);
+    const browse = await evaluate(`({
+      tab: new URLSearchParams(location.search).get('tab'),
+      view: new URLSearchParams(location.search).get('view'),
+      hasTable: !!document.querySelector('#ansList table'),
+      btnOn: (function () { var b = document.querySelector('.ans-view [data-view=table]'); return b && b.classList.contains('on'); })(),
+    })`);
+    check(browse.tab === "answers" && browse.view === "table", "表格浏览切到问答明细表格视图",
+      `tab=${browse.tab} view=${browse.view}`);
+    // 新建对象没有答案数据，表格区会渲染空提示而不是 <table>——
+    // 这里守的是「视图切换生效」（按钮高亮 + 有内容区），不强制表格行存在。
+    check(browse.btnOn, "表格视图按钮高亮（新建对象可无数据）", `on=${browse.btnOn}`);
   } finally {
     if (createdId) {
       const del = await fetch(`${BASE}/v1/trackers/${createdId}`, { method: "DELETE" });

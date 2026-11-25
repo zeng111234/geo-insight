@@ -100,6 +100,45 @@ class ConfigFlowTest(unittest.TestCase):
         self.assertEqual(plan["daily_planned"], 0)
         self.assertTrue(any("尚未导入问题" in n for n in plan["notes"]))
 
+    def test_website_is_persisted_and_returned(self):
+        """新建抽屉的官网字段要真落库、详情能回显（不是画个输入框糊弄）。"""
+        created = config_service.create(
+            self.conn,
+            TENANT,
+            {"name": "官网对象", "brand_name": "官网品牌", "website": "https://example.com/law"},
+            NOW,
+        )
+        detail = config_service.tracker_detail(self.conn, created["tracker_id"], TENANT)
+        self.assertEqual(detail["website"], "https://example.com/law")
+
+    def test_new_tracker_can_store_keywords_without_extra_step(self):
+        """新建对象应自带生效问题集，否则抽屉里填的核心词存不上（真 bug 回归）。"""
+        from geo.services import tracker_service
+
+        created = config_service.create(
+            self.conn,
+            TENANT,
+            {"name": "核心词对象", "brand_name": "核心词品牌"},
+            NOW,
+        )
+        tid = created["tracker_id"]
+        tracker_service.update_active_keywords(self.conn, tid, TENANT, ["律师", "律所"])
+        self.assertEqual(
+            sorted(tracker_service.active_keywords(self.conn, tid)),
+            ["律师", "律所"],
+        )
+
+    def test_website_without_scheme_is_rejected(self):
+        """明显不是链接的 website 要在服务层挡住，别存进 settings。"""
+        with self.assertRaises(ValueError) as ctx:
+            config_service.create(
+                self.conn,
+                TENANT,
+                {"name": "坏官网", "brand_name": "坏品牌", "website": "example.com"},
+                NOW,
+            )
+        self.assertIn("http://", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

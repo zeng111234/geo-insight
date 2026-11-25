@@ -125,6 +125,7 @@ def create_tracker(
     competitors: list[str],
     owner_id: str | None,
     now: str,
+    settings_json: str = "{}",
 ) -> dict:
     brand_id = uid()
     conn.execute(
@@ -157,13 +158,32 @@ def create_tracker(
     conn.execute(
         """INSERT INTO tracker(id, tenant_id, brand_id, competitor_set_id, name, industry, region,
                                status, owner_id, settings, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, '{}', ?, ?)""",
-        (tracker_id, tenant_id, brand_id, competitor_set_id, name, industry, region, owner_id, now, now),
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)""",
+        (
+            tracker_id,
+            tenant_id,
+            brand_id,
+            competitor_set_id,
+            name,
+            industry,
+            region,
+            owner_id,
+            settings_json,
+            now,
+            now,
+        ),
     )
     # 问题集先建空集：FR-007 要求允许保存，但页面必须提示「不会产生数据」。
+    # 同时设为生效集——否则新建后写核心词会报「还没有生效问题集」，
+    # 用户在抽屉里填了核心词却存不上（上游 tracker_service 要求 active 存在）。
+    question_set_id = uid()
     conn.execute(
         "INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at) VALUES (?, ?, ?, ?, ?)",
-        (uid(), tenant_id, tracker_id, f"{name} · 问题集", now),
+        (question_set_id, tenant_id, tracker_id, f"{name} · 问题集", now),
+    )
+    conn.execute(
+        "UPDATE tracker SET active_question_set_id = ? WHERE id = ?",
+        (question_set_id, tracker_id),
     )
     conn.commit()
     return {"tracker_id": tracker_id, "brand_id": brand_id, "has_questions": False}

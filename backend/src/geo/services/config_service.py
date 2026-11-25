@@ -42,9 +42,21 @@ def create(conn: sqlite3.Connection, tenant_id: str, payload: dict, now: str) ->
         problems.append("brand_aliases 最多 20 个")
     if len(competitors) > 20:
         problems.append("competitor_names 最多 20 个")
+
+    # 官网地址可选：存进 tracker.settings，不新增列。只做最基本的结构校验——
+    # 这里不是 URL 解析器，挡住明显不是链接的串即可，别拦合法的中文域名。
+    website = (payload.get("website") or "").strip()
+    if website:
+        if not isinstance(website, str):
+            problems.append("website 必须是字符串")
+        elif len(website) > 500:
+            problems.append("website 最多 500 字符")
+        elif not (website.startswith("http://") or website.startswith("https://")):
+            problems.append("website 必须以 http:// 或 https:// 开头")
     if problems:
         raise ValueError("；".join(problems))
 
+    settings_json = json.dumps({"website": website}, ensure_ascii=False) if website else "{}"
     return config.create_tracker(
         conn,
         tenant_id=tenant_id,
@@ -56,6 +68,7 @@ def create(conn: sqlite3.Connection, tenant_id: str, payload: dict, now: str) ->
         competitors=competitors,
         owner_id=payload.get("owner_id"),
         now=now,
+        settings_json=settings_json,
     )
 
 
@@ -118,6 +131,12 @@ def tracker_detail(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) ->
     from geo.services import tracker_service
 
     tracker["keywords"] = tracker_service.active_keywords(conn, tracker_id)
+    # settings 列存的是 JSON 字符串；前端要读 website，这里解析成结构化字段。
+    try:
+        extra = json.loads(tracker.get("settings") or "{}")
+    except (TypeError, ValueError):
+        extra = {}
+    tracker["website"] = extra.get("website", "") if isinstance(extra, dict) else ""
     tracker["question_summary"] = repo.question_summary(conn, tracker_id)
     profile = config.get_brand_profile(conn, tracker_id, tenant_id) or {}
     tracker["brand"] = {
