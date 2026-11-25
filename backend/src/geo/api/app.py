@@ -423,6 +423,50 @@ async def metrics_sentiment_by_model(request: Request):
         conn.close()
 
 
+async def metrics_tab_counts(request: Request):
+    """工作台 10 个 tab 的计数，一次给全（E1d：切筛选同步换数字）。"""
+    period = _period(request)
+    if isinstance(period, JSONResponse):
+        return period
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        if not repo.get_tracker(conn, tracker_id, _tenant(request)):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        counts = repo.tab_count_rows(
+            conn,
+            tracker_id,
+            period[0],
+            period[1],
+            request.query_params.get("questionId") or None,
+            request.query_params.get("model") or None,
+        )
+        samples = counts["samples"] or 0
+        return JSONResponse(
+            {
+                "items": [
+                    {"tab": "dashboard", "count": counts["mentions"] or 0, "unit": "提及"},
+                    {"tab": "answers", "count": samples, "unit": "条"},
+                    {"tab": "metrics", "count": counts["questions"] or 0, "unit": "题"},
+                    {"tab": "trend", "count": counts["days"] or 0, "unit": "天"},
+                    {"tab": "competitors", "count": counts["competitor_mentions"] or 0, "unit": "次"},
+                    {"tab": "sources", "count": counts["citations"] or 0, "unit": "条"},
+                    {"tab": "sentiment", "count": counts["mentions"] or 0, "unit": "条"},
+                    {"tab": "competitorStats", "count": counts["competitors"] or 0, "unit": "个"},
+                    {"tab": "media", "count": counts["media_citations"] or 0, "unit": "条"},
+                    {"tab": "health", "count": samples, "unit": "条"},
+                ],
+                "filters": {
+                    "questionId": request.query_params.get("questionId") or "",
+                    "model": request.query_params.get("model") or "",
+                },
+                "window": {"from": period[0], "to": period[1]},
+            }
+        )
+    finally:
+        conn.close()
+
+
 async def metrics_overview(request: Request):
     period = _period(request)
     if isinstance(period, JSONResponse):
@@ -1673,6 +1717,10 @@ def create_app() -> Starlette:
         Route(
             f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/sentiment-by-model",
             metrics_sentiment_by_model,
+        ),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/tab-counts",
+            metrics_tab_counts,
         ),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/overview", metrics_overview),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/trend", metrics_trend),

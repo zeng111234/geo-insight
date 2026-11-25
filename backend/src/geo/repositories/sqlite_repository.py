@@ -879,6 +879,66 @@ def latest_import_at(
     return row["last"] if row and row["last"] else None
 
 
+def tab_count_rows(
+    conn: sqlite3.Connection,
+    tracker_id: str,
+    start: str,
+    end: str,
+    question_id: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """一次查询给工作台 10 个 tab 的计数。
+
+    为什么合在一起：切筛选要同步刷新 10 个 tab，逐个请求会在页面上此起彼伏地
+    跳数字。一个请求拿到全部，筛选变化时数字一起换。
+
+    各口径都挂同一套样本条件（有效 + 周期 + 问题集 + 可选问题/模型），
+    避免 tab 之间分母不一致——那比数字旧一点更让人困惑。
+    """
+    clauses = [
+        "a.tracker_id = ?",
+        "a.is_valid = 1",
+        f"{day_of('a.collected_at')} BETWEEN ? AND ?",
+        "a.question_id IN (SELECT q.id FROM question q WHERE q.question_set_id = "
+        "(SELECT t.active_question_set_id FROM tracker t WHERE t.id = a.tracker_id))",
+    ]
+    params: list[Any] = [tracker_id, start, end]
+    if question_id:
+        clauses.append("a.question_id = ?")
+        params.append(question_id)
+    if model:
+        clauses.append("a.model_key = ?")
+        params.append(model)
+    where = " AND ".join(clauses)
+
+    row = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) AS samples,
+          COUNT(DISTINCT a.question_id) AS questions,
+          COUNT(DISTINCT {day_of('a.collected_at')}) AS days,
+          SUM(CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END) AS mentions,
+          SUM(CASE WHEN m.subject_type = 'competitor' THEN 1 ELSE 0 END) AS competitor_mentions,
+          SUM(CASE WHEN m.sentiment = 'pos' THEN 1 ELSE 0 END) AS pos_mentions,
+          SUM(CASE WHEN m.sentiment = 'neu' THEN 1 ELSE 0 END) AS neu_mentions,
+          SUM(CASE WHEN m.sentiment = 'neg' THEN 1 ELSE 0 END) AS neg_mentions,
+          (SELECT COUNT(*) FROM citation c JOIN answer ca ON ca.id = c.answer_id WHERE {where.replace('a.', 'ca.')}) AS citations,
+          (SELECT COUNT(*) FROM citation c JOIN answer ca ON ca.id = c.answer_id
+            WHERE {where.replace('a.', 'ca.')} AND c.media_type IN ('video', 'image')) AS media_citations,
+          (SELECT COUNT(DISTINCT cp.id) FROM competitor cp
+            JOIN competitor_set cs ON cs.id = cp.competitor_set_id
+            JOIN tracker t ON t.competitor_set_id = cs.id WHERE t.id = ?) AS competitors
+        FROM answer a
+        LEFT JOIN mention m ON m.answer_id = a.id
+        WHERE {where}
+        """,
+        # SELECT 列表里的两个子查询先求值，再是竞品集合，最后才是主查询的 WHERE。
+        # 绑定参数按 ? 出现顺序走，不能按代码阅读顺序想当然。
+        params + params + [tracker_id] + params,
+    ).fetchone()
+    return dict(row)
+
+
 def channel_sample_rows(
     conn: sqlite3.Connection, tracker_id: str, start: str, end: str
 ) -> list[dict]:

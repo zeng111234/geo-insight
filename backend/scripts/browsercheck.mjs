@@ -78,6 +78,8 @@ const EXTRA = {
   ],
   "/monitor?tab=answers": [
     ["问题下拉", /id="qSelect"/],
+    ["筛选条在 tab 之上", /id="filterBar"[\s\S]{0,2200}id="tabs"/],
+    ["10 个 tab 带数字", /role="tab"[^>]*>指标看板<span class="n">/],
     ["引用信源第三栏", /id="citeBody"[\s\S]{0,400}cite-item/],
     ["全部/已监控筛选", /id="citeView"[\s\S]{0,160}已监控/],
     ["明细翻页条", /class="pager"/],
