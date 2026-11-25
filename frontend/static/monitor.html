@@ -79,6 +79,20 @@
   dialog code { background: var(--subtle); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
   dialog .notice { margin-top: 12px; }
 
+  /* E1e 新建抽屉：贴右侧从上到下，不像模态框那样盖住整页。
+     字段与 /settings 的新建表单一致，只是容器从居中对话框换成侧滑。 */
+  dialog#newDrawer { margin: 0 0 0 auto; width: min(420px, 96vw); height: 100%;
+    max-height: 100%; border-radius: 0; border: none; border-left: 1px solid var(--border);
+    box-shadow: -12px 0 40px rgba(31,36,48,.16); }
+  dialog#newDrawer::backdrop { background: rgba(31,36,48,.22); }
+  dialog#newDrawer .dialog-body { overflow-y: auto; flex: 1; }
+  dialog#newDrawer form { display: flex; flex-direction: column; height: 100%; }
+  dialog#newDrawer .field { display: block; margin-bottom: 12px; font-size: 11.5px; }
+  dialog#newDrawer .field span { display: block; color: var(--muted); margin-bottom: 5px; }
+  dialog#newDrawer .field input { width: 100%; }
+  dialog#newDrawer .row { display: flex; gap: 8px; }
+  dialog#newDrawer .row .field { flex: 1; min-width: 0; }
+
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; padding: 14px; }
   .kpi { border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; background: var(--panel); }
   .kpi .k { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
@@ -233,6 +247,34 @@
 
 <!-- 删除确认：要求手打对象名，不是点一下「确定」。
      一次删除会带走该对象的问题、答案、提及、引用与报告，误点的代价太大。 -->
+<!-- E1e 新建监控右侧抽屉：字段与校验和 /settings 的 newForm 完全一致。
+     就近创建，不跳页——演示时跳出当前上下文最容易断节奏。 -->
+<dialog id="newDrawer">
+  <form id="newTrackerForm">
+    <h2>新建监控对象 <span class="badge">建后再导入问题</span></h2>
+    <div class="dialog-body">
+      <label class="field"><span>监控名称 *</span>
+        <input id="ntName" type="text" required placeholder="例：大连示例医美" /></label>
+      <label class="field"><span>品牌名称 *</span>
+        <input id="ntBrand" type="text" required placeholder="答案中出现的正式名称" /></label>
+      <div class="row">
+        <label class="field"><span>行业</span><input id="ntIndustry" type="text" /></label>
+        <label class="field"><span>地区</span><input id="ntRegion" type="text" /></label>
+      </div>
+      <label class="field"><span>别名（逗号分隔）</span>
+        <input id="ntAliases" type="text" placeholder="简称, 英文名" /></label>
+      <label class="field"><span>竞品（逗号分隔）</span>
+        <input id="ntCompetitors" type="text" /></label>
+      <div class="notice warn">保存后不会自动产生数据：先导入问题集，系统才按核心 3 次 / 长尾 1 次安排采样。</div>
+      <div id="ntError"></div>
+    </div>
+    <div class="dialog-foot">
+      <button type="button" id="ntCancel">取消</button>
+      <button type="submit" class="primary">创建</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="delDialog">
   <form method="dialog">
     <h2>删除监控对象</h2>
@@ -1251,7 +1293,47 @@
   });
 
   $("listSearch").addEventListener("input", renderTrackerList);
-  $("newTracker").addEventListener("click", function () { location.href = "/settings"; });
+  // ---- E1e 新建抽屉：字段与校验和 settings.html 的 newForm 一致 ----
+  var splitNames = function (v) {
+    return (v || "").split(/[,，]/).map(function (x) { return x.trim(); }).filter(Boolean);
+  };
+  $("newTracker").addEventListener("click", function () {
+    $("ntError").innerHTML = "";
+    $("newTrackerForm").reset();
+    $("newDrawer").showModal();
+  });
+  $("ntCancel").addEventListener("click", function () { $("newDrawer").close(); });
+  $("newTrackerForm").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    var body = {
+      name: $("ntName").value.trim(),
+      brand_name: $("ntBrand").value.trim(),
+      industry: $("ntIndustry").value.trim(),
+      region: $("ntRegion").value.trim(),
+      brand_aliases: splitNames($("ntAliases").value),
+      competitor_names: splitNames($("ntCompetitors").value),
+    };
+    try {
+      var created = await G.post("/trackers", body);
+      $("newDrawer").close();
+      state.trackers.push(created);
+      state.trackerId = created.id;
+      state.questionId = "";
+      state.questions = [];
+      state.tabCounts = {};
+      $("tracker").value = created.id;
+      renderTrackerList();
+      renderHead();
+      await loadQuestions();
+      syncUrl(true);
+      renderTabs();
+      await renderTab();
+      G.toast("已创建；导入问题后才会产生采样");
+    } catch (err) {
+      // 校验错误就地显示，不跳页、不清空已填字段——重填一遍最烦人
+      $("ntError").innerHTML = '<div class="notice error">创建失败：' + esc(err.message) + "</div>";
+    }
+  });
   $("refreshBtn").addEventListener("click", function () { renderTab(); });
   $("load").addEventListener("click", function () { renderTab(); });
 
