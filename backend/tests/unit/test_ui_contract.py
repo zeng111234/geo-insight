@@ -171,6 +171,24 @@ class PublishTableContractTest(unittest.TestCase):
         self.assertIn("#channels td .tag { white-space: nowrap; }", self.html)
 
 
+class HomeKpiGridContractTest(unittest.TestCase):
+    """首页 KPI 卡：8 张要在宽屏排 4+4，情感卡不再独占一行。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.css = APP_CSS.read_text(encoding="utf-8")
+
+    def test_cards_use_wider_min_column(self):
+        """260px 阈值让 1440 下 4 列、900 下 2 列；退回 148px 会变 7+1 断行。"""
+        self.assertIn(".cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));",
+                      self.css)
+        self.assertNotIn("minmax(148px, 1fr)", self.css)
+
+    def test_sentiment_no_narrow_hack(self):
+        """卡片变宽后不能再把三段强行收紧成竖排兜底。"""
+        self.assertNotIn(".card .sentiment-split { gap: 0; line-height: 1.35; }", self.css)
+
+
 class TrendLineContractTest(unittest.TestCase):
     """折线：x 轴按真实日期、缺口用虚线，不能再退回点序号+整段消失。"""
 

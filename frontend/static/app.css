@@ -177,7 +177,9 @@ label.field > input, label.field > select, label.field > textarea { width: 100%;
 }
 
 /* 指标卡 */
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 12px; }
+/* 8 张 KPI 卡在 1440 下排 4+4；148px 时会变成 7+1、第 8 张独占一行右侧全空。
+   260px 阈值让宽屏 4 列、900 宽 2 列，情感卡也够了横排三段的空间。 */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .card {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 13px 14px; box-shadow: var(--shadow);
@@ -265,9 +267,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .sentiment-split > span.neu { color: var(--text-body); }
 .sentiment-split > span.neg { color: var(--red-ink); }
 .sentiment-split b { font-weight: 600; font-variant-numeric: tabular-nums; }
-/* 窄卡片（首页 KPI 约 148px）：三段横排物理上放不下，改为紧凑竖排。
-   关键是收紧行距，让这张卡片不要比同排其它 KPI 高出一大截。 */
-.card .sentiment-split { gap: 0; line-height: 1.35; }
+/* 首页 KPI 卡已加宽到 260px 档，三段能横排；不再需要旧的紧凑竖排兜底。
+   极窄屏（单列 < 320px）仍可能换行，但 flex-wrap 保证每段自身不拆。 */
 
 /* 抽屉 */
 .scrim {
