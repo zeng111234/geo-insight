@@ -12,6 +12,7 @@ import unittest
 
 from geo.domain import citation as citation_domain
 from geo.repositories import sqlite_repository as repo
+from tests import fixtures
 
 
 class CitationViewFilterTest(unittest.TestCase):
@@ -30,26 +31,56 @@ class CitationViewFilterTest(unittest.TestCase):
 
 
 class AnswerCiteViewTest(unittest.TestCase):
-    """用演示库核对：筛选后每条答案带的引用必须符合视图与类型。"""
+    """自建库核对：筛选后每条答案带的引用必须符合视图与类型。
 
-    @classmethod
-    def setUpClass(cls):
-        import sqlite3
+    不读演示库 geo.db —— 那条文件是运行产物、不入库，干净检出里根本不存在；
+    测试依赖它就会「工作区绿、检出树红」，等于没有验证。
+    """
+
+    def setUp(self):
+        import tempfile
         from pathlib import Path
 
-        db_path = Path(__file__).resolve().parents[3] / "geo.db"
-        cls.conn = sqlite3.connect(db_path)
-        cls.conn.row_factory = sqlite3.Row
-        cls.tracker = "11111111-1111-1111-1111-111111111111"
+        from geo.collectors.citations import domain_of
+        from geo.services.import_service import sha
+        from tests import fixtures
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.conn.close()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.conn = fixtures.build_minimal_db(Path(self.tmp.name) / "cite.db")
+        answer_id = fixtures.add_answer(
+            self.conn, "2026-11-10T10:00:00+08:00", question_id=fixtures.QUESTION
+        )
+        for index, (url, cite_type) in enumerate(
+            (
+                ("https://zhuanlan.zhihu.com/p/1", "inline"),
+                ("https://www.bilibili.com/video/1", "video"),
+            )
+        ):
+            self.conn.execute(
+                """INSERT INTO citation(id, answer_id, url, url_hash, domain, media_name,
+                                        media_type, owner_type, position, cite_type,
+                                        published_at, published_at_unknown)
+                   VALUES (?, ?, ?, ?, ?, '来源', 'news', 'media', ?, ?, NULL, 0)""",
+                (
+                    f"cit-{index}",
+                    answer_id,
+                    url,
+                    sha(url),
+                    domain_of(url),
+                    index + 1,
+                    cite_type,
+                ),
+            )
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+        self.tmp.cleanup()
 
     def _items(self, **kwargs):
         items, _ = repo.list_answers(
             self.conn,
-            self.tracker,
+            fixtures.TRACKER,
             "2026-11-01",
             "2026-11-30",
             None,
