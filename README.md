@@ -132,9 +132,34 @@ python backend/run.py --reset         # 重建演示数据（清表，不删文�
 python backend/run.py --no-browser    # 不自动开浏览器
 ```
 
-数据库就是 `backend/geo.db` 一个文件；`Ctrl+C` 停止。
+数据库就是项目根的 `geo.db` 一个文件（路径由 `settings` 从项目根推导，**不跟着 cwd 走**——
+所以双击 `start.bat` 和命令行启动用的是同一个库，见决策 013）；`Ctrl+C` 停止。
 
 `--reset` 会重建全部演示数据，**包括 5 份报告**（含一份不可比、一份 +23.3pp 可比），所以重置后报告中心不会是空的。
+
+## 备份与恢复
+
+数据只有一份（项目根的 `geo.db`），丢了自己重建不出来——里面是真实的采集结果与配置。
+
+```bash
+python backend/scripts/backup.py                  # 备份一次（服务开着也能备）
+python backend/scripts/backup.py --list           # 看有哪几份、各有多少数据
+python backend/scripts/backup.py --keep 14        # 备份 + 只留最近 14 份
+python backend/scripts/backup.py --prune 7        # 只清理，不备份
+python backend/scripts/backup.py --verify 某文件   # 校验一个备份能不能用
+python backend/scripts/backup.py --restore 某文件  # 用它覆盖当前库（**先停服务**）
+```
+
+Windows 上双击 `backup-team.bat` 等同 `--keep 14`。
+
+**为什么不是「把 geo.db 复制一份」**：SQLite 在 WAL 模式下，已提交的数据可能还留在
+`geo.db-wal` 里没写进主文件。复制主文件会得到一份能打开、能查询、只是少了最近几条的备份，
+而且**不会报错**——等真需要它的那天才发现少了关键的一段。`backup.py` 用 `VACUUM INTO`
+让 SQLite 自己生成一致快照，服务在跑也能安全执行。
+
+**恢复**必须停服务（关掉 `start.bat` 的黑窗口）。会先尝试拿独占锁，拿不到直接报错、
+不会硬写。恢复前自动把当前库存成 `pre-restore-*`（选错文件时用它回退），
+恢复后自动跑迁移链，所以旧版本的备份也能直接用。
 
 ## 数据接入
 

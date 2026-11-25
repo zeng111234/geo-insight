@@ -21,22 +21,23 @@ import re
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-# 媒体类型只认这 8 个值：前 7 个是页面上已有的中文映射
-# （frontend/static/monitor.html 的 TYPE_TEXT），other 是兜底。
-# domain/enums.py 的 MediaType 已按同一套词汇改正——以那里为准。
-MEDIA_TYPES = ("news", "video", "forum", "blog", "wechat", "wiki", "database", "other")
+from geo.domain.enums import CiteType, MediaType
+
+# 媒体类型只认这几个值，**从枚举派生而不是另写一份**。
+# 两份字面量迟早会分叉：有人加了新类型只改一边，另一边照样"看起来对"。
+MEDIA_TYPES = tuple(item.value for item in MediaType)
 
 # 顺序有意义：先匹配到的赢。放在前面的是「即使域名里也带新闻字样，也该按论坛算」的站点。
-_DOMAIN_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("zhihu.com", "zhihu.cn", "tieba.baidu.com", "douban.com", "v2ex.com", "xueqiu.com"), "forum"),
-    (("mp.weixin.qq.com", "weixin.qq.com", "xiaohongshu.com"), "wechat"),
+_DOMAIN_RULES: tuple[tuple[tuple[str, ...], MediaType], ...] = (
+    (("zhihu.com", "zhihu.cn", "tieba.baidu.com", "douban.com", "v2ex.com", "xueqiu.com"), MediaType.FORUM),
+    (("mp.weixin.qq.com", "weixin.qq.com", "xiaohongshu.com"), MediaType.WECHAT),
     (("bilibili.com", "b23.tv", "douyin.com", "kuaishou.com", "youtube.com",
-      "youtu.be", "v.qq.com", "youku.com", "iqiyi.com", "ixigua.com"), "video"),
-    (("baike.baidu.com", "wikipedia.org", "wikiwand.com", "baike.so.com", "zh.wikipedia.org"), "wiki"),
+      "youtu.be", "v.qq.com", "youku.com", "iqiyi.com", "ixigua.com"), MediaType.VIDEO),
+    (("baike.baidu.com", "wikipedia.org", "wikiwand.com", "baike.so.com", "zh.wikipedia.org"), MediaType.WIKI),
     (("wenshu.court.gov.cn", "pkulaw.com", "itslaw.com", "faxin.cn", "openlaw.cn",
-      "judgelaw.com", "chinacourt.org"), "database"),
+      "judgelaw.com", "chinacourt.org"), MediaType.DATABASE),
     (("blog.", "/blog", "csdn.net", "jianshu.com", "cnblogs.com", "medium.com",
-      "substack.com", "wordpress.com"), "blog"),
+      "substack.com", "wordpress.com"), MediaType.BLOG),
 )
 
 # 追踪参数：不影响页面内容，只影响「同一条引用被当成几条」。
@@ -56,8 +57,8 @@ class CitationDraft:
     title: str | None = None
     site_name: str | None = None
     published_at: str | None = None
-    media_type: str = "other"
-    cite_type: str = "reference"
+    media_type: str = MediaType.OTHER.value
+    cite_type: str = CiteType.REFERENCE.value
     position: int = 0
 
 
@@ -119,22 +120,22 @@ def classify_media(url: str, site_name: str | None = None) -> str:
 
     for needles, media_type in _DOMAIN_RULES:
         if any(needle in probe for needle in needles):
-            return media_type
+            return media_type.value
 
     if site_name:
         name = site_name.lower()
         if "百科" in site_name:
-            return "wiki"
+            return MediaType.WIKI.value
         if "知乎" in site_name or "论坛" in site_name or "贴吧" in site_name:
-            return "forum"
+            return MediaType.FORUM.value
         if "公众号" in site_name:
-            return "wechat"
+            return MediaType.WECHAT.value
         if "视频" in site_name or "抖音" in site_name or "b站" in name:
-            return "video"
+            return MediaType.VIDEO.value
         if "裁判" in site_name or "案例" in site_name or "法规" in site_name:
-            return "database"
+            return MediaType.DATABASE.value
 
-    return "news" if host else "other"
+    return MediaType.NEWS.value if host else MediaType.OTHER.value
 
 
 def infer_cite_type(media_type: str, platform_default: str) -> str:
@@ -144,11 +145,13 @@ def infer_cite_type(media_type: str, platform_default: str) -> str:
     豆包的 url_citation 是答案级（reference）。同一个媒体类型在两个平台
     形态可能不同，所以不让这里硬定。
     """
-    if media_type == "video":
-        return "video"
-    if media_type in ("wiki", "database"):
-        return "reference"
-    return platform_default if platform_default in ("inline", "reference") else "reference"
+    if media_type == MediaType.VIDEO:
+        return CiteType.VIDEO.value
+    if media_type in (MediaType.WIKI, MediaType.DATABASE):
+        return CiteType.REFERENCE.value
+    if platform_default in (CiteType.INLINE, CiteType.REFERENCE):
+        return platform_default
+    return CiteType.REFERENCE.value
 
 
 def build_drafts(

@@ -431,7 +431,7 @@ RICH_START = "2026-11-06"
 RICH_END = "2026-11-30"
 OUTAGE_DAYS = {"2026-11-06", "2026-11-22"}
 FAIL_EVERY = 15  # 每天 60 槽位中 slot_no % 15 == 7 的 4 个失败
-ERROR_CODES = ["RATE_LIMITED", "TIMEOUT", "UPSTREAM_ERROR", "AUTH_EXPIRED"]
+ERROR_CODES = ["RATE_LIMITED", "TIMEOUT", "UPSTREAM_ERROR", "AUTH_FAILED"]
 
 # 信源池：domain, media_name, media_type, owner_type, published_at_unknown
 # owner_type 只有 brand/competitor/media 三种（schema CHECK），品牌自有渠道记 brand。
