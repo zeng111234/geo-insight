@@ -34,8 +34,17 @@
 
 ## Phase 4: 后续（本期明确不做）
 
-- [ ] T019 真实渠道登录：扫码 / OAuth / Cookie 管理，替换 `pending_integration` 占位 per FR-016 (missing)
-- [ ] T020 真实发帖与失败重试、发布回调、回链自动回填 per FR-010 (missing)
+- [X] T019 真实渠道登录：扫码 / OAuth / Cookie 管理，替换 `pending_integration` 占位 per FR-016
+  **2026-11-24 完成（决策 011）**：渠道状态 = 真实登录态（seed 假「已连接」清零）；
+  CLI 发布器 `backend/src/geo/publishers/` + `scripts/*_publish.py`（搜狐/知乎/公众号走
+  Playwright + 持久化 profile，百家号走开放平台密钥）。应用内「连接」派生可见登录子进程
+  （扫码），「检测」跑无头浏览器落库；账密可选存 `data/channels.local.json`（自动填表，
+  验证码转人工）。连接/检测/发布全部接进 `/studio` 发布通道面板与 `/v1/channels` 系列接口。
+- [X] T020 真实发帖与失败处理 per FR-010
+  **2026-11-24 完成（决策 011）**：`POST /v1/articles/{id}/publish` 幂等入队（failed/
+  blocked/unknown 重置可重试）→ worker 线程跑 CLI publish → 结果映射 published /
+  draft_saved / blocked / failed / unknown，含 failure_reason 与回链；启动清扫遗留
+  running。**未做**：定时发布、失败自动重试、发布回调（仍按本 Phase 边界排除）。
 - [X] ~~T021 AI 生成正文与视频脚本、积分扣减~~ **取消（决策 003）**：不做成稿、不做积分；将来若做只允许「提纲建议」，需重新立规。
 - [ ] T022 文章新建/删除与模板管理，替换当前仅切换演示文章的芯片 per FR-002 (missing)
 

@@ -88,6 +88,13 @@ class TrackerDeleteTest(unittest.TestCase):
         response = self.client.post("/login", content=body, headers=FORM, follow_redirects=False)
         self.assertEqual(response.status_code, 303, response.text)
 
+    def csrf(self) -> str:
+        """登录时下发的双提交 token（geo_csrf 是非 HttpOnly 的，JS 读它放进请求头）。"""
+        return self.client.cookies.get(settings.csrf_cookie_name, "")
+
+    def delete(self, path: str):
+        return self.client.delete(path, headers={"X-CSRF-Token": self.csrf()})
+
     def count(self, table: str) -> int:
         with closing(db.connect()) as conn:
             return int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
@@ -105,7 +112,7 @@ class TrackerDeleteTest(unittest.TestCase):
         self.assertEqual(self.count("citation"), 1)
         self.assertEqual(self.count("question"), 1)
 
-        response = self.client.delete(f"/v1/trackers/{TRACKER}")
+        response = self.delete(f"/v1/trackers/{TRACKER}")
 
         self.assertEqual(response.status_code, 204, response.text)
         for table in CASCADE_TABLES:
@@ -113,12 +120,12 @@ class TrackerDeleteTest(unittest.TestCase):
         self.assertEqual(self.count("tracker"), 1, "只该删掉自己的，别家的不能动")
 
     def test_tracker_is_gone_after_delete(self):
-        self.client.delete(f"/v1/trackers/{TRACKER}")
+        self.delete(f"/v1/trackers/{TRACKER}")
 
         self.assertEqual(self.client.get(f"/v1/trackers/{TRACKER}").status_code, 404)
 
     def test_audit_records_how_much_was_deleted(self):
-        self.client.delete(f"/v1/trackers/{TRACKER}")
+        self.delete(f"/v1/trackers/{TRACKER}")
 
         [row] = self.audit_rows()
         self.assertEqual(row["action"], "tracker.delete")
@@ -132,20 +139,32 @@ class TrackerDeleteTest(unittest.TestCase):
     # --- 防护 ---
 
     def test_cannot_delete_another_tenants_tracker(self):
-        response = self.client.delete(f"/v1/trackers/{OTHER_TRACKER}")
+        response = self.delete(f"/v1/trackers/{OTHER_TRACKER}")
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(self.count("tracker"), 2, "跨租户删除必须一行都不动")
         self.assertEqual(self.audit_rows(), [], "没删成功就不该留下审计")
 
     def test_delete_unknown_tracker_is_404(self):
-        response = self.client.delete("/v1/trackers/t-does-not-exist")
+        response = self.delete("/v1/trackers/t-does-not-exist")
 
         self.assertEqual(response.status_code, 404)
 
+    def test_delete_without_csrf_token_is_rejected(self):
+        """删除是最危险的写接口，必须挡住没有 CSRF token 的请求。
+
+        这条守的不是「中间件存在」（那是 003 的测试），而是
+        「这个新接口确实被中间件覆盖到了」——漏挂一条路由就能绕过全局防护。
+        """
+        response = self.client.delete(f"/v1/trackers/{TRACKER}")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "CSRF_REJECTED")
+        self.assertEqual(self.count("tracker"), 2, "被拒的请求一行都不能动")
+
     def test_without_session_is_401(self):
         self.client.cookies.clear()
-        response = self.client.delete(f"/v1/trackers/{TRACKER}")
+        response = self.delete(f"/v1/trackers/{TRACKER}")
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(self.count("tracker"), 2)

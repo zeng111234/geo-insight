@@ -306,7 +306,8 @@ Task: "实现明细抽屉 in frontend/src/components/answer-drawer.tsx"
 
 ### 解析与口径
 
-- [ ] T087 实现提及识别与列表位次解析器：别名/错写匹配、有序列表序号、无列表判定，并接入黄金样本回归 per FR-013/FR-014 (missing) in `backend/src/geo/domain/mention_parser.py` （未做：mention 仍由 seed 写入，真实提及解析器依赖采集；首版不做）
+- [X] T087 实现提及识别与列表位次解析器：别名/错写匹配、有序列表序号、无列表判定，并接入黄金样本回归 per FR-013/FR-014 in `backend/src/geo/domain/mention_parser.py`
+  **2026-11-24 完成（003 US4 收编）**：精确/归一化匹配 + misspell 人工清单 + 有序列表行号解析；一键清空重跑走 `POST /v1/trackers/{id}/mentions/recompute`（服务层 `mention_service`，审计 `mention.recompute`）。30 条人工标注样本 P/R = 100%（FR-008 口径 ≥80%），黄金窗口 9 样本 2 提及在整库重跑后不变（`tests/integration/test_mentions.py`）。
 - [ ] T100 实现情感片段级聚合：按片段多数取值，平票按负面>中性>正面，保留全部片段 per FR-017 (partial) in `backend/src/geo/domain/metrics.py` （未做：情感按答案单值聚合，片段多数与平票规则未落实现有样本结构）
 - [X] T101 实现引用明细按 URL 去重（计数仍按出现次数累计）per FR-020 (partial) in `backend/src/geo/repositories/sqlite_repository.py` （已实现：/v1/trackers/{id}/citations 按 URL 去重、次数累计）
 

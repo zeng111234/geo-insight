@@ -328,7 +328,10 @@ def remove_competitor(
 
 def _question_set(conn: sqlite3.Connection, tracker_id: str, tenant_id: str, now: str) -> str:
     row = conn.execute(
-        "SELECT id FROM question_set WHERE tracker_id = ? ORDER BY created_at LIMIT 1", (tracker_id,)
+        """SELECT id FROM question_set WHERE tracker_id = ?
+           ORDER BY (id = (SELECT active_question_set_id FROM tracker WHERE id = ?)) DESC, created_at
+           LIMIT 1""",
+        (tracker_id, tracker_id),
     ).fetchone()
     if row:
         return row["id"]
@@ -348,6 +351,7 @@ def list_questions(conn: sqlite3.Connection, tracker_id: str) -> dict:
                (SELECT COUNT(*) FROM answer a WHERE a.question_id = q.id AND a.is_valid = 1) AS sample_total
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ?
+          AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         ORDER BY CASE q.tier WHEN 'core' THEN 0 ELSE 1 END, q.created_at
         """,
         (tracker_id,),
@@ -472,8 +476,10 @@ def failure_stats(
 # 删除监控对象
 # ---------------------------------------------------------------------------
 
-# 删除顺序从叶子到根。两张表会被两个父级同时引用，顺序错了会撞外键：
-# - run_item 引用 question，必须在 question 之前删；
+# 删除顺序从叶子到根。三处顺序错了会撞外键，都是实际踩过的：
+# - run_item / article 都引用 question，必须在 question 之前删；
+# - tracker.active_question_set_id（迁移 010）反过来引用 question_set，
+#   所以删问题集之前要先把 tracker 上的这个指针断开；
 # - answer 被 citation/mention/answer_block 引用，先删子表再删父表。
 _ANSWER_CHILDREN = ("citation", "mention", "answer_block")
 
@@ -515,6 +521,7 @@ def delete_tracker(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) ->
     )
     deleted["report_snapshot"] = cur.rowcount
 
+    # article 引用 question，必须先于 question 删
     cur = conn.execute(
         "DELETE FROM article_fact WHERE article_id IN "
         "(SELECT id FROM article WHERE tracker_id = ?)",
@@ -529,6 +536,15 @@ def delete_tracker(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) ->
     )
     deleted["run_item"] = cur.rowcount
 
+    for table in ("answer", "report", "article", "run"):
+        cur = conn.execute(f"DELETE FROM {table} WHERE tracker_id = ?", (tracker_id,))
+        deleted[table] = cur.rowcount
+
+    # 断开 tracker 指向问题集的指针（迁移 010 新增的列），否则下面删 question_set 会撞外键
+    conn.execute(
+        "UPDATE tracker SET active_question_set_id = NULL WHERE id = ?", (tracker_id,)
+    )
+
     cur = conn.execute(
         "DELETE FROM question WHERE question_set_id IN "
         "(SELECT id FROM question_set WHERE tracker_id = ?)",
@@ -536,7 +552,7 @@ def delete_tracker(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) ->
     )
     deleted["question"] = cur.rowcount
 
-    for table in ("answer", "report", "article", "run", "sampling_plan", "question_set"):
+    for table in ("question_set", "sampling_plan"):
         cur = conn.execute(f"DELETE FROM {table} WHERE tracker_id = ?", (tracker_id,))
         deleted[table] = cur.rowcount
 

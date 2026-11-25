@@ -24,6 +24,12 @@ def _filters(
         f"{alias}.tracker_id = ?",
         f"{alias}.is_valid = 1",
         f"{day_of(alias + '.collected_at')} BETWEEN ? AND ?",
+        # H2-6(003 FR-003):口径跟「当前生效问题集」走。相关子查询挂在
+        # {alias}.tracker_id 上(它已被上面的绑定参数约束),不新增参数,
+        # 全部指标查询一次接上;active 为 NULL 时集合为空(无集可依)
+        f"{alias}.question_id IN (SELECT q.id FROM question q "
+        f"WHERE q.question_set_id = (SELECT t.active_question_set_id FROM tracker t "
+        f"WHERE t.id = {alias}.tracker_id))",
     ]
     params: list[Any] = [tracker_id, start, end]
     if model:
@@ -68,6 +74,7 @@ def question_summary(conn: sqlite3.Connection, tracker_id: str) -> dict:
                SUM(CASE WHEN q.tier = 'long_tail' THEN 1 ELSE 0 END) AS long_tail
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         """,
         (tracker_id,),
     ).fetchone()
@@ -81,6 +88,7 @@ def active_question_texts(conn: sqlite3.Connection, tracker_id: str, limit: int 
         SELECT q.text
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         ORDER BY q.created_at, q.id
         LIMIT ?
         """,
@@ -109,6 +117,7 @@ def active_questions(conn: sqlite3.Connection, tracker_id: str) -> list[dict]:
         SELECT q.id, q.text, q.tier
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         ORDER BY q.tier, q.created_at, q.id
         """,
         (tracker_id,),
@@ -176,6 +185,7 @@ def overview_counts(
         SELECT COUNT(*) AS active_questions
         FROM question q JOIN question_set qs ON qs.id = q.question_set_id
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         """,
         (tracker_id,),
     ).fetchone()
@@ -280,8 +290,12 @@ def citation_summary(
     end: str,
     model: str | None,
     channel: str | None,
+    cite_type: str | None = None,
 ) -> dict:
     where, params = _filters(tracker_id, start, end, model, channel)
+    if cite_type:  # H2-7:合法值由 domain.citation.citation_type_filter 保证
+        where += " AND c.cite_type = ?"
+        params = [*params, cite_type]
     base = f"""
         FROM citation c JOIN answer a ON a.id = c.answer_id
         WHERE {where}
@@ -345,9 +359,11 @@ def citation_summary(
 def list_channels(conn: sqlite3.Connection, tenant_id: str) -> list[dict]:
     rows = conn.execute(
         """
-        SELECT id, platform_key, platform_name, account_name, status, login_mode, last_checked_at
+        SELECT id, platform_key, platform_name, account_name, status, login_mode,
+               last_checked_at, last_check_note
         FROM channel_account WHERE tenant_id = ?
-        ORDER BY CASE status WHEN 'connected' THEN 0 WHEN 'expired' THEN 1 ELSE 2 END, platform_name
+        ORDER BY CASE status WHEN 'connected' THEN 0 WHEN 'connecting' THEN 1
+                             WHEN 'expired' THEN 2 ELSE 3 END, platform_name
         """,
         (tenant_id,),
     ).fetchall()
@@ -357,15 +373,6 @@ def list_channels(conn: sqlite3.Connection, tenant_id: str) -> list[dict]:
 def get_channel(conn: sqlite3.Connection, channel_id: str) -> dict | None:
     row = conn.execute("SELECT * FROM channel_account WHERE id = ?", (channel_id,)).fetchone()
     return dict(row) if row else None
-
-
-def connect_channel(conn: sqlite3.Connection, channel_id: str, checked_at: str, login_mode: str = "demo") -> dict | None:
-    conn.execute(
-        "UPDATE channel_account SET status = 'connected', login_mode = ?, last_checked_at = ? WHERE id = ?",
-        (login_mode, checked_at, channel_id),
-    )
-    conn.commit()
-    return get_channel(conn, channel_id)
 
 
 def list_articles(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) -> list[dict]:
@@ -420,26 +427,129 @@ def update_article(conn: sqlite3.Connection, article_id: str, title: str, body: 
     return get_article(conn, article_id)
 
 
-def create_publications(conn: sqlite3.Connection, article_id: str, channels: list[dict], created_at: str) -> tuple[list[str], list[str]]:
-    """为「文章 × 渠道」建待发布记录；已存在的复用，不重复入队（FR-011）。"""
+def create_publications(
+    conn: sqlite3.Connection, article_id: str, channels: list[dict], created_at: str
+) -> tuple[list[str], list[str], list[str]]:
+    """为「文章 × 渠道」建待发布记录(FR-011 幂等 + 真实化的重试语义)。
+
+    返回 (created, requeued, existing):
+    - created   新建的 queued 记录,本轮要派发;
+    - requeued  上一轮跑到终态 failed/blocked/unknown 的记录被重置回 queued,
+                本轮要重新派发(重试同一行,不违反 UNIQUE(article_id, channel_id));
+    - existing  queued/running/published/draft_saved 的记录,不动也不重复派发。
+    """
     created: list[str] = []
+    requeued: list[str] = []
     existing: list[str] = []
     for ch in channels:
         row = conn.execute(
-            "SELECT id FROM publication WHERE article_id = ? AND channel_id = ?", (article_id, ch["id"])
+            "SELECT id, status FROM publication WHERE article_id = ? AND channel_id = ?",
+            (article_id, ch["id"]),
         ).fetchone()
-        if row:
+        if row is None:
+            pub_id = uuid.uuid4().hex
+            conn.execute(
+                """INSERT INTO publication(id, article_id, channel_id, status, created_at)
+                   VALUES (?, ?, ?, 'queued', ?)""",
+                (pub_id, article_id, ch["id"], created_at),
+            )
+            created.append(pub_id)
+        elif row["status"] in ("failed", "blocked", "unknown"):
+            # 重试:清掉上一轮的结果字段,回到 queued
+            conn.execute(
+                """UPDATE publication
+                   SET status = 'queued', published_url = NULL, published_at = NULL, failure_reason = NULL
+                   WHERE id = ?""",
+                (row["id"],),
+            )
+            requeued.append(row["id"])
+        else:
             existing.append(row["id"])
-            continue
-        pub_id = uuid.uuid4().hex
-        conn.execute(
-            """INSERT INTO publication(id, article_id, channel_id, status, created_at)
-               VALUES (?, ?, ?, 'queued', ?)""",
-            (pub_id, article_id, ch["id"], created_at),
-        )
-        created.append(pub_id)
     conn.commit()
-    return created, existing
+    return created, requeued, existing
+
+
+def update_channel_status(
+    conn: sqlite3.Connection,
+    channel_id: str,
+    status: str,
+    checked_at: str,
+    *,
+    login_mode: str | None = None,
+    note: str | None = None,
+) -> dict | None:
+    """真实检测/登录结果落库。login_mode 传 None 表示沿用原值(只改状态)。"""
+    if login_mode is None:
+        conn.execute(
+            "UPDATE channel_account SET status = ?, last_checked_at = ?, last_check_note = ? WHERE id = ?",
+            (status, checked_at, note, channel_id),
+        )
+    else:
+        conn.execute(
+            """UPDATE channel_account
+               SET status = ?, login_mode = ?, last_checked_at = ?, last_check_note = ? WHERE id = ?""",
+            (status, login_mode, checked_at, note, channel_id),
+        )
+    conn.commit()
+    return get_channel(conn, channel_id)
+
+
+def update_publication_status(
+    conn: sqlite3.Connection,
+    publication_id: str,
+    status: str,
+    *,
+    published_url: str | None = None,
+    failure_reason: str | None = None,
+    published_at: str | None = None,
+) -> None:
+    """发布 worker 回写结果。只改给定的字段,没给的不覆盖(避免把 URL 清空)。"""
+    conn.execute(
+        """UPDATE publication
+           SET status = ?,
+               published_url = COALESCE(?, published_url),
+               published_at = COALESCE(?, published_at),
+               failure_reason = ?
+           WHERE id = ?""",
+        (status, published_url, published_at, failure_reason, publication_id),
+    )
+    conn.commit()
+
+
+def sweep_stale_publications(conn: sqlite3.Connection, note: str) -> int:
+    """启动清扫:上一进程遗留的 running 记录标记为 failed(服务重启会杀掉 worker
+    线程,记录停在 running 就是说谎)。返回清扫条数。"""
+    cur = conn.execute(
+        "UPDATE publication SET status = 'failed', failure_reason = ? WHERE status = 'running'",
+        (note,),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+def sweep_stale_connecting(conn: sqlite3.Connection, note: str) -> int:
+    """启动清扫:connecting 渠道回 disconnected(登录监控线程随进程死了,
+    就算登录子进程还在跑,也没人把结果写回库)。返回清扫条数。"""
+    cur = conn.execute(
+        "UPDATE channel_account SET status = 'disconnected', last_check_note = ? WHERE status = 'connecting'",
+        (note,),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+def get_publication_channels(conn: sqlite3.Connection, pub_ids: list[str]) -> list[dict]:
+    """pub_id → 渠道映射(id/channel_id/platform_key),发布派发定位 worker 用。"""
+    if not pub_ids:
+        return []
+    marks = ",".join("?" * len(pub_ids))
+    rows = conn.execute(
+        f"""SELECT p.id, p.channel_id, c.platform_key
+            FROM publication p JOIN channel_account c ON c.id = p.channel_id
+            WHERE p.id IN ({marks})""",
+        pub_ids,
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def window_counts(conn: sqlite3.Connection, tracker_id: str, start: str, end: str) -> dict:
@@ -523,6 +633,7 @@ def coverage_rows(
         LEFT JOIN answer a ON {on_clause}
         LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         GROUP BY q.id
         ORDER BY q.text
         """,
@@ -613,6 +724,7 @@ def url_dedup_citations(
     limit: int = 100,
     offset: int = 0,
     media_type: str | None = None,
+    cite_type: str | None = None,
 ) -> dict:
     """FR-020：内容明细按 URL 去重，次数仍按出现次数累计。
 
@@ -623,6 +735,9 @@ def url_dedup_citations(
     if media_type:
         where += " AND c.media_type = ?"
         params = [*params, media_type]
+    if cite_type:  # H2-7:合法值由 domain.citation.citation_type_filter 保证
+        where += " AND c.cite_type = ?"
+        params = [*params, cite_type]
     totals = conn.execute(
         f"""
         SELECT COUNT(DISTINCT c.url) AS total_urls, COUNT(*) AS total_occurrences
@@ -775,6 +890,7 @@ def question_performance_rows(
               AND {day_of('a.collected_at')} BETWEEN ? AND ?
         LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
         WHERE qs.tracker_id = ? AND q.status = 'active'
+           AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         GROUP BY q.id, q.text, q.tier
         ORDER BY q.tier, q.created_at, q.id
         """,

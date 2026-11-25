@@ -193,13 +193,14 @@ if (location.protocol === "file:") {
       </div>
 
       <section class="panel">
-        <h2>发布通道 <span class="tag" style="margin-left:6px">展示态 · 未接入真实登录与发帖</span></h2>
+        <h2>发布通道 <span class="tag" style="margin-left:6px">真实发布 · 浏览器自动化</span></h2>
         <div class="body">
           <div class="channels" id="channels"></div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">
             <button id="publishBtn" class="primary">一键发布到已选渠道</button>
             <span class="hint" id="publishState" style="color:var(--muted);font-size:11.5px"></span>
           </div>
+          <div class="notice" style="margin-top:10px">「连接」会打开浏览器窗口扫码登录（登录态保存在本机）；「检测」会开一次无头浏览器验证登录是否还有效（约 10-15 秒）。发布走真实浏览器自动化，结果如实记录，失败会写明原因。</div>
         </div>
       </section>
 
@@ -220,8 +221,15 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 
 const VERDICT_TEXT = { confirmed: "已确认", pending: "待核实", rejected: "驳回" };
 const STATUS_TEXT = { draft: "草稿", review: "待审核", published: "已发布" };
-const CHANNEL_TEXT = { connected: "已连接", disconnected: "未连接", expired: "已过期" };
-const PUB_TEXT = { queued: "已入队", published: "已发布", failed: "失败" };
+// 决策 011:渠道状态是真实登录态,发布记录状态是真实结果
+const CHANNEL_TEXT = {
+  connected: "已连接", disconnected: "未连接", expired: "已过期",
+  connecting: "登录中…", needs_config: "待配置密钥", not_implemented: "未接入",
+};
+const PUB_TEXT = {
+  queued: "排队中", running: "发布中…", published: "已发布",
+  draft_saved: "已存草稿", blocked: "被平台拦", failed: "失败", unknown: "待人工确认",
+};
 
 const state = { articles: [], articleId: null, article: null, channels: [], impact: null, selected: new Set() };
 
@@ -234,7 +242,16 @@ function toast(msg, kind = "") {
   toastTimer = setTimeout(() => { el.className = "toast " + kind; }, 4200);
 }
 
+// CSRF 双提交:写请求带 X-CSRF-Token(geo_csrf 由登录下发,非 HttpOnly)
+function csrfToken() {
+  const m = document.cookie.match(/(?:^|;\s*)geo_csrf=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
 async function api(path, options) {
+  if (options && options.method && options.method !== "GET") {
+    options.headers = Object.assign({}, options.headers, { "X-CSRF-Token": csrfToken() });
+  }
   const res = await fetch(API + path, options);
   const text = await res.text();
   let data = null;
@@ -325,18 +342,33 @@ function renderFacts(a) {
 }
 
 /* ---------- 发布通道 ---------- */
+function channelSub(c) {
+  // 第二行文案:账号名 > 检测附注 > 上次检测时间
+  const bits = [];
+  if (c.account_name) bits.push(esc(c.account_name));
+  if (c.last_check_note) bits.push(esc(c.last_check_note));
+  if (c.last_checked_at) bits.push("检测于 " + esc(c.last_checked_at.slice(0, 16).replace("T", " ")));
+  return bits.join(" · ") || "未绑定账号";
+}
+
 function renderChannels() {
   $("channels").innerHTML = state.channels.map((c) => {
     const connected = c.status === "connected";
     const checked = state.selected.has(c.id) ? " checked" : "";
+    // 有真实发布器的渠道才有「连接/检测」;没有的只显示「未接入」
+    const hasPublisher = c.support === "browser" || c.support === "api";
+    const actions = ['<span class="state ' + esc(c.status) + '">' + (CHANNEL_TEXT[c.status] || esc(c.status)) + "</span>"];
+    if (hasPublisher) {
+      actions.push('<button data-check="' + c.id + '" title="开一次无头浏览器验证登录态(约 10-15 秒)">检测</button>');
+      if (c.support === "browser" && !connected && c.status !== "connecting") {
+        actions.push('<button data-connect="' + c.id + '">连接</button>');
+      }
+    }
     return '<div class="channel">' +
       '<input type="checkbox" data-id="' + c.id + '"' + checked + (connected ? "" : " disabled") + " />" +
       '<div><div class="name">' + esc(c.platform_name) + "</div>" +
-      '<div style="color:var(--muted);font-size:11px">' + esc(c.account_name || "未绑定账号") + "</div></div>" +
-      '<div class="actions">' +
-      '<span class="state ' + c.status + '">' + (CHANNEL_TEXT[c.status] || c.status) + "</span>" +
-      (connected ? "" : '<button data-connect="' + c.id + '">连接</button>') +
-      "</div></div>";
+      '<div style="color:var(--muted);font-size:11px">' + channelSub(c) + "</div></div>" +
+      '<div class="actions">' + actions.join("") + "</div></div>";
   }).join("");
 
   $("channels").querySelectorAll('input[type="checkbox"]').forEach((el) => {
@@ -348,18 +380,54 @@ function renderChannels() {
   $("channels").querySelectorAll("[data-connect]").forEach((el) => {
     el.addEventListener("click", () => connectChannel(el.dataset.connect, el));
   });
+  $("channels").querySelectorAll("[data-check]").forEach((el) => {
+    el.addEventListener("click", () => checkChannel(el.dataset.check, el));
+  });
 }
 
 async function connectChannel(id, btn) {
   btn.disabled = true;
   try {
     const res = await api("/channels/" + id + "/connect", { method: "POST" });
+    toast(res.platform_name + "：" + (res.note || "登录流程已启动"), "warn");
     await loadChannels();
-    toast(res.platform_name + " 已置为已连接。" + (res.note || ""), "warn");
+    // 扫码是分钟级交互:轮询等状态离开 connecting(最长 6 分钟)
+    pollChannelStatus(id);
   } catch (e) {
     toast("连接失败：" + e.message, "error");
   } finally {
     btn.disabled = false;
+  }
+}
+
+async function pollChannelStatus(id) {
+  const deadline = Date.now() + 6 * 60 * 1000;
+  const tick = async () => {
+    if (Date.now() > deadline) { await loadChannels(); return; }
+    await loadChannels();
+    const ch = state.channels.find((c) => c.id === id);
+    if (!ch || ch.status !== "connecting") return;  // 终态:渲染已就位
+    setTimeout(tick, 4000);
+  };
+  setTimeout(tick, 4000);
+}
+
+async function checkChannel(id, btn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "检测中…";
+  try {
+    const res = await api("/channels/" + id + "/check", { method: "POST" });
+    const ch = state.channels.find((c) => c.id === id);
+    if (ch) Object.assign(ch, res);
+    renderChannels();
+    toast((res.platform_name || "渠道") + "：" + (res.reachable ? "登录态有效 ✓" : "登录态失效") +
+      (res.last_check_note ? "（" + res.last_check_note + "）" : ""), res.reachable ? "" : "warn");
+  } catch (e) {
+    toast("检测失败：" + e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
   }
 }
 
@@ -368,14 +436,14 @@ function publicationTable() {
   const pubs = (state.article && state.article.publications) || [];
   if (!pubs.length) return "";
   const rows = pubs.map((p) =>
-    "<tr><td>" + esc(p.platform_name) + "</td><td>" + (PUB_TEXT[p.status] || p.status) + "</td><td>" +
+    "<tr><td>" + esc(p.platform_name) + "</td><td>" + (PUB_TEXT[p.status] || esc(p.status)) + "</td><td>" +
     esc((p.published_at || "").slice(0, 16).replace("T", " ") || "—") + "</td><td>" +
     (p.published_url ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链</a>' : "—") +
-    "</td></tr>"
+    "</td><td style=\"color:var(--red);font-size:11.5px\">" + esc(p.failure_reason || "") + "</td></tr>"
   ).join("");
   const th = (t) => '<th style="text-align:left;color:var(--muted);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">' + t + "</th>";
   return '<table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:12px">' +
-    "<thead><tr>" + th("渠道") + th("状态") + th("时间") + th("回链") + "</tr></thead>" +
+    "<thead><tr>" + th("渠道") + th("状态") + th("时间") + th("回链") + th("原因") + "</tr></thead>" +
     "<tbody>" + rows + "</tbody></table>";
 }
 
@@ -385,9 +453,12 @@ function renderImpact(data) {
   if (!data || data.status === "not_published") {
     $("impactMeta").textContent = "";
     if (pubs.length) {
-      box.innerHTML = '<div class="notice warn">已入队 ' + pubs.length +
-        " 条发布记录，但还没有真实发布（首版不接自动发帖）。真实发布后这里才会出现发布前后对比。</div>" +
-        publicationTable();
+      const pending = pubs.filter((p) => p.status === "queued" || p.status === "running").length;
+      box.innerHTML = '<div class="notice warn">' +
+        (pending
+          ? "有 " + pending + " 条发布正在执行（浏览器自动化，分钟级），完成后这里会出现发布前后对比。"
+          : "有发布记录，但还没有任何一条真实发布成功（blocked/failed 的记录看下方原因列）。") +
+        "</div>" + publicationTable();
     } else {
       box.innerHTML = '<div class="empty">该文章还没有发布记录，暂无对比数据。先在下面的发布通道里发起一次发布。</div>';
     }
@@ -503,19 +574,34 @@ $("publishBtn").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ channel_ids: Array.from(state.selected) }),
     });
-    toast("已写入发布队列：" + res.queued.map((q) => q.channel).join("、") +
-      (res.note ? "。" + res.note : ""), "warn");
+    toast("已发起发布：" + res.queued.map((q) => q.channel).join("、") + "。" + (res.note || ""), "warn");
     state.selected.clear();
     $("publishState").textContent = "";
     await selectArticle(state.articleId);
+    pollArticleUntilSettled();
   } catch (e) {
     const blocked = (e.payload && e.payload.blocked) || [];
-    const names = blocked.map((b) => b.channel || b.channel_id).join("、");
+    const names = blocked.map((b) => (b.channel || b.channel_id) + (b.reason ? "：" + b.reason : "")).join("；");
     toast("发布未发起：" + e.message + (names ? "（" + names + "）" : ""), "error");
   } finally {
     $("publishBtn").disabled = false;
   }
 });
+
+// 发布是分钟级异步(浏览器自动化):轮询文章详情,直到没有 queued/running 的记录
+async function pollArticleUntilSettled() {
+  const deadline = Date.now() + 12 * 60 * 1000;
+  const tick = async () => {
+    if (!state.articleId || Date.now() > deadline) return;
+    try {
+      await selectArticle(state.articleId);
+    } catch (e) { return; }
+    const pubs = (state.article && state.article.publications) || [];
+    const busy = pubs.some((p) => p.status === "queued" || p.status === "running");
+    if (busy) setTimeout(tick, 5000);
+  };
+  setTimeout(tick, 5000);
+}
 
 load();
 </script>

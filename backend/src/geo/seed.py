@@ -83,14 +83,17 @@ ART_QUEUED = "55555555-5555-5555-5555-555555555557"
 ART_DRAFT2 = "55555555-5555-5555-5555-555555555558"
 PUBLISHED_AT = "2026-11-04T10:00:00+08:00"
 
+# 2026-11-24 决策 011(第二批):全部 7 渠道都有发布器了,初始态统一为
+# 「未连接」(disconnected,登录态未知待检测)或「待配置密钥」(百家号)。
+# connected 只能来自真实检测/登录(POST /v1/channels/{id}/check 或 connect)。
 CHANNELS = [
-    ("66666666-6666-6666-6666-666666666661", "wechat", "微信公众号", "辽宁辽征律师事务所", "connected", "scan_qr"),
-    ("66666666-6666-6666-6666-666666666662", "zhihu", "知乎", "辽征律所 · 张律师", "connected", "oauth"),
-    ("66666666-6666-6666-6666-666666666663", "baijiahao", "百家号", None, "disconnected", None),
+    ("66666666-6666-6666-6666-666666666661", "wechat", "微信公众号", None, "disconnected", None),
+    ("66666666-6666-6666-6666-666666666662", "zhihu", "知乎", None, "disconnected", None),
+    ("66666666-6666-6666-6666-666666666663", "baijiahao", "百家号", None, "needs_config", None),
     ("66666666-6666-6666-6666-666666666664", "xiaohongshu", "小红书", None, "disconnected", None),
     ("66666666-6666-6666-6666-666666666665", "toutiao", "今日头条", None, "disconnected", None),
     ("66666666-6666-6666-6666-666666666666", "sohu", "搜狐号", None, "disconnected", None),
-    ("66666666-6666-6666-6666-666666666667", "douyin", "抖音", None, "expired", "scan_qr"),
+    ("66666666-6666-6666-6666-666666666667", "douyin", "抖音", None, "disconnected", None),
 ]
 
 
@@ -213,6 +216,9 @@ def seed() -> dict:
     db.init_db()
     # sqlite3 的 with 只提交事务不关连接，这里显式关闭，避免测试与 --reset 泄漏句柄。
     with closing(db.connect()) as conn:
+        # H2-6 之后 tracker ↔ question_set 互相引用(双向外键),顺序删除无解;
+        # 先把绑定解开再清表
+        conn.execute("UPDATE tracker SET active_question_set_id = NULL")
         for table in [
             "report_snapshot",
             "report",
@@ -292,9 +298,24 @@ def seed() -> dict:
             ),
         )
         conn.execute(
-            "INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at) VALUES (?, ?, ?, ?, ?)",
-            (QUESTION_SET, TENANT, TRACKER, "律所核心问题", now),
+            "INSERT INTO question_set(id, tenant_id, tracker_id, name, keywords, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (QUESTION_SET, TENANT, TRACKER, "律所核心问题",
+             json.dumps(["律所", "律师", "刑事辩护", "离婚", "劳动仲裁"], ensure_ascii=False), now),
         )
+        # H2-6:生效集指向主集(黄金窗口口径不变);再挂一个空答案的扩展集供切换演示
+        conn.execute("UPDATE tracker SET active_question_set_id = ? WHERE id = ?", (QUESTION_SET, TRACKER))
+        QUESTION_SET2 = "22222222-2222-2222-2222-222222222223"
+        conn.execute(
+            "INSERT INTO question_set(id, tenant_id, tracker_id, name, keywords, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (QUESTION_SET2, TENANT, TRACKER, "长尾扩展集",
+             json.dumps(["律所", "律师", "合同纠纷"], ensure_ascii=False), now),
+        )
+        for text in ("沈阳合同纠纷律师哪家好", "沈阳公司法务咨询收费"):
+            conn.execute(
+                """INSERT INTO question(id, tenant_id, question_set_id, text, normalized_text, tier, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, 'long_tail', 'active', ?)""",
+                (uid(), TENANT, QUESTION_SET2, text, text, now),
+            )
         for qid, text, tier in QUESTIONS:
             conn.execute(
                 """INSERT INTO question(id, tenant_id, question_set_id, text, normalized_text, tier, status, created_at)
@@ -697,7 +718,8 @@ def seed_studio(conn) -> None:
             """INSERT INTO channel_account
                (id, tenant_id, platform_key, platform_name, account_name, status, login_mode, last_checked_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (cid, TENANT, key, name, account, status, mode, now if status != "disconnected" else None),
+            # last_checked_at 只在 connected 时有意义;初始诚实态从未检测过
+            (cid, TENANT, key, name, account, status, mode, now if status == "connected" else None),
         )
 
     articles = [
@@ -986,9 +1008,11 @@ def seed_alt_tracker(conn) -> dict:
         ),
     )
     conn.execute(
-        "INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at) VALUES (?, ?, ?, ?, ?)",
-        (QSET2, TENANT, TRACKER2, "教培核心问题", now),
+        "INSERT INTO question_set(id, tenant_id, tracker_id, name, keywords, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (QSET2, TENANT, TRACKER2, "教培核心问题",
+         json.dumps(["幼儿园", "幼小衔接", "入园", "学前教育"], ensure_ascii=False), now),
     )
+    conn.execute("UPDATE tracker SET active_question_set_id = ? WHERE id = ?", (QSET2, TRACKER2))
     for qid, text, tier in ALT_QUESTIONS:
         conn.execute(
             """INSERT INTO question(id, tenant_id, question_set_id, text, normalized_text, tier, status, created_at)

@@ -30,6 +30,12 @@
       <select id="tracker" aria-label="监控对象"></select>
       <input id="from" type="date" value="2026-11-01" aria-label="开始日期" />
       <input id="to" type="date" value="2026-11-30" aria-label="结束日期" />
+      <select id="citeType" aria-label="引用类型">
+        <option value="">引用类型：全部</option>
+        <option value="inline">正文内链</option>
+        <option value="reference">参考资料</option>
+        <option value="video">视频引用</option>
+      </select>
       <button id="load" class="primary">查询</button>
     </header>
     <div class="content">
@@ -77,8 +83,13 @@
   async function loadUrls() {
     var t = G.tracker(); if (!t) return;
     var st = G.pagerInit("urls", loadUrls);
+    // H2-7:筛选变化即回第 1 页(类型变化改变总数,旧页码可能越界)
+    if (window.__lastCiteType !== undefined && window.__lastCiteType !== $("citeType").value) {
+      window.__lastCiteType = $("citeType").value; st.page = 1;
+    } else { window.__lastCiteType = $("citeType").value; }
     try {
-      var detail = await G.get("/trackers/" + t + "/citations?" + G.dates() +
+      var typeQ = $("citeType").value ? "&citeType=" + $("citeType").value : "";
+      var detail = await G.get("/trackers/" + t + "/citations?" + G.dates() + typeQ +
         "&limit=" + URL_PAGE_SIZE + "&page=" + st.page);
       var items = detail.items || [];
       var total = detail.total_urls || 0;
@@ -102,7 +113,7 @@
   async function load() {
     var t = G.tracker(); if (!t) return;
     G.pagerReset("urls");
-    var q = G.dates();
+    var q = G.dates() + ($("citeType").value ? "&citeType=" + $("citeType").value : "");
     try {
       var sum = await G.get("/trackers/" + t + "/citations/summary?" + q);
       $("stats").innerHTML =

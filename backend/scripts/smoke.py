@@ -101,6 +101,10 @@ def patch(path: str, payload: dict) -> tuple[int, dict]:
     return _request(path, payload, "PATCH")
 
 
+def patch(path: str, payload: dict) -> tuple[int, dict]:
+    return _request(path, payload, "PATCH")
+
+
 def delete(path: str) -> int:
     req = urllib.request.Request(BASE + path, method="DELETE")
     try:
@@ -110,12 +114,23 @@ def delete(path: str) -> int:
         return exc.code
 
 
+def _csrf_token() -> str:
+    """登录后服务端下发的 geo_csrf(写接口的 X-CSRF-Token 头)。"""
+    for c in _COOKIES:
+        if c.name == "geo_csrf":
+            return c.value
+    return ""
+
+
 def _request(path: str, payload: dict, method: str) -> tuple[int, dict]:
+    headers = {"Content-Type": "application/json"}
+    if method != "GET":
+        headers["X-CSRF-Token"] = _csrf_token()
     req = urllib.request.Request(
         BASE + path,
         data=json.dumps(payload).encode("utf-8"),
         method=method,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -162,8 +177,21 @@ def main() -> None:
     env["PYTHONPATH"] = str(ROOT / "src")
     # 显式指定密码，不依赖默认值：seed 与 uvicorn 用同一份环境，登录才对得上
     env["GEO_ADMIN_PASSWORD"] = ADMIN_PASSWORD
+    # 发布通道真实化(决策 011):冒烟里不开 worker,发布走「纯入队」,
+    # 否则 uvicorn 子进程会真的去起浏览器自动化
+    env["GEO_PUBLISH_WORKER"] = "0"
 
     subprocess.run([sys.executable, "-m", "geo.seed"], cwd=ROOT, env=env, check=True, capture_output=True)
+    # 冒烟要验发布链路,需要一个 connected 渠道;决策 011 后 seed 不再给假
+    # 「已连接」,这里直接在临时库里把 wechat 摆成 connected(测试布置,不是假 UI 数据)
+    import sqlite3
+
+    with sqlite3.connect(DB) as conn:
+        conn.execute(
+            """UPDATE channel_account SET status = 'connected', login_mode = 'browser',
+                                     last_checked_at = '2026-11-24T12:00:00+08:00'
+               WHERE platform_key = 'wechat'"""
+        )
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "geo.api.app:app", "--port", str(PORT), "--log-level", "warning"],
         cwd=ROOT,
@@ -197,6 +225,31 @@ def main() -> None:
         status, location = post_form("/login", {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
         check("正确密码登录成功", status == 303 and location == "/", (status, location))
         check("登录后拿到 session cookie", any(c.name == "geo_session" for c in _COOKIES), list(_COOKIES))
+        # CSRF(003 FR-005):登录同时下发非 HttpOnly 的 geo_csrf;写请求不带
+        # X-CSRF-Token 必须 403——SameSite=None 场景下第三方页面的写请求没有这个头
+        check("登录后下发 csrf cookie", any(c.name == "geo_csrf" for c in _COOKIES), list(_COOKIES))
+        csrf = _csrf_token()
+        no_token_req = urllib.request.Request(
+            BASE + "/logout", data=b"", method="POST"
+        )
+        try:
+            with urllib.request.urlopen(no_token_req, timeout=5) as resp:
+                no_token_status = resp.status
+        except urllib.error.HTTPError as exc:
+            no_token_status = exc.code
+        check("写请求缺 CSRF token 被 403", no_token_status == 403, no_token_status)
+        with_token_req = urllib.request.Request(
+            BASE + "/logout", data=b"", method="POST", headers={"X-CSRF-Token": csrf}
+        )
+        try:
+            with _NO_REDIRECT.open(with_token_req, timeout=5) as resp:
+                with_token_status, with_token_loc = resp.status, resp.headers.get("location", "")
+        except urllib.error.HTTPError as exc:
+            with_token_status, with_token_loc = exc.code, exc.headers.get("location", "")
+        check("带 token 的写请求放行(logout 303)", with_token_status == 303, (with_token_status, with_token_loc))
+        # logout 之后重新登录,后续断言继续用会话
+        status, location = post_form("/login", {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+        check("csrf 验证后重新登录", status == 303 and location == "/", (status, location))
 
         status, body = get("/v1/trackers")
         check("tracker list", status == 200 and len(body["items"]) == 2, body)
@@ -384,7 +437,31 @@ def main() -> None:
         check("7 channels seeded", status == 200 and len(channels) == 7, {"count": len(channels)})
         connected = [c for c in channels if c["status"] == "connected"]
         disconnected = [c for c in channels if c["status"] != "connected"]
-        check("2 channels connected", len(connected) == 2, connected)
+        # 决策 011:seed 不再有假「已连接」;诚实初始态 = wechat(冒烟布置)+ 3 个浏览器渠道
+        # 之外的 needs_config / not_implemented。字段 last_check_note 必须在(前端显示检测附注)。
+        check("honest channel states (no fake connected)",
+              len(connected) == 1 and connected[0]["platform_key"] == "wechat",
+              [c["platform_key"] + ":" + c["status"] for c in channels])
+        by_key = {c["platform_key"]: c for c in channels}
+        check("baijiahao needs_config", by_key["baijiahao"]["status"] == "needs_config", by_key["baijiahao"])
+        # 决策 011 第二批:三渠道发布器上线,初始态 disconnected(不再是 not_implemented)
+        check("xhs/toutiao/douyin have publishers (disconnected)",
+              all(by_key[k]["status"] == "disconnected" for k in ("xiaohongshu", "toutiao", "douyin")),
+              {k: by_key[k]["status"] for k in ("xiaohongshu", "toutiao", "douyin")})
+        check("channels expose last_check_note", all("last_check_note" in c for c in channels), channels[:1])
+
+        # 决策 011 第二批:7 渠道全部有发布器(不再有 not_implemented)
+        check("all seven channels have publishers",
+              all(c.get("support") in ("browser", "api") for c in channels),
+              [c["platform_key"] for c in channels if c.get("support") not in ("browser", "api")])
+        # 测试模式(worker=0)下 connect 不派登录子进程,如实回 skipped
+        status, body = post(f"/v1/channels/{by_key['xiaohongshu']['id']}/connect", {})
+        check("connect skipped in smoke mode (no login subprocess)",
+              status == 202 and body["status"] == "skipped", body)
+        status, body = post(f"/v1/channels/{by_key['baijiahao']['id']}/connect", {})
+        check("connect baijiahao points to key config",
+              status == 400 and body["code"] == "NEEDS_CONFIG" and "baijiahao.local.json" in body["message"],
+              body)
 
         status, body = get(f"/v1/trackers/{TRACKER}/articles")
         check("8 articles seeded", status == 200 and len(body["items"]) == 8, body)
@@ -407,6 +484,8 @@ def main() -> None:
 
         status, body = post(f"/v1/articles/{ART_DRAFT}/publish", {"channel_ids": [connected[0]["id"]]})
         check("publish queues one channel", status == 202 and len(body["queued"]) == 1, body)
+        check("publish is real integration (worker off in smoke)",
+              body.get("integration") == "real" and body.get("worker") is False, body)
 
         status, body = post(f"/v1/articles/{ART_DRAFT}/publish", {"channel_ids": [connected[0]["id"]]})
         check(
@@ -414,6 +493,41 @@ def main() -> None:
             status == 202 and body["created"] == [] and len(body["existing"]) == 1,
             body,
         )
+
+        # ---- H2-6/H2-7 收尾(003 US2) ----
+        qsets = get(f"/v1/trackers/{TRACKER}/question-sets")[1]["items"]
+        check("two question sets seeded", len([s for s in qsets if s["name"] in ("律所核心问题", "长尾扩展集")]) == 2, qsets)
+        extra = next(s for s in qsets if s["name"] == "长尾扩展集")
+        main_set_id = next(s for s in qsets if s["name"] == "律所核心问题")["id"]
+        status, body = patch(f"/v1/trackers/{TRACKER}", {"active_question_set_id": extra["id"]})
+        check("switch question set accepted", status == 200, body)
+        status, body = get(f"/v1/trackers/{TRACKER}/questions")
+        check("questions follow active set (12 -> 2)", len(body["items"]) == 2, body["summary"])
+        status, body = get(f"/v1/trackers/{TRACKER}/metrics/overview?from=2026-11-01&to=2026-11-03")
+        check("metrics follow active set (9 -> 0 samples)", body["valid_total"] == 0, body["valid_total"])
+        # 切回主集:黄金窗口分毫不动(这是 H2-6 的硬验收)
+        status, body = patch(f"/v1/trackers/{TRACKER}", {"active_question_set_id": main_set_id})
+        check("switch back to main set", status == 200, body)
+        status, body = get(f"/v1/trackers/{TRACKER}/metrics/overview?from=2026-11-01&to=2026-11-03")
+        check("golden window restored after switch back", body["valid_total"] == 9, body["valid_total"])
+        status, body = get(f"/v1/articles/{ART_PUBLISHED}/impact")
+        check("golden impact 22.22% after switch back", body["before"]["mention_rate"]["value"] == 0.2222, body["before"])
+
+        # H2-7:引用类型筛选的条数与手工 SQL 对拍
+        import sqlite3 as _sq
+
+        with _sq.connect(DB) as _c:
+            _inline = _c.execute(
+                "SELECT COUNT(*) FROM citation c JOIN answer a ON a.id=c.answer_id "
+                "WHERE a.tracker_id = ? AND a.is_valid = 1 AND c.cite_type = 'inline'",
+                (TRACKER,),
+            ).fetchone()[0]
+        status, body = get(f"/v1/trackers/{TRACKER}/citations?from=2026-11-01&to=2026-11-30&citeType=inline&limit=1")
+        check("citation inline filter matches manual SQL",
+              status == 200 and body["total_occurrences"] == _inline,
+              {"api": body.get("total_occurrences"), "sql": _inline})
+        status, body = get(f"/v1/trackers/{TRACKER}/citations?from=2026-11-01&to=2026-11-30&citeType=bogus")
+        check("invalid citeType is 400", status == 400 and "citeType" in body["message"], body)
 
         # ---- 001 配置面 / 下钻 / 报告 ----
         status, ctype, html = get_html("/settings")

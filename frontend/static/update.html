@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<script src="/static/app.js"></script>
+<title>GEO Insight · 系统更新</title>
+<style>
+  .upd-kv { display: flex; gap: 8px; align-items: baseline; margin: 6px 0; }
+  .upd-kv .k { color: var(--muted); min-width: 88px; }
+  .upd-notes { white-space: pre-wrap; background: var(--subtle); border: 1px solid var(--border);
+               border-radius: 8px; padding: 10px 12px; margin-top: 8px; }
+  .upd-progress { margin-top: 10px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <main>
+    <header class="top">
+      <h1>系统更新</h1>
+      <span class="sub">检查更新源、一键升级；数据与本地配置不受影响</span>
+    </header>
+    <div class="content">
+      <div class="panel">
+        <h2>当前状态 <span class="badge" id="verBadge">…</span></h2>
+        <div class="upd-kv"><span class="k">当前版本</span><span id="curVersion">…</span></div>
+        <div class="upd-kv"><span class="k">更新源</span><span id="curSource" style="word-break:break-all">…</span></div>
+        <div class="body" id="checkResult" style="margin-top:10px"></div>
+        <div class="upd-kv" style="margin-top:14px">
+          <span class="k">更新源 URL</span>
+          <input id="sourceInput" placeholder="https://gitee.com/<你>/geo-updates/raw/master/update.json" style="flex:1" />
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap">
+          <button id="saveSource" class="btn">保存更新源</button>
+          <button id="check" class="primary">检查更新</button>
+          <button id="apply" class="primary" hidden>一键更新</button>
+        </div>
+        <div class="upd-progress" id="progress" hidden>更新应用中，服务将自动重启…</div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+(function () {
+  var G = window.GEO, $ = G.$, esc = G.esc;
+  var latest = null;
+
+  function failBox(msg) {
+    return '<div class="notice">' + esc(msg) + '</div>';
+  }
+
+  function renderCheck(r) {
+    $("curVersion").textContent = r.current || "（未知）";
+    $("curSource").textContent = r.has_source ? r.source_url : "未配置";
+    $("sourceInput").value = r.source_url || "";
+    $("verBadge").textContent = "v" + (r.current || "?");
+    var box = $("checkResult");
+    if (r.error) { box.innerHTML = failBox("检查失败：" + r.error); return; }
+    if (!r.has_source) {
+      box.innerHTML = failBox("还没配置更新源：把 update.json 的 raw 地址填到上面并保存。");
+      return;
+    }
+    if (!r.has_update) {
+      box.innerHTML = '<div class="notice">已是最新版本 v' + esc(r.current) + "（远端 v" + esc(r.latest) + "）</div>";
+      $("apply").hidden = true;
+      return;
+    }
+    latest = r;
+    $("apply").hidden = false;
+    var html = '<div class="notice"><strong>有新版本 v' + esc(r.latest) + "</strong>（当前 v" + esc(r.current) + "）</div>";
+    if (r.notes) html += '<div class="upd-notes">' + esc(r.notes) + "</div>";
+    if (r.published_at) html += '<div class="upd-kv"><span class="k">发布时间</span><span>' + esc(r.published_at) + "</span></div>";
+    box.innerHTML = html;
+  }
+
+  function loadStatus() {
+    G.get("/v1/system/update/status").then(renderCheck).catch(function (e) { G.fail(e); });
+  }
+
+  $("saveSource").addEventListener("click", function () {
+    var url = $("sourceInput").value.trim();
+    if (!url) { G.toast("先填更新源 URL", "warn"); return; }
+    G.post("/v1/system/update/source", { source_url: url }).then(function () {
+      G.toast("更新源已保存");
+      G.post("/v1/system/update/check").then(renderCheck).catch(function (e) { G.fail(e); });
+    }).catch(function (e) { G.fail(e); });
+  });
+
+  $("check").addEventListener("click", function () {
+    $("checkResult").innerHTML = '<div class="empty">检查中…</div>';
+    G.post("/v1/system/update/check").then(renderCheck).catch(function (e) { G.fail(e); });
+  });
+
+  $("apply").addEventListener("click", function () {
+    if (!latest) return;
+    if (!window.confirm("确认更新到 v" + latest.latest + "？\n服务会自动重启，数据不受影响。")) return;
+    $("progress").hidden = false;
+    $("apply").disabled = true;
+    G.post("/v1/system/update/apply").then(function (r) {
+      G.toast("已开始应用 v" + r.version + "，等待服务重启…");
+      waitForRestart(r.restart_seconds || 10);
+    }).catch(function (e) {
+      $("progress").hidden = true;
+      $("apply").disabled = false;
+      G.fail(e);
+    });
+  });
+
+  function waitForRestart(seconds) {
+    var deadline = Date.now() + (seconds + 30) * 1000;
+    (function poll() {
+      fetch("/health").then(function (res) {
+        if (!res.ok) throw new Error("not ok");
+        return res.json();
+      }).then(function () {
+        // 服务回来了——停 1 秒让它完成启动收尾，然后整页刷新看新版本
+        setTimeout(function () { window.location.reload(); }, 1000);
+      }).catch(function () {
+        if (Date.now() < deadline) setTimeout(poll, 2000);
+        else $("progress").textContent = "等了很久服务还没回来：看服务窗口有没有报错，或手动双击 start-team.bat。";
+      });
+    })();
+  }
+
+  loadStatus();
+})();
+</script>
+</body>
+</html>

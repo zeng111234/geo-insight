@@ -106,8 +106,18 @@ def render_sidebar(active: str) -> str:
     from geo.settings import settings
 
     if settings.auth_required:
+        # logout 也要过 CSRF(写接口):纯 form POST 带不了请求头,改内联 fetch
+        # 从 geo_csrf cookie 取 token 提交,成功后跳登录页
+        logout_js = (
+            "event.preventDefault();"
+            "var m=document.cookie.match(/(?:^|;\\s*)geo_csrf=([^;]+)/);"
+            "fetch('/logout',{method:'POST',"
+            "headers:{'X-CSRF-Token':m?decodeURIComponent(m[1]):''}})"
+            ".then(function(){location.href='/login'});return false;"
+        )
         foot.append(
-            '<form method="post" action="/logout" class="side-logout">'
+            '<form method="post" action="/logout" class="side-logout" '
+            f'onsubmit="{logout_js}">'
             '<button class="ghost small" type="submit">退出登录</button></form>'
         )
     foot.append("</div>")
@@ -165,7 +175,7 @@ def render_page(static_dir: Path | None, name: str, active: str):
     return HTMLResponse(inject_footer(inject_sidebar(html, active)))
 
 
-def render_login(static_dir: Path | None, next_url: str, email: str, error: bool):
+def render_login(static_dir: Path | None, next_url: str, email: str, error: bool, cooldown: int = 0):
     """登录页：不套侧栏与页脚——没登录的人不该看到导航。"""
     from starlette.responses import HTMLResponse, JSONResponse
 
@@ -175,7 +185,15 @@ def render_login(static_dir: Path | None, next_url: str, email: str, error: bool
             status_code=404,
         )
     html = (static_dir / "login.html").read_text(encoding="utf-8")
-    message = '<p class="login-error">邮箱或密码不正确</p>' if error else ""
+    if error == "locked":
+        message = (
+            '<p class="login-error">连续失败次数过多，已锁定 ' + str(cooldown)
+            + ' 秒；锁定期内正确密码也无法登录，请稍后再试</p>'
+        )
+    elif error:
+        message = '<p class="login-error">邮箱或密码不正确</p>'
+    else:
+        message = ""
     return HTMLResponse(
         html.replace("{{error}}", message)
         .replace("{{next}}", escape(next_url, quote=True))

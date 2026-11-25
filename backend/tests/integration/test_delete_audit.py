@@ -74,6 +74,8 @@ class DeleteAuditTest(unittest.TestCase):
     def login(self):
         body = f"email={settings.admin_email}&password={settings.admin_password}"
         response = self.client.post("/login", content=body, headers=FORM, follow_redirects=False)
+        # CSRF:写请求(DELETE/POST/PATCH)一律带登录下发的 geo_csrf
+        self.client.headers.update({"X-CSRF-Token": self.client.cookies.get("geo_csrf", "")})
         self.assertEqual(response.status_code, 303, response.text)
 
     def audit_rows(self):

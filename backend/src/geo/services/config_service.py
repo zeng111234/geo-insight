@@ -114,8 +114,10 @@ def tracker_detail(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) ->
     tracker = repo.get_tracker(conn, tracker_id, tenant_id)
     if not tracker:
         return None
-    # 存的是 JSON 字符串，出参统一成数组，前端直接用
-    tracker["keywords"] = relevance.parse_keywords(tracker.get("keywords"))
+    # H2-6:核心词属于生效问题集(出参统一成数组,前端直接用)
+    from geo.services import tracker_service
+
+    tracker["keywords"] = tracker_service.active_keywords(conn, tracker_id)
     tracker["question_summary"] = repo.question_summary(conn, tracker_id)
     profile = config.get_brand_profile(conn, tracker_id, tenant_id) or {}
     tracker["brand"] = {

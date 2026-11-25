@@ -67,7 +67,7 @@ if (location.protocol === "file:") {
               <label class="field" style="flex:1"><span>行业</span><input id="industry" type="text" /></label>
               <label class="field" style="flex:1"><span>地区</span><input id="region" type="text" /></label>
             </div>
-            <label class="field"><span>核心词</span>
+            <label class="field"><span>核心词（当前生效问题集）</span>
               <input id="keywords" type="text" placeholder="逗号分隔，例：律所，刑事辩护，离婚" /></label>
             <div class="muted" style="font-size:11px;margin:-4px 0 10px">
               用于判断答案是否跑题：正文一个核心词都没出现时，问答明细里标「疑似跑题」。
@@ -104,6 +104,15 @@ if (location.protocol === "file:") {
         <section class="panel">
           <h2>问题集 <span class="badge" id="qSummary"></span></h2>
           <div class="body">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+              <select id="qsetSelect" aria-label="问题集" style="min-width:200px"></select>
+              <button id="qsetSwitch">切换到此集</button>
+              <button id="qsetNew">新建问题集</button>
+              <span class="muted" id="qsetHint" style="font-size:11px"></span>
+            </div>
+            <div class="muted" style="font-size:11px;margin-bottom:10px">
+              指标口径、问题列表、核心词与跑题判定都跟随「当前生效问题集」；导入的问题进入当前生效集。
+            </div>
             <label class="field"><span>批量导入（每行一条，* 开头标为核心问题）</span>
               <textarea id="importText" rows="8" placeholder="* 沈阳哪一家律所最专业&#10;沈阳刑事辩护律师大概需要多少费用&#10;沈阳交通事故律师怎么收费"></textarea>
             </label>
@@ -300,6 +309,39 @@ function renderQuestionHint(summary) {
     : "";
 }
 
+async function loadQsets() {
+  const data = await api(`/trackers/${state.tracker}/question-sets`);
+  const items = data.items || [];
+  $("qsetSelect").innerHTML = items.length
+    ? items.map((s) => `<option value="${s.id}"${s.active ? " selected" : ""}>` +
+        esc(s.name) + `（${s.question_total} 题 · 核心词 ${s.keywords.length} 个）${s.active ? " · 生效中" : ""}</option>`).join("")
+    : '<option value="">还没有问题集</option>';
+  const active = items.find((s) => s.active);
+  $("qsetHint").textContent = active
+    ? `当前生效：${active.name}；切换后指标口径与核心词立即跟随`
+    : "该对象还没有生效问题集";
+}
+
+async function switchQset() {
+  const id = $("qsetSelect").value;
+  if (!id) { toast("请先选择问题集"); return; }
+  try {
+    await api(`/trackers/${state.tracker}`, { method: "PATCH", body: JSON.stringify({ active_question_set_id: id }) });
+    toast("已切换问题集，问题列表、指标口径与核心词已跟随");
+    await Promise.all([loadQsets(), loadQuestions(), loadDetail(await api(`/trackers/${state.tracker}`))]);
+  } catch (e) { toast("切换失败：" + e.message, "error"); }
+}
+
+async function newQset() {
+  const name = window.prompt("新问题集名称：", "");
+  if (!name || !name.trim()) return;
+  try {
+    await api(`/trackers/${state.tracker}/question-sets`, { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+    toast(`已创建「${name.trim()}」；切换过去后导入的问题会进入这个集`);
+    await loadQsets();
+  } catch (e) { toast("创建失败：" + e.message, "error"); }
+}
+
 async function loadQuestions() {
   const data = await api(`/trackers/${state.tracker}/questions`);
   renderQuestionHint(data.summary);
@@ -395,6 +437,8 @@ $("aliases").addEventListener("click", async (e) => {
 });
 
 $("importBtn").addEventListener("click", async () => {
+$("qsetSwitch").addEventListener("click", switchQset);
+$("qsetNew").addEventListener("click", newQset);
   const text = $("importText").value;
   if (!text.trim()) { toast("先粘贴要导入的问题", "warn"); return; }
   $("importBtn").disabled = true;

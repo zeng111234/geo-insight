@@ -21,3 +21,20 @@ Thumbs.db
 
 # WorkBuddy 应用卡（工具生成，含本机绝对路径，可再生）
 .wbapp_*.genie
+
+# 渠道密钥与浏览器登录态（本地私有，绝不入库）
+# .browser-profiles/ 不带路径前缀：实际位置在 backend/src/ 下（与 sohu 现存
+# 登录态一致），写死 backend/ 前缀会漏掉，登录 cookie 有被提交的风险
+backend/data/*.local.json
+# start-team.bat 的共享密码文件（批处理 call 用，非 JSON）
+backend/data/team.local.bat
+# backup-team.bat 的整库快照（同事机器上的运行时产物）
+backend/backups/
+.browser-profiles/
+
+# Reasonix 会话状态
+.reasonix/
+
+# ZCode 会话状态与发布 draft 运行产物(可再生)
+.zcode/
+backend/data/publish_drafts/
