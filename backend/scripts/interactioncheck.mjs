@@ -161,6 +161,21 @@ try {
   })`);
   check(resumed.btn === "暂停" && resumed.tag === "监控中", "恢复生效", `${resumed.btn}/${resumed.tag}`);
 
+  // 7. 新建抽屉：点「＋ 新建」打开右侧抽屉，字段齐全
+  await evaluate(`document.getElementById('newTracker').click()`);
+  await sleep(300);
+  check(await evaluate(`document.getElementById('newDrawer').open`) === true, "点新建打开右侧抽屉");
+  const fields = await evaluate(`
+    ['ntName','ntBrand','ntIndustry','ntRegion','ntAliases','ntCompetitors']
+      .map(function (i) { return !!document.getElementById(i); })
+  `);
+  check(fields.every(Boolean), "抽屉字段齐全（名称/品牌/行业/地区/别名/竞品）", fields.join(","));
+
+  // 8. 取消关闭抽屉，不新建对象
+  await evaluate(`document.getElementById('ntCancel').click()`);
+  await sleep(200);
+  check(await evaluate(`!document.getElementById('newDrawer').open`) === true, "取消关闭抽屉");
+
   check(errors.length === 0, "全程无 JS 异常", errors.join("; "));
 
   const failed = results.filter((x) => !x).length;
