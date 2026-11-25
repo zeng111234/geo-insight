@@ -9,7 +9,7 @@
 <style>
   .report-head { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
   .report-head h2 { margin: 0 0 4px; font-size: 19px; color: var(--text-strong); }
-  .report-head .meta { color: var(--muted); font-size: 11.5px; line-height: 1.8; }
+  .report-head .meta { color: var(--muted); font-size: var(--fs-label); line-height: 1.8; }
   .conclusion { display: flex; gap: 9px; padding: 7px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; line-height: 1.7; }
   .conclusion:last-child { border-bottom: none; }
   .conclusion .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; flex: none; background: var(--accent); }
@@ -17,10 +17,10 @@
   .conclusion.risk .dot { background: var(--red); }
   .cmp { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .cmp .cell { border: 1px solid var(--border); border-radius: 8px; padding: 11px 13px; background: var(--subtle); }
-  .cmp .k { color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+  .cmp .k { color: var(--muted); font-size: var(--fs-caption); margin-bottom: 5px; }
   .cmp .v { font-size: 20px; font-weight: 600; color: var(--text-strong); }
-  .cmp .s { color: var(--muted); font-size: 11px; margin-top: 4px; }
-  .sign { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; line-height: 1.9; }
+  .cmp .s { color: var(--muted); font-size: var(--fs-caption); margin-top: 4px; }
+  .sign { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: var(--fs-caption); line-height: 1.9; }
 </style>
 </head>
 <body>

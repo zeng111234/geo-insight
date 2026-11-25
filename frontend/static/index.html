@@ -243,7 +243,7 @@ function renderCitations(c, detail) {
   ).join("");
   const urls = detail && detail.items ? detail.items.slice(0, 6).map((u) =>
     `<tr><td><a class="plain" href="${esc(u.url)}" target="_blank" rel="noreferrer">${esc(u.media_name || u.domain || u.url)}</a>
-       <div class="muted mono" style="font-size:11px">${esc(u.domain || "")}</div></td>
+       <div class="muted mono" style="font-size: var(--fs-caption)">${esc(u.domain || "")}</div></td>
      <td><span class="tag">${esc(u.media_type || "未知")}</span></td>
      <td class="num">${u.times}</td><td class="num">${esc((u.first_seen || "").slice(0, 10))}</td></tr>`
   ).join("") : "";

@@ -11,7 +11,7 @@
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-    font-size: 13px;
+    font-size: var(--fs-body);
     -webkit-font-smoothing: antialiased;
   }
   /* 布局与侧栏统一交给 app.css：nav.py 注入的侧栏依赖 .group / .side-foot / .ico，
@@ -22,12 +22,12 @@
     display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
     padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel);
   }
-  header.top h1 { font-size: 15px; margin: 0; font-weight: 600; color: #232838; }
-  header.top .sub { color: var(--muted); font-size: 11.5px; }
+  header.top h1 { font-size: var(--fs-title); margin: 0; font-weight: 600; color: #232838; }
+  header.top .sub { color: var(--muted); font-size: var(--fs-label); }
   .spacer { margin-left: auto; }
-  .pill { border: 1px solid var(--border); background: var(--panel-2); border-radius: 999px; padding: 3px 10px; font-size: 11.5px; color: var(--muted); }
+  .pill { border: 1px solid var(--border); background: var(--panel-2); border-radius: 999px; padding: 3px 10px; font-size: var(--fs-label); color: var(--muted); }
   button {
-    font: inherit; font-size: 12px; cursor: pointer; color: var(--text);
+    font: inherit; font-size: var(--fs-meta); cursor: pointer; color: var(--text);
     background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 6px 11px;
     transition: background .12s, border-color .12s;
   }
@@ -43,11 +43,11 @@
   .article-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
   .chip {
     display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
-    border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; font-size: 12px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; font-size: var(--fs-meta);
   }
   .chip:hover { border-color: #ccd2e3; }
   .chip.on { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-weak); }
-  .tag { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2); }
+  .tag { font-size: var(--fs-caption); padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--panel-2); }
   .tag.published { color: var(--green-ink); border-color: var(--green-line); background: var(--green-tint); }
   .tag.review { color: var(--amber-ink); border-color: var(--amber-line); background: var(--amber-tint); }
   /* E4 积分徽章：账本是真的，定价是假的——标签明说，别当计费系统看 */
@@ -64,7 +64,7 @@
     padding: 12px 16px; border-top: 1px solid var(--border); background: var(--subtle); }
   dialog#creditDialog { width: min(620px, 94vw); }
   dialog#creditDialog .balance { font-size: 28px; font-weight: 600; color: var(--text-strong); }
-  dialog#creditDialog table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  dialog#creditDialog table { width: 100%; border-collapse: collapse; font-size: var(--fs-meta); }
   dialog#creditDialog th, dialog#creditDialog td { padding: 7px 8px; text-align: left;
     border-bottom: 1px solid var(--border); }
   dialog#creditDialog td.num, dialog#creditDialog th.num { text-align: right;
@@ -80,15 +80,15 @@
     padding: 9px 10px; border: none; border-right: 1px solid var(--border);
     border-radius: 0; background: transparent; text-align: left; cursor: pointer; }
   .stage-step:last-of-type { border-right: none; }
-  .stage-step .no { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .stage-step .nm { font-size: 12px; color: var(--text); }
+  .stage-step .no { font-size: var(--fs-caption); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stage-step .nm { font-size: var(--fs-meta); color: var(--text); }
   .stage-step.done .nm { color: var(--green-ink); }
   .stage-step.current { background: var(--accent-weak); }
   .stage-step.current .no, .stage-step.current .nm { color: var(--accent-ink); font-weight: 600; }
   .stage-step:disabled { cursor: not-allowed; }
   .stage-act { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
     border-left: 1px solid var(--border); background: var(--subtle); white-space: nowrap; }
-  .stage-act .hint { font-size: 11px; color: var(--muted); }
+  .stage-act .hint { font-size: var(--fs-caption); color: var(--muted); }
   /* 窄屏不放成 6 行纵列——那样占掉近 400px，把正文挤出首屏。
      改成紧凑网格：流程仍按从左到右读，操作条横跨整行。 */
   @media (max-width: 1180px) {
@@ -110,25 +110,25 @@
     font-size: 12.5px; margin: 0; padding: 11px 14px; border-bottom: 1px solid var(--border);
     color: var(--text-strong); font-weight: 600; display: flex; align-items: center; gap: 8px;
   }
-  .col > h2 .badge { font-size: 10.5px; color: var(--muted); font-weight: 400; }
+  .col > h2 .badge { font-size: var(--fs-caption); color: var(--muted); font-weight: 400; }
   .col .body { padding: 13px 14px; }
   .field { margin-bottom: 13px; }
   .field:last-child { margin-bottom: 0; }
-  .field .k { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .field .k { color: var(--muted); font-size: var(--fs-caption); margin-bottom: 4px; }
   .field .v { line-height: 1.68; color: var(--text-body); white-space: pre-wrap; word-break: break-word; }
-  .field .v.mono { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: #5f6a7d; }
+  .field .v.mono { font-family: ui-monospace, Consolas, monospace; font-size: var(--fs-label); color: #5f6a7d; }
   /* 正文编辑 */
   .editor-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--subtle); }
-  .editor-toolbar .hint { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .editor-toolbar .hint { color: var(--muted); font-size: var(--fs-caption); margin-left: auto; }
   input[type="text"], textarea {
     width: 100%; background: #ffffff; color: var(--text); border: 1px solid var(--border);
     border-radius: 7px; padding: 9px 11px; font: inherit; line-height: 1.75;
   }
   input[type="text"]:focus, textarea:focus { border-color: var(--accent); outline: 2px solid rgba(108, 92, 231, .14); outline-offset: 0; }
-  textarea { resize: vertical; min-height: 320px; font-size: 13px; }
+  textarea { resize: vertical; min-height: 320px; font-size: var(--fs-body); }
   .editor-body { padding: 13px 14px; }
-  .editor-body .label { color: var(--muted); font-size: 11px; margin: 10px 0 5px; }
-  .notice { border-radius: 8px; padding: 9px 11px; font-size: 12px; margin-top: 10px; line-height: 1.65; }
+  .editor-body .label { color: var(--muted); font-size: var(--fs-caption); margin: 10px 0 5px; }
+  .notice { border-radius: 8px; padding: 9px 11px; font-size: var(--fs-meta); margin-top: 10px; line-height: 1.65; }
   .notice.warn { border: 1px solid var(--amber-line); background: var(--amber-tint); color: var(--amber-ink); }
   .notice.error { border: 1px solid var(--red-line); background: var(--red-tint); color: var(--red-ink); }
   .notice.ok { border: 1px solid var(--green-line); background: var(--green-tint); color: var(--green-ink); }
@@ -136,12 +136,12 @@
   .fact { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; background: var(--subtle); }
   .fact.pending { border-color: var(--amber-line); background: #fffdf7; }
   .fact .claim { line-height: 1.6; margin-bottom: 5px; color: var(--text-body); }
-  .fact .src { color: var(--muted); font-size: 11px; }
-  .fact .verdict { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; margin-bottom: 5px; display: inline-block; }
+  .fact .src { color: var(--muted); font-size: var(--fs-caption); }
+  .fact .verdict { font-size: var(--fs-caption); padding: 1px 7px; border-radius: 999px; margin-bottom: 5px; display: inline-block; }
   .verdict.confirmed { color: var(--green-ink); background: var(--green-tint); }
   .verdict.pending { color: var(--amber-ink); background: var(--amber-tint); }
   .verdict.rejected { color: var(--red-ink); background: var(--red-tint); }
-  .empty { color: var(--muted); font-size: 12px; padding: 10px 0; }
+  .empty { color: var(--muted); font-size: var(--fs-meta); padding: 10px 0; }
   /* 发布区 */
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 14px; box-shadow: var(--shadow); }
   .panel > h2 { font-size: 12.5px; margin: 0; padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text-strong); font-weight: 600; }
@@ -149,21 +149,21 @@
   .channels { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 9px; }
   .channel { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; background: var(--subtle); }
   .channel .name { font-weight: 500; color: var(--text-strong); }
-  .channel .state { font-size: 10.5px; padding: 1px 7px; border-radius: 999px; }
+  .channel .state { font-size: var(--fs-caption); padding: 1px 7px; border-radius: 999px; }
   .channel .state.connected { color: var(--green-ink); background: var(--green-tint); }
   .channel .state.disconnected { color: #5f6a7d; background: var(--neutral-tint); }
   .channel .state.expired { color: var(--amber-ink); background: var(--amber-tint); }
   .channel .actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-  .channel label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+  .channel label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-caption); }
   .impact { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
   .kpi { border: 1px solid var(--border); border-radius: 8px; padding: 11px 13px; background: var(--subtle); }
-  .kpi .k { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+  .kpi .k { color: var(--muted); font-size: var(--fs-caption); margin-bottom: 6px; }
   .kpi .v { font-size: 21px; font-weight: 600; color: #232838; }
-  .kpi .s { color: var(--muted); font-size: 11px; margin-top: 5px; }
+  .kpi .s { color: var(--muted); font-size: var(--fs-caption); margin-top: 5px; }
   .up { color: var(--teal); } .down { color: var(--red); } .flat { color: var(--muted); }
   .toast {
     position: fixed; right: 18px; bottom: 18px; max-width: 420px; padding: 11px 14px; border-radius: 9px;
-    background: #ffffff; border: 1px solid var(--border); color: var(--text-body); font-size: 12px; line-height: 1.65;
+    background: #ffffff; border: 1px solid var(--border); color: var(--text-body); font-size: var(--fs-meta); line-height: 1.65;
     box-shadow: 0 8px 28px rgba(31, 36, 48, .14);
     opacity: 0; transform: translateY(8px); transition: .18s; pointer-events: none;
   }
@@ -209,7 +209,7 @@ if (location.protocol === "file:") {
       <span class="pill">人工成稿 · 系统只做事实核对与合规提示</span>
       <span class="pill credit-badge" id="creditBadge" title="查看积分流水">积分 <b id="creditBalance">—</b></span>
       <button id="newArticle">+ 新建文章</button>
-      <a class="plain" href="/" style="font-size:12px">← 返回看板</a>
+      <a class="plain" href="/" style="font-size:var(--fs-meta)">← 返回看板</a>
     </header>
 
     <div class="content">
@@ -270,14 +270,14 @@ if (location.protocol === "file:") {
           <div class="channels" id="channels"></div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">
             <button id="publishBtn" class="primary">一键发布到已选渠道</button>
-            <span class="hint" id="publishState" style="color:var(--muted);font-size:11.5px"></span>
+            <span class="hint" id="publishState" style="color:var(--muted);font-size:var(--fs-label)"></span>
           </div>
           <div class="notice" style="margin-top:10px">「连接」会打开浏览器窗口扫码登录（登录态保存在本机）；「检测」会开一次无头浏览器验证登录是否还有效（约 10-15 秒）。发布走真实浏览器自动化，结果如实记录，失败会写明原因。</div>
         </div>
       </section>
 
       <section class="panel">
-        <h2>发布后提及率 <span class="badge" id="impactMeta" style="color:var(--muted);font-weight:400;font-size:10.5px"></span></h2>
+        <h2>发布后提及率 <span class="badge" id="impactMeta" style="color:var(--muted);font-weight:400;font-size: var(--fs-caption)"></span></h2>
         <div class="body" id="impact"></div>
       </section>
     </div>
@@ -287,7 +287,7 @@ if (location.protocol === "file:") {
   <h2>积分账本 <span class="badge">账本是真的，定价是假的</span></h2>
   <div class="dialog-body">
     <div class="balance" id="creditBig">—</div>
-    <div class="muted" style="font-size:11px;margin:4px 0 14px" id="creditNote"></div>
+    <div class="muted" style="font-size: var(--fs-caption);margin:4px 0 14px" id="creditNote"></div>
     <div id="creditEntries"></div>
   </div>
   <div class="dialog-foot">
@@ -451,7 +451,7 @@ function renderChannels() {
     return '<div class="channel">' +
       '<input type="checkbox" data-id="' + c.id + '"' + checked + (connected ? "" : " disabled") + " />" +
       '<div><div class="name">' + esc(c.platform_name) + "</div>" +
-      '<div style="color:var(--muted);font-size:11px">' + channelSub(c) + "</div></div>" +
+      '<div style="color:var(--muted);font-size: var(--fs-caption)">' + channelSub(c) + "</div></div>" +
       '<div class="actions">' + actions.join("") + "</div></div>";
   }).join("");
 
@@ -523,10 +523,10 @@ function publicationTable() {
     "<tr><td>" + esc(p.platform_name) + "</td><td>" + (PUB_TEXT[p.status] || esc(p.status)) + "</td><td>" +
     esc((p.published_at || "").slice(0, 16).replace("T", " ") || "—") + "</td><td>" +
     (p.published_url ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链</a>' : "—") +
-    "</td><td style=\"color:var(--red);font-size:11.5px\">" + esc(p.failure_reason || "") + "</td></tr>"
+    "</td><td style=\"color:var(--red);font-size:var(--fs-label)\">" + esc(p.failure_reason || "") + "</td></tr>"
   ).join("");
   const th = (t) => '<th style="text-align:left;color:var(--muted);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--border)">' + t + "</th>";
-  return '<table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:12px">' +
+  return '<table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:var(--fs-meta)">' +
     "<thead><tr>" + th("渠道") + th("状态") + th("时间") + th("回链") + th("原因") + "</tr></thead>" +
     "<tbody>" + rows + "</tbody></table>";
 }

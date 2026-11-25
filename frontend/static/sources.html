@@ -14,9 +14,9 @@
   @media (max-width: 1100px) { .src-grid { grid-template-columns: 1fr; } }
   .media-row { display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-bottom: 1px solid var(--border); }
   .media-row:last-child { border-bottom: none; }
-  .media-row .rank { width: 20px; height: 20px; border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: 11px; display: grid; place-items: center; flex: none; }
+  .media-row .rank { width: 20px; height: 20px; border-radius: 5px; background: var(--panel-2); color: var(--muted); font-size: var(--fs-caption); display: grid; place-items: center; flex: none; }
   .media-row:nth-child(-n+3) .rank { background: var(--accent-weak); color: var(--accent-ink); }
-  .media-row .nm { flex: 1; font-size: 12px; }
+  .media-row .nm { flex: 1; font-size: var(--fs-meta); }
   .urlcell { max-width: 340px; word-break: break-all; }
 </style>
 </head>

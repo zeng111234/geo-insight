@@ -18,10 +18,10 @@
   .mon-cite { display: none; }
   .mon-grid.with-cite > .mon-cite { display: flex; }
   .mon-cite .cite-head { display: flex; gap: 8px; align-items: center; padding: 11px 12px;
-    border-bottom: 1px solid var(--border); font-size: 12px; }
-  .mon-cite .cite-head select { margin-left: auto; font-size: 11px; padding: 3px 6px; }
+    border-bottom: 1px solid var(--border); font-size: var(--fs-meta); }
+  .mon-cite .cite-head select { margin-left: auto; font-size: var(--fs-caption); padding: 3px 6px; }
   .mon-cite .cite-body { flex: 1; min-height: 0; overflow-y: auto; }
-  .mon-cite .cite-body .hd { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--muted); }
+  .mon-cite .cite-body .hd { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: var(--fs-label); color: var(--muted); }
   @media (max-width: 1280px) {
     .mon-grid.with-cite { grid-template-columns: 220px minmax(0, 1fr) 320px; }
   }
@@ -42,12 +42,12 @@
   .titem:hover { background: var(--subtle); }
   .titem.on { background: var(--accent-weak); border-left: 3px solid var(--accent); padding-left: 9px; }
   .titem .n { font-size: 12.5px; color: var(--text); margin-bottom: 3px; }
-  .titem .m { font-size: 10.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .titem .m { font-size: var(--fs-caption); color: var(--muted); display: flex; gap: 6px; align-items: center; }
 
   .mon-head { padding: 12px 14px; border-bottom: 1px solid var(--border); }
   .mon-head .line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .mon-head h2 { margin: 0; font-size: 15px; }
-  .mon-head .meta { font-size: 11px; color: var(--muted); margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .mon-head h2 { margin: 0; font-size: var(--fs-title); }
+  .mon-head .meta { font-size: var(--fs-caption); color: var(--muted); margin-top: 5px; display: flex; gap: 10px; flex-wrap: wrap; }
   .mon-head .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
   /* 危险操作要和常规操作拉开距离：实心底 + 更重边框，不再和「刷新」一个视觉重量。 */
   .mon-head .acts .danger { background: var(--red-tint); border-color: var(--red-ink); color: var(--red-ink); }
@@ -62,21 +62,21 @@
   .mon-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
     padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--subtle); }
   .mon-filters label { display: inline-flex; align-items: center; gap: 5px;
-    font-size: 11px; color: var(--muted); }
-  .mon-filters select { max-width: 190px; font-size: 11.5px; }
-  .mon-filters .dates { font-size: 11.5px; color: var(--text); }
+    font-size: var(--fs-caption); color: var(--muted); }
+  .mon-filters select { max-width: 190px; font-size: var(--fs-label); }
+  .mon-filters .dates { font-size: var(--fs-label); color: var(--text); }
   .mon-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
     padding: 8px 12px; border-bottom: 1px solid var(--border); }
   .mon-tabs button { display: inline-flex; align-items: center; gap: 8px;
     border: 1px solid transparent; background: transparent; border-radius: 999px;
-    padding: 5px 11px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+    padding: 5px 11px; font-size: var(--fs-meta); color: var(--muted); white-space: nowrap; cursor: pointer; }
   .mon-tabs button:hover { background: var(--subtle); color: var(--text); }
   .mon-tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   /* 数字与文字之间留明确空隙并给浅边框，避免「指标看板1062提及」糊成一串。
      用 inline-flex + gap 而不是 margin：换行时整颗 tab 不拆、行高一致。 */
   .mon-tabs button .n { display: inline-block; padding: 1px 7px; min-width: 24px;
     border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border);
-    color: var(--text-body); font-size: 11px; font-weight: 500;
+    color: var(--text-body); font-size: var(--fs-caption); font-weight: 500;
     font-variant-numeric: tabular-nums; text-align: center; }
   .mon-tabs button.on .n { background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.3); color: #fff; }
   .mon-body { flex: 1; min-height: 0; overflow-y: auto; }
@@ -89,7 +89,7 @@
   dialog .dialog-body { padding: 14px 16px; }
   dialog .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px;
     border-top: 1px solid var(--border); background: var(--subtle); }
-  dialog code { background: var(--subtle); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+  dialog code { background: var(--subtle); padding: 1px 5px; border-radius: 4px; font-size: var(--fs-label); }
   dialog .notice { margin-top: 12px; }
 
   /* E1e 新建抽屉：贴右侧从上到下，不像模态框那样盖住整页。
@@ -100,7 +100,7 @@
   dialog#newDrawer::backdrop { background: rgba(31,36,48,.22); }
   dialog#newDrawer .dialog-body { overflow-y: auto; flex: 1; }
   dialog#newDrawer form { display: flex; flex-direction: column; height: 100%; }
-  dialog#newDrawer .field { display: block; margin-bottom: 12px; font-size: 11.5px; }
+  dialog#newDrawer .field { display: block; margin-bottom: 12px; font-size: var(--fs-label); }
   dialog#newDrawer .field span { display: block; color: var(--muted); margin-bottom: 5px; }
   dialog#newDrawer .field input { width: 100%; }
   dialog#newDrawer .row { display: flex; gap: 8px; }
@@ -108,11 +108,11 @@
 
   .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; padding: 14px; }
   .kpi { border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; background: var(--panel); }
-  .kpi .k { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
+  .kpi .k { font-size: var(--fs-caption); color: var(--muted); margin-bottom: 7px; }
   .kpi .v { font-size: 25px; line-height: 1.1; font-weight: 600; color: var(--text-strong); }
-  .kpi .v.small { font-size: 15px; }
-  .kpi .s { font-size: 10.5px; color: var(--muted); margin-top: 6px; }
-  .kpi .rows { font-size: 11.5px; color: var(--text-body); display: grid; gap: 3px; }
+  .kpi .v.small { font-size: var(--fs-title); }
+  .kpi .s { font-size: var(--fs-caption); color: var(--muted); margin-top: 6px; }
+  .kpi .rows { font-size: var(--fs-label); color: var(--text-body); display: grid; gap: 3px; }
   .kpi .rows i { font-style: normal; color: var(--muted); display: inline-block; width: 42px; }
   .kpi .rows b { font-weight: 500; }
   .kpi.lit { background: var(--red-tint); border-color: var(--red-line); }
@@ -123,29 +123,29 @@
   .answer:last-child { border-bottom: none; }
   .answer .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 7px; }
   .answer .text { font-size: 12.5px; line-height: 1.7; color: var(--text-body); white-space: pre-wrap; }
-  .answer .cite { font-size: 11px; color: var(--muted); margin-top: 7px; }
+  .answer .cite { font-size: var(--fs-caption); color: var(--muted); margin-top: 7px; }
   .todo { padding: 22px 16px; }
 
   /* 问答明细：引用已提到工作台第三栏，这里只留回答列表 */
   .ans-split { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
   .ans-main { overflow-y: auto; min-height: 0; }
-  .cite-item { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
+  .cite-item { padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: var(--fs-label); }
   .cite-item .top { display: flex; gap: 5px; align-items: baseline; margin-bottom: 3px; }
   .cite-item .idx { color: var(--muted); font-variant-numeric: tabular-nums; }
   .cite-item a { color: var(--accent-ink); text-decoration: none; word-break: break-all; }
   .cite-item a:hover { text-decoration: underline; }
-  .cite-item .sub { color: var(--muted); font-size: 10.5px; }
+  .cite-item .sub { color: var(--muted); font-size: var(--fs-caption); }
   .answer.sel { background: var(--accent-weak); }
   /* E1c：视图切换 + 表格视图 + 行内复制 */
   .ans-view { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
-  .ans-view button { border: 0; background: transparent; padding: 4px 12px; font-size: 11.5px;
+  .ans-view button { border: 0; background: transparent; padding: 4px 12px; font-size: var(--fs-label);
     color: var(--muted); cursor: pointer; }
   .ans-view button + button { border-left: 1px solid var(--border); }
   .ans-view button.on { background: var(--accent); color: #fff; }
   button.copy-answer { border: 1px solid var(--border); background: var(--panel); color: var(--accent-ink);
-    border-radius: 6px; padding: 3px 9px; font-size: 11px; cursor: pointer; }
+    border-radius: 6px; padding: 3px 9px; font-size: var(--fs-caption); cursor: pointer; }
   button.copy-answer:hover { background: var(--accent-weak); }
-  .ans-table { font-size: 12px; }
+  .ans-table { font-size: var(--fs-meta); }
   .ans-table td { vertical-align: top; }
   .ans-table tr.sel { background: var(--accent-weak); }
   .ans-table th, .ans-table td { padding: 9px 10px; }
@@ -156,11 +156,11 @@
   /* 指标明细 / 趋势 / 信源 共用 */
   .tab-pad { padding: 12px 14px; }
   .metric-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  .metric-bar button { font-size: 11.5px; padding: 4px 10px; border-radius: 999px; }
+  .metric-bar button { font-size: var(--fs-label); padding: 4px 10px; border-radius: 999px; }
   .metric-bar button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .rule { font-size: 11px; color: var(--muted); margin: 9px 0 10px; line-height: 1.6; }
+  .rule { font-size: var(--fs-caption); color: var(--muted); margin: 9px 0 10px; line-height: 1.6; }
   .bars { display: grid; gap: 6px; }
-  .bar-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) 62px; gap: 9px; align-items: center; font-size: 11.5px; }
+  .bar-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) 62px; gap: 9px; align-items: center; font-size: var(--fs-label); }
   .bar-row .track { height: 7px; background: var(--subtle); border-radius: 999px; overflow: hidden; }
   .bar-row .fill { display: block; height: 100%; background: var(--accent); }
   .bar-row .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -170,19 +170,19 @@
   .dash-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
   .dash-head { display: flex; justify-content: space-between; align-items: baseline;
     padding: 10px 12px 8px; font-size: 12.5px; font-weight: 600; color: var(--text-strong); }
-  .dash-head span { font-size: 10.5px; font-weight: 400; color: var(--muted); }
+  .dash-head span { font-size: var(--fs-caption); font-weight: 400; color: var(--muted); }
   .dash-card .table-wrap { border: 0; border-top: 1px solid var(--border); border-radius: 0; }
   .dash-card .spark { height: 232px; padding: 2px 10px 0; }
   .dash-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
-    padding: 4px 12px 12px; font-size: 10.5px; color: var(--muted); }
+    padding: 4px 12px 12px; font-size: var(--fs-caption); color: var(--muted); }
   .dash-facts b { display: block; font-size: 16px; font-weight: 600; color: var(--text-strong); margin: 2px 0 1px; }
   .dash-cites { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 2px; }
   @media (max-width: 1180px) { .dash-grid { grid-template-columns: 1fr; } }
   .tag.kw { color: var(--accent-ink); border-color: var(--accent-weak); background: var(--accent-weak); margin-left: 2px; }
   .sent-table .sentiment { margin-top: 0; }
-  .note-line { margin-top: 12px; font-size: 11px; color: var(--muted); }
-  .note-line code { font-size: 10.5px; background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }
-  .matrix th, .matrix td { padding: 5px 7px; font-size: 11px; white-space: nowrap; min-width: 46px; }
+  .note-line { margin-top: 12px; font-size: var(--fs-caption); color: var(--muted); }
+  .note-line code { font-size: var(--fs-caption); background: var(--panel-2); padding: 1px 4px; border-radius: 4px; }
+  .matrix th, .matrix td { padding: 5px 7px; font-size: var(--fs-caption); white-space: nowrap; min-width: 46px; }
   .matrix td.n { text-align: center; font-variant-numeric: tabular-nums; }
   .matrix td.diag { background: var(--subtle); color: var(--muted); text-align: center; }
   .cmp-bar { display: block; height: 7px; background: var(--subtle); border-radius: 999px; overflow: hidden; }

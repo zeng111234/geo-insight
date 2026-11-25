@@ -8,13 +8,13 @@
 <title>GEO Insight · 监控配置</title>
 <style>
   .alias-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .alias { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 10px; background: var(--subtle); font-size: 11.5px; }
+  .alias { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 10px; background: var(--subtle); font-size: var(--fs-label); }
   .alias button { border: none; background: transparent; padding: 0 2px; color: var(--muted); font-size: 14px; line-height: 1; }
   .alias button:hover { color: var(--red); background: transparent; }
   .q-row td { vertical-align: middle; }
   .status-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
   .num-lg { font-size: 26px; font-weight: 600; color: var(--text-strong); }
-  .kv { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: 12px; }
+  .kv { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: var(--fs-meta); }
   .kv:last-child { border-bottom: none; }
   dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0; box-shadow: 0 20px 60px rgba(31,36,48,.18); width: min(560px, 94vw); }
   dialog::backdrop { background: rgba(31,36,48,.32); }
@@ -24,9 +24,9 @@
   .channel-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; }
   .channel-cell { border: 1px solid var(--border); border-radius: 8px; padding: 8px 6px; min-width: 0; background: var(--surface); }
   .channel-cell.off { background: var(--subtle); opacity: .72; }
-  .channel-cell .n { font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
-  .channel-cell .s { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
-  .channel-cell .na { font-size: 10px; color: var(--amber, #9a6700); margin-top: 3px; }
+  .channel-cell .n { font-size: var(--fs-label); font-weight: 600; overflow-wrap: anywhere; }
+  .channel-cell .s { font-size: var(--fs-caption); color: var(--muted); margin-top: 3px; }
+  .channel-cell .na { font-size: var(--fs-caption); color: var(--amber, #9a6700); margin-top: 3px; }
   @media (max-width: 1100px) { .channel-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 </style>
 </head>
@@ -76,7 +76,7 @@ if (location.protocol === "file:") {
             </div>
             <label class="field"><span>核心词（当前生效问题集）</span>
               <input id="keywords" type="text" placeholder="逗号分隔，例：律所，刑事辩护，离婚" /></label>
-            <div class="muted" style="font-size:11px;margin:-4px 0 10px">
+            <div class="muted" style="font-size: var(--fs-caption);margin:-4px 0 10px">
               用于判断答案是否跑题：正文一个核心词都没出现时，问答明细里标「疑似跑题」。
             </div>
             <div class="row">
@@ -84,8 +84,8 @@ if (location.protocol === "file:") {
               <span class="muted" id="saveState"></span>
             </div>
 
-            <h3 style="font-size:12px;margin:18px 0 6px;color:var(--text-strong)">品牌别名</h3>
-            <div class="muted" style="font-size:11px">用于答案中的品牌识别，覆盖简称、英文名与常见错写。</div>
+            <h3 style="font-size:var(--fs-meta);margin:18px 0 6px;color:var(--text-strong)">品牌别名</h3>
+            <div class="muted" style="font-size: var(--fs-caption)">用于答案中的品牌识别，覆盖简称、英文名与常见错写。</div>
             <div class="alias-list" id="aliases"></div>
             <div class="row" style="margin-top:10px">
               <input id="aliasInput" type="text" placeholder="新增别名" style="flex:1" />
@@ -98,13 +98,13 @@ if (location.protocol === "file:") {
               <button id="addAlias">添加</button>
             </div>
 
-            <h3 style="font-size:12px;margin:18px 0 6px;color:var(--text-strong)">状态</h3>
+            <h3 style="font-size:var(--fs-meta);margin:18px 0 6px;color:var(--text-strong)">状态</h3>
             <div class="status-btns">
               <button class="small" data-status="active">启用监控</button>
               <button class="small" data-status="paused">暂停采样</button>
               <button class="small danger" data-status="archived">归档</button>
             </div>
-            <div class="muted" style="font-size:11px;margin-top:6px">归档后不可重新启用；历史数据保留。</div>
+            <div class="muted" style="font-size: var(--fs-caption);margin-top:6px">归档后不可重新启用；历史数据保留。</div>
           </div>
         </section>
 
@@ -115,9 +115,9 @@ if (location.protocol === "file:") {
               <select id="qsetSelect" aria-label="问题集" style="min-width:200px"></select>
               <button id="qsetSwitch">切换到此集</button>
               <button id="qsetNew">新建问题集</button>
-              <span class="muted" id="qsetHint" style="font-size:11px"></span>
+              <span class="muted" id="qsetHint" style="font-size: var(--fs-caption)"></span>
             </div>
-            <div class="muted" style="font-size:11px;margin-bottom:10px">
+            <div class="muted" style="font-size: var(--fs-caption);margin-bottom:10px">
               指标口径、问题列表、核心词与跑题判定都跟随「当前生效问题集」；导入的问题进入当前生效集。
             </div>
             <label class="field"><span>批量导入（每行一条，* 开头标为核心问题）</span>
@@ -140,7 +140,7 @@ if (location.protocol === "file:") {
                 <tbody id="qBody"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
               </table>
             </div>
-            <div class="muted" style="font-size:11px;margin-top:8px">层级调整从次日生效，不回改历史采样次数。</div>
+            <div class="muted" style="font-size: var(--fs-caption);margin-top:8px">层级调整从次日生效，不回改历史采样次数。</div>
           </div>
         </section>
       </div>
@@ -154,7 +154,7 @@ if (location.protocol === "file:") {
               <input id="competitorInput" type="text" placeholder="新增竞品名称" style="flex:1" />
               <button id="addCompetitor">添加</button>
             </div>
-            <div class="muted" style="font-size:11px;margin-top:8px">竞品集合变更会递增版本，历史指标不重算。</div>
+            <div class="muted" style="font-size: var(--fs-caption);margin-top:8px">竞品集合变更会递增版本，历史指标不重算。</div>
           </div>
         </section>
 
@@ -166,7 +166,7 @@ if (location.protocol === "file:") {
         <section class="panel">
           <h2>数据导出 <span class="badge">原始答案</span></h2>
           <div class="body">
-            <div class="muted" style="font-size:11px;margin-bottom:10px">导出含答案原文、提及位次、情感与引用数量，CSV 带 BOM 可直接用 Excel 打开。</div>
+            <div class="muted" style="font-size: var(--fs-caption);margin-bottom:10px">导出含答案原文、提及位次、情感与引用数量，CSV 带 BOM 可直接用 Excel 打开。</div>
             <div class="row">
               <label class="field" style="margin:0"><span>开始</span><input id="exportFrom" type="date" value="2026-11-01" /></label>
               <label class="field" style="margin:0"><span>结束</span><input id="exportTo" type="date" value="2026-11-30" /></label>
@@ -175,7 +175,7 @@ if (location.protocol === "file:") {
               <button type="button" class="btn" id="exportCsv">下载 CSV</button>
               <button type="button" class="btn" id="exportJsonl">下载 JSONL</button>
             </div>
-            <div class="muted" style="font-size:11px;margin-top:10px">原始答案保留 180 天，到期归档。</div>
+            <div class="muted" style="font-size: var(--fs-caption);margin-top:10px">原始答案保留 180 天，到期归档。</div>
           </div>
         </section>
       </div>
@@ -183,7 +183,7 @@ if (location.protocol === "file:") {
       <section class="panel" style="margin-top:14px">
         <h2>采集渠道 <span class="badge" id="channelBadge">模型 × 端</span></h2>
         <div class="body">
-          <div class="muted" style="font-size:11px;margin-bottom:10px">
+          <div class="muted" style="font-size: var(--fs-caption);margin-bottom:10px">
             同一模型网页端与手机端分开统计。13 个未接入的渠道显式标注，不画空图、不填假数字。
           </div>
           <div class="channel-grid" id="channelGrid"><div class="empty">加载中…</div></div>
@@ -286,9 +286,9 @@ function renderDetail(d) {
   const aliases = d.brand.aliases || [];
   $("aliases").innerHTML = aliases.length
     ? aliases.map((a) => `<span class="alias">${esc(a.alias)}
-        <span class="muted" style="font-size:10px">${esc(a.alias_type)}</span>
+        <span class="muted" style="font-size: var(--fs-caption)">${esc(a.alias_type)}</span>
         <button data-alias="${a.id}" title="删除别名" aria-label="删除 ${esc(a.alias)}">×</button></span>`).join("")
-    : '<span class="muted" style="font-size:11.5px">还没有别名</span>';
+    : '<span class="muted" style="font-size:var(--fs-label)">还没有别名</span>';
 
   const comp = d.competitors;
   $("compBadge").textContent = comp.version === null ? "无集合" : `v${comp.version} · ${comp.items.length} 个`;
@@ -309,8 +309,8 @@ function renderPlan(p) {
     : f.status === "ok" ? `<span class="tag ok">正常</span>` : `<span class="tag">无采样记录</span>`;
   $("planBadge").innerHTML = tag;
   $("plan").innerHTML = `
-    <div class="num-lg">${p.daily_planned}<span class="muted" style="font-size:12px;font-weight:400"> 条 / 日</span></div>
-    <div class="muted" style="font-size:11px;margin-bottom:8px">${(p.models || []).join("、") || "未配置模型"} · ${esc(p.timezone)}</div>
+    <div class="num-lg">${p.daily_planned}<span class="muted" style="font-size:var(--fs-meta);font-weight:400"> 条 / 日</span></div>
+    <div class="muted" style="font-size: var(--fs-caption);margin-bottom:8px">${(p.models || []).join("、") || "未配置模型"} · ${esc(p.timezone)}</div>
     <div class="kv"><span>核心问题 ${p.breakdown.core_questions} 个 × ${p.core_times} 次 × ${p.breakdown.model_count} 模型</span><b>${p.breakdown.core_daily}</b></div>
     <div class="kv"><span>长尾问题 ${p.breakdown.long_tail_questions} 个 × ${p.long_tail_times} 次 × ${p.breakdown.model_count} 模型</span><b>${p.breakdown.long_tail_daily}</b></div>
     <div class="kv"><span>采样失败率</span><b class="${f.status === "over_threshold" ? "bad" : ""}">${fmtPct(f.rate)}（${f.failed || 0}/${f.attempted || 0}）</b></div>

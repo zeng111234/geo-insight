@@ -93,5 +93,46 @@ class SentimentSplitContractTest(unittest.TestCase):
         self.assertNotIn("' · 中 ' + fmtPct(senti.neu)", html)
 
 
+class FontScaleContractTest(unittest.TestCase):
+    """字号阶梯：theme.css 是唯一来源，页面不许各自写死小字号。
+
+    此前 15 个文件散落 10/10.5/11/11.5/12px，中文在 1440 屏上低于 11px 难读。
+    本次把所有 ≤10.5px 提到 caption(11px)，其余数值不变仅 token 化。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.static_dir = PROJECT_ROOT / "frontend" / "static"
+        cls.theme = (cls.static_dir / "theme.css").read_text(encoding="utf-8")
+
+    def test_token_ladder_defined(self):
+        for name, value in (
+            ("--fs-caption", "11px"),
+            ("--fs-label", "11.5px"),
+            ("--fs-meta", "12px"),
+            ("--fs-body", "13px"),
+            ("--fs-title", "15px"),
+            ("--fs-h1", "17px"),
+        ):
+            self.assertIn(f"{name}: {value}", self.theme)
+
+    def test_no_hardcoded_tiny_font(self):
+        """任何文件里都不该再有 ≤10.5px 的裸声明。"""
+        violations = []
+        for path in list(self.static_dir.glob("*.css")) + list(self.static_dir.glob("*.html")):
+            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                for needle in ("font-size: 10.5px", "font-size:10.5px",
+                               "font-size: 10px", "font-size:10px"):
+                    if needle in line:
+                        violations.append(f"{path.name}:{lineno}")
+        self.assertEqual(violations, [], f"发现裸小字号：{violations}")
+
+    def test_pages_reference_tokens(self):
+        """主要页面至少引用一次字号 token，防止整页退回裸声明。"""
+        for name in ("monitor.html", "studio.html", "settings.html", "app.css"):
+            text = (self.static_dir / name).read_text(encoding="utf-8")
+            self.assertIn("var(--fs-", text, f"{name} 没有引用字号 token")
+
+
 if __name__ == "__main__":
     unittest.main()
