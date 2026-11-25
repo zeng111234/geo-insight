@@ -19,6 +19,13 @@
   .delta.up { color: var(--green-ink); }
   .delta.down { color: var(--red-ink); }
   .delta.flat { color: var(--muted); }
+  .imp .scope { font-size: 11px; color: var(--text-body); margin-top: 3px; }
+  .imp .table-wrap { margin-top: 7px; border: 1px solid var(--border); border-radius: 7px; }
+  .imp table { font-size: 11px; }
+  .imp th, .imp td { padding: 4px 7px; }
+  .imp .hit { font-size: 11px; margin-top: 7px; color: var(--text-body); line-height: 1.7; }
+  .imp .hit a { color: var(--accent-ink); text-decoration: none; }
+  .imp .hit a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -47,7 +54,15 @@
           <div class="body" id="channels"><div class="empty">加载中…</div></div>
         </div>
         <div class="panel">
-          <h2>发布前后效果对比 <span class="badge" id="impMeta">—</span></h2>
+          <h2>发布前后效果对比
+            <select id="impactWindow" aria-label="对比窗口"
+              style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--text)">
+              <option value="7">7 天</option>
+              <option value="14" selected>14 天</option>
+              <option value="30">30 天</option>
+            </select>
+            <span class="badge" id="impMeta">—</span>
+          </h2>
           <div id="impact"><div class="empty">加载中…</div></div>
         </div>
       </div>
@@ -57,6 +72,7 @@
 <script>
 (function () {
   var G = window.GEO, $ = G.$, esc = G.esc;
+  var state = { impactWindow: 14 };
   var stat = function (l, v, s) {
     return '<div class="card"><div class="label">' + esc(l) + '</div><div class="value">' + esc(v) + '</div><div class="sub">' + esc(s) + "</div></div>";
   };
@@ -122,27 +138,81 @@
       }).join("") + "</tbody></table></div>";
   }
 
+  function rateText(window) {
+    if (!window || !window.mention_rate) return "—";
+    if (window.mention_rate.status !== "ok") return "样本不足";
+    return G.pct(window.mention_rate.value) + "（" + window.mention_total + "/" + window.valid_total + "）";
+  }
+
+  function deltaText(value) {
+    if (value === null || value === undefined) return "—";
+    return (value > 0 ? "+" : "") + value.toFixed(1) + "pp";
+  }
+
+  function deltaCls(value) {
+    return value === null || value === undefined ? "flat" : value > 0 ? "up" : value < 0 ? "down" : "flat";
+  }
+
   function renderImpact(rows) {
     var list = rows.filter(function (r) { return r.impact && r.impact.status === "ok"; });
     $("impMeta").textContent = list.length + " 篇有对比";
     if (!list.length) { $("impact").innerHTML = G.empty("还没有可对比的发布效果"); return; }
     $("impact").innerHTML = list.map(function (r) {
       var im = r.impact;
-      var before = im.before && im.before.mention_rate, after = im.after && im.after.mention_rate;
-      var bt = !before || before.status === "insufficient_samples" ? "样本不足" : G.pct(before.value);
-      var at = !after || after.status === "insufficient_samples" ? "样本不足" : G.pct(after.value);
       var d = im.delta_pp;
-      var dCls = d === null || d === undefined ? "flat" : d > 0 ? "up" : d < 0 ? "down" : "flat";
-      var dText = d === null || d === undefined ? "—" : (d > 0 ? "+" : "") + d.toFixed(1) + "pp";
+      var scopeText = im.scope === "question" && im.question
+        ? "目标问题：" + esc(im.question.text) + "（发布前 " + im.before.valid_total + " 条 / 发布后 " + im.after.valid_total + " 条）"
+        : "口径：全对象（文章未绑定问题）";
+
+      var modelRows = (im.by_model || []).map(function (m) {
+        return "<tr><td>" + esc(m.model_key) + "</td>" +
+          '<td class="num">' + esc(rateText(m.before)) + "</td>" +
+          '<td class="num">' + esc(rateText(m.after)) + "</td>" +
+          '<td class="num"><span class="delta ' + deltaCls(m.delta_pp) + '" style="font-size:11px">' +
+          esc(deltaText(m.delta_pp)) + "</span></td>" +
+          '<td class="num">' + (m.citations_matched ? G.num(m.citations_matched) : "—") + "</td></tr>";
+      }).join("");
+      var modelTable = modelRows
+        ? '<div class="table-wrap"><table><thead><tr><th>模型</th><th class="num">发布前</th>' +
+          '<th class="num">发布后</th><th class="num">变化</th><th class="num">引用命中</th></tr></thead><tbody>' +
+          modelRows + "</tbody></table></div>"
+        : "";
+
+      var hit = im.citation_match || {};
+      var afterHit = hit.after || {};
+      var beforeHit = hit.before || {};
+      var hitText = "AI 引用我方文章：发布后 " + (afterHit.matched_count || 0) + " 次 / " +
+        (afterHit.matched_answers || 0) + " 条答案（发布前 " + (beforeHit.matched_count || 0) + " 次）";
+      var samples = (afterHit.samples || []).slice(0, 3).map(function (s) {
+        return '<a href="' + esc(s.url) + '" target="_blank" rel="noreferrer">' +
+          esc(s.title || s.domain || s.url) + "</a> " +
+          '<span class="muted">' + esc(s.model_key) + " · " +
+          esc(String(s.collected_at).slice(0, 16).replace("T", " ")) + "</span>";
+      }).join("<br />");
+
+      var controlText = "";
+      if (im.control) {
+        var c = im.control;
+        controlText = '<div class="m" style="margin-top:5px">对照问题「' + esc(c.question_text || c.question_id) + "」" +
+          "：发布前 " + esc(rateText(c.before)) + " → 发布后 " + esc(rateText(c.after)) +
+          "，变化 " + esc(deltaText(c.delta_pp)) +
+          (im.did_pp === null || im.did_pp === undefined ? "" : "；净变化（DiD）" + esc(deltaText(im.did_pp))) +
+          "</div>";
+      }
+
       return '<div class="imp"><div class="h"><span class="t">' + esc(r.title) + "</span>" +
         '<span class="tag ' + (im.comparable === true ? "ok" : "warn") + '">' +
         (im.comparable === true ? "可比" : "不可比") + "</span>" +
         '<span class="muted">窗口 ' + esc(im.window_days) + " 天 · " + esc((im.channels || []).join("、")) + "</span>" +
-        '<span class="spacer"></span><span class="delta ' + dCls + '">' + esc(dText) + "</span></div>" +
+        '<span class="spacer"></span><span class="delta ' + deltaCls(d) + '">' + esc(deltaText(d)) + "</span></div>" +
+        '<div class="scope">' + esc(scopeText) + "</div>" +
         '<div class="m">发布前 ' + esc(im.before.from) + " ~ " + esc(im.before.to) +
-        " 提及率 " + esc(bt) + "（" + esc(im.before.mention_total) + "/" + esc(im.before.valid_total) + "）" +
+        " 提及率 " + esc(rateText(im.before)) +
         " · 发布后 " + esc(im.after.from) + " ~ " + esc(im.after.to) +
-        " 提及率 " + esc(at) + "（" + esc(im.after.mention_total) + "/" + esc(im.after.valid_total) + "）</div>" +
+        " 提及率 " + esc(rateText(im.after)) + "</div>" +
+        modelTable +
+        '<div class="hit">' + esc(hitText) + (samples ? "<br />" + samples : "") + "</div>" +
+        controlText +
         ((im.notes || []).length ? '<div class="m" style="margin-top:5px">说明：' + esc(im.notes.join("；")) + "</div>" : "") +
         "</div>";
     }).join("");
@@ -160,7 +230,7 @@
       var rows = await Promise.all(items.map(function (a) {
         return Promise.all([
           G.get("/articles/" + a.id).catch(function () { return null; }),
-          G.get("/articles/" + a.id + "/impact").catch(function () { return null; })
+          G.get("/articles/" + a.id + "/impact?windowDays=" + state.impactWindow + "&scope=question").catch(function () { return null; })
         ]).then(function (d) {
           return { article: a, title: a.title, publications: (d[0] && d[0].publications) || [], impact: d[1] };
         });
@@ -172,6 +242,10 @@
     } catch (e) { G.fail(e, ["stats", "pubs", "channels", "impact"]); }
   }
 
+  $("impactWindow").addEventListener("change", function () {
+    state.impactWindow = parseInt(this.value, 10) || 14;
+    load();
+  });
   $("load").addEventListener("click", load);
   (async function () { await G.fillTrackers(); await load(); })();
 })();

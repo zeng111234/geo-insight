@@ -841,12 +841,23 @@ async def article_impact(request: Request):
         window_days = int(request.query_params.get("windowDays", 3))
     except ValueError:
         return _error(request, "VALIDATION_ERROR", "windowDays must be an integer")
-    if not 1 <= window_days <= 14:
-        return _error(request, "VALIDATION_ERROR", "windowDays must be between 1 and 14")
+    if not 1 <= window_days <= 30:
+        return _error(request, "VALIDATION_ERROR", "windowDays must be between 1 and 30")
+
+    scope = request.query_params.get("scope", "tracker")
+    if scope not in ("tracker", "question"):
+        return _error(request, "VALIDATION_ERROR", "scope must be tracker or question")
+    control_question_id = request.query_params.get("controlQuestionId") or None
 
     conn = db.connect()
     try:
-        payload = content_service.publish_impact(conn, request.path_params["article_id"], window_days)
+        payload = content_service.publish_impact(
+            conn,
+            request.path_params["article_id"],
+            window_days,
+            scope=scope,
+            control_question_id=control_question_id,
+        )
         if payload["status"] == "not_found":
             return _error(request, "NOT_FOUND", "article not found", 404)
         return JSONResponse(payload)
