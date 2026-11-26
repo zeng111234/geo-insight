@@ -311,6 +311,25 @@ class PublishHttpTest(unittest.TestCase):
         self.assertEqual(row["status"], "failed")
         self.assertIn("服务重启", row["failure_reason"])
 
+    def test_sweep_marks_stale_queued_as_failed(self):
+        """闸门让记录可能在 queued 排队很久,重启后没人推进,同样要说清是中断。"""
+        with closing(db.connect()) as conn:
+            # 用 zhihu 渠道新建一条,与上面的 running 用例不共用同一行
+            zhihu = self._connect_channel_in_db("zhihu")
+            created, _, _ = repo.create_publications(
+                conn, seed.ART_REVIEW, [zhihu], "2026-11-24T13:05:00+08:00"
+            )
+            new_id = created[0]
+            # 建出来就是 queued。不清精确条数:前面的用例可能留下别的 queued,
+            # 那些也该被同一场清扫带走——断言只盯自己新建的这一行。
+            repo.sweep_stale_publications(conn, "服务重启,排队中断;请重新发布")
+
+            row = conn.execute(
+                "SELECT status, failure_reason FROM publication WHERE id = ?", (new_id,)
+            ).fetchone()
+        self.assertEqual(row["status"], "failed")
+        self.assertIn("排队中断", row["failure_reason"])
+
     # ------------------------------------------------------------------
     # 工具
     # ------------------------------------------------------------------

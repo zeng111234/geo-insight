@@ -528,10 +528,16 @@ def update_publication_status(
 
 
 def sweep_stale_publications(conn: sqlite3.Connection, note: str) -> int:
-    """启动清扫:上一进程遗留的 running 记录标记为 failed(服务重启会杀掉 worker
-    线程,记录停在 running 就是说谎)。返回清扫条数。"""
+    """启动清扫:上一进程遗留的 running / queued 记录标记为 failed。
+
+    服务重启会杀掉 worker 线程,没人再把结果写回库——记录停在 running 是"发布中"的谎,
+    停在 queued 是"排队中"的谎。全局并发闸门让记录可能在 queued 停留很久,
+    重启时遗留排队的概率大幅上升,所以两种状态一起清。本函数只在 create_app
+    启动时、任何 worker 派发之前调用,此刻的 queued 一定是上个进程留下的,不会误伤。
+    """
     cur = conn.execute(
-        "UPDATE publication SET status = 'failed', failure_reason = ? WHERE status = 'running'",
+        "UPDATE publication SET status = 'failed', failure_reason = ? "
+        "WHERE status IN ('running', 'queued')",
         (note,),
     )
     conn.commit()

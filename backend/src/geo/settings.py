@@ -59,6 +59,12 @@ class Settings:
     publish_worker_enabled: bool = os.getenv("GEO_PUBLISH_WORKER", "1") != "0"
     # 单条发布的子进程超时（秒）：浏览器自动化含页面等待，给足余量。
     publish_timeout_s: int = int(os.getenv("GEO_PUBLISH_TIMEOUT", "600"))
+    # 全局发布并发上限：同时最多几个浏览器发布在跑。
+    # 一个发布 worker ≈ 一个 Python 子进程 + 一个 Chrome(400~500MB)。
+    # 默认 3：2 核 4G 下约 1.8G，给系统和 uvicorn 留余量；4 核 8G 可调到 4。
+    # 进程内信号量，和 session/渠道锁一样只对单进程部署有效（决策 012）。
+    # max(1, ...) 防止误配 0/负数把队列永久卡死。
+    publish_concurrency: int = max(1, int(os.getenv("GEO_PUBLISH_CONCURRENCY", "3")))
 
 
 settings = Settings()

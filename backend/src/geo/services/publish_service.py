@@ -116,6 +116,30 @@ def channel_busy(key: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# 全局发布闸门(进程内)
+# ---------------------------------------------------------------------------
+
+_publish_slots: threading.Semaphore | None = None
+_slots_guard = threading.Lock()
+
+
+def _get_publish_slots() -> threading.Semaphore:
+    """懒建信号量:settings 在 import 时固定,测试要改并发数可直接替换模块变量。"""
+    global _publish_slots
+    with _slots_guard:
+        if _publish_slots is None:
+            _publish_slots = threading.Semaphore(settings.publish_concurrency)
+        return _publish_slots
+
+
+def reset_publish_slots() -> None:
+    """仅供测试重置闸门状态;生产路径不调用。"""
+    global _publish_slots
+    with _slots_guard:
+        _publish_slots = None
+
+
+# ---------------------------------------------------------------------------
 # 正文转换
 # ---------------------------------------------------------------------------
 
@@ -282,19 +306,25 @@ def _monitor_login(key: str, channel_id: str, proc: subprocess.Popen) -> None:
 
 
 def dispatch_publication(pub_id: str, channel_key: str, article: dict) -> None:
-    """发布 worker 线程主体:queued → running → 终态。调用方持锁,这里收尾释放。
+    """发布 worker 线程主体:queued → (排队等槽) → running → 终态。
 
-    draft.json 落在 data/publish_drafts/<pub_id>.json,留档可追溯(出问题时
-    能复现当时发给渠道的内容)。
+    调用方持有渠道锁,这里收尾释放。浏览器渠道还要先抢全局发布槽:抢不到时
+    记录保持 queued,前端显示"排队中";拿到后才写 running 并起浏览器。
+    API 渠道(百家号)不起浏览器,不占槽,避免被无关的浏览器任务拖住。
     """
+    support = CHANNEL_SUPPORT[channel_key]
+    slot_held = False
     try:
+        if support["kind"] == "browser":
+            _get_publish_slots().acquire()
+            slot_held = True
+
         conn = db.connect()
         try:
             repo.update_publication_status(conn, pub_id, "running")
         finally:
             conn.close()
 
-        support = CHANNEL_SUPPORT[channel_key]
         DRAFT_DIR.mkdir(parents=True, exist_ok=True)
         draft_path = DRAFT_DIR / f"{pub_id}.json"
         draft = {"title": article["title"], "content_html": markdown_to_html(article["body"])}
@@ -336,6 +366,8 @@ def dispatch_publication(pub_id: str, channel_key: str, article: dict) -> None:
         except Exception:  # noqa: BLE001  # 连落库都失败就只能放弃了
             pass
     finally:
+        if slot_held:
+            _get_publish_slots().release()
         release_channel_lock(channel_key)
 
 
