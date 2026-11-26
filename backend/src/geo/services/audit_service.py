@@ -29,6 +29,7 @@ ACTIONS = {
     "mention.recompute",
     "tracker.delete",
     "import.rollback",
+    "answer.correction",
 }
 
 

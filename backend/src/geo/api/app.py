@@ -41,6 +41,7 @@ from geo.services import (
     audit_service,
     auth_service,
     config_service,
+    correction_service,
     credit_service,
     content_service,
     mention_service,
@@ -1659,6 +1660,65 @@ async def answer_detail(request: Request):
         conn.close()
 
 
+async def answer_correction(request: Request):
+    """P2：回答的人工纠正。GET 回显，POST 写入（upsert）。
+
+    纠正独立表，不写回 mention——已锁死的指标基准不能因为点了一下就变。
+    """
+    conn = db.connect()
+    try:
+        answer_id = request.path_params["answer_id"]
+        tenant = _tenant(request)
+        exists = conn.execute(
+            "SELECT 1 FROM answer WHERE id = ? AND tenant_id = ?", (answer_id, tenant)
+        ).fetchone()
+        if not exists:
+            return _error(request, "NOT_FOUND", "answer not found", 404)
+
+        if request.method == "GET":
+            return JSONResponse(
+                {"correction": correction_service.get_correction(conn, answer_id, tenant)}
+            )
+        if request.method == "DELETE":
+            # 撤销纠正：纠正人发现自己填错时需要能撤回，且撤回本身也要审计。
+            before = correction_service.get_correction(conn, answer_id, tenant)
+            conn.execute(
+                "DELETE FROM answer_correction WHERE answer_id = ? AND tenant_id = ?",
+                (answer_id, tenant),
+            )
+            if before:
+                audit_service.record(
+                    conn, tenant_id=tenant, action="answer.correction",
+                    object_type="answer_correction", object_id=answer_id,
+                    before=before, after=None, actor_id=_actor_id(request),
+                )
+            conn.commit()
+            return JSONResponse({"correction": None})
+
+        payload = await _json_body(request)
+        if isinstance(payload, JSONResponse):
+            return payload
+        try:
+            result = correction_service.upsert_correction(
+                conn,
+                answer_id=answer_id,
+                tenant_id=tenant,
+                payload=payload,
+                corrected_by=_actor_id(request) or "",
+            )
+            conn.commit()
+        except correction_service.CorrectionError as exc:
+            conn.rollback()
+            code = "NOT_FOUND" if exc.code == "NOT_FOUND" else "VALIDATION_ERROR"
+            return _error(request, code, str(exc), 404 if code == "NOT_FOUND" else 400)
+        except Exception:
+            conn.rollback()
+            raise
+        return JSONResponse({"correction": result})
+    finally:
+        conn.close()
+
+
 async def answers_export(request: Request):
     period = _period(request)
     if isinstance(period, JSONResponse):
@@ -1942,6 +2002,11 @@ def create_app() -> Starlette:
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/reports", create_report, methods=["POST"]),
         Route(f"{settings.api_prefix}/reports/{{report_id}}", report_detail),
         Route(f"{settings.api_prefix}/answers/{{answer_id}}", answer_detail),
+        Route(
+            f"{settings.api_prefix}/answers/{{answer_id}}/correction",
+            answer_correction,
+            methods=["GET", "POST", "DELETE"],
+        ),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/articles", list_articles),
         Route(
             f"{settings.api_prefix}/trackers/{{tracker_id}}/articles",

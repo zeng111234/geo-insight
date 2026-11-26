@@ -150,6 +150,23 @@
   button.copy-answer { border: 1px solid var(--border); background: var(--panel); color: var(--accent-ink);
     border-radius: 6px; padding: 3px 9px; font-size: var(--fs-caption); cursor: pointer; }
   button.copy-answer:hover { background: var(--accent-weak); }
+  /* P2：截图 / 纠正按钮与纠正回显标记 */
+  button.answer-shot, button.answer-correct { border: 1px solid var(--border); background: var(--panel);
+    color: var(--accent-ink); border-radius: 6px; padding: 3px 9px; font-size: var(--fs-caption);
+    cursor: pointer; }
+  button.answer-shot:hover, button.answer-correct:hover { background: var(--accent-weak); }
+  .tag.corrected { color: #8a5a00; background: #fff4d6; border-color: #e5c365; }
+  .correction-form { position: fixed; z-index: 60; right: 24px; bottom: 24px; width: 340px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.18); padding: 16px; }
+  .correction-form h4 { margin: 0 0 10px; font-size: 15px; }
+  .correction-form label { display: block; margin: 8px 0 4px; font-size: var(--fs-caption); }
+  .correction-form select, .correction-form input, .correction-form textarea {
+    width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg); color: var(--ink); font-size: var(--fs-meta); }
+  .correction-form textarea { min-height: 64px; resize: vertical; }
+  .correction-form .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .correction-form button { padding: 6px 14px; border-radius: 6px; cursor: pointer; }
   .ans-table { font-size: var(--fs-meta); }
   .ans-table td { vertical-align: top; }
   .ans-table tr.sel { background: var(--accent-weak); }
@@ -724,6 +741,130 @@
     G.toast(done ? "已复制全文（" + text.length + " 字）" : "复制失败，请手动选择正文");
   }
 
+  // P2 截图：把这条回答的「可视区」画进 canvas 再导出 PNG。
+  // 不用 html2canvas——项目零前端依赖，线上可能没网加载 CDN；自己画文本+标签，
+  // 导出的是真实图片（可下载、可打开），不是给个按钮假装截图。
+  // 逐行折行：canvas 的 fillText 不自动换行，长回答必须手动切，否则会画出画布外。
+  function wrapText(ctx, text, maxWidth) {
+    var lines = [];
+    String(text || "").split("\n").forEach(function (para) {
+      var line = "";
+      for (var i = 0; i < para.length; i++) {
+        var next = line + para[i];
+        if (ctx.measureText(next).width > maxWidth && line) {
+          lines.push(line); line = para[i];
+        } else { line = next; }
+      }
+      lines.push(line);
+    });
+    return lines;
+  }
+
+  function shotAnswer(answerId) {
+    var a = state.answers.filter(function (x) { return x.id === answerId; })[0];
+    if (!a) { G.toast("找不到这条回答"); return; }
+    var W = 760, pad = 28, y = pad;
+    var canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = 200;
+    var ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, canvas.height);
+    ctx.fillStyle = "#1b1b1b"; ctx.font = "600 15px sans-serif";
+    ctx.fillText("回答截图 · " + String(a.collected_at).slice(0, 16).replace("T", " "), pad, y + 18);
+    y += 52;
+    ctx.font = "12px sans-serif"; ctx.fillStyle = "#555";
+    ctx.fillText("模型 " + a.model_key + "  ·  引用 " + (a.citations || []).length + " 条  ·  通道 " + a.channel, pad, y);
+    y += 30;
+    ctx.font = "14px sans-serif"; ctx.fillStyle = "#1b1b1b";
+    var lines = wrapText(ctx, a.text || "", W - pad * 2);
+    // 高度按实际行数定，重设 width 会清画布，所以先量行数再一次性定高。
+    var lineH = 22;
+    var need = y + lines.length * lineH + pad + 30;
+    canvas.height = Math.max(200, need);
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, canvas.height);
+    ctx.fillStyle = "#1b1b1b"; ctx.font = "600 15px sans-serif";
+    ctx.fillText("回答截图 · " + String(a.collected_at).slice(0, 16).replace("T", " "), pad, 46);
+    ctx.font = "12px sans-serif"; ctx.fillStyle = "#555";
+    ctx.fillText("模型 " + a.model_key + "  ·  引用 " + (a.citations || []).length + " 条  ·  通道 " + a.channel, pad, 76);
+    ctx.font = "14px sans-serif"; ctx.fillStyle = "#1b1b1b";
+    lines.forEach(function (line, i) { ctx.fillText(line, pad, 110 + i * lineH); });
+    ctx.fillStyle = "#888"; ctx.font = "11px sans-serif";
+    ctx.fillText("GEO Insight · 人工识别结果以系统内为准", pad, canvas.height - 12);
+
+    var url = canvas.toDataURL("image/png");
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = "answer-" + answerId.slice(0, 8) + ".png";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    G.toast("已导出截图（" + lines.length + " 行正文）");
+  }
+
+  // P2 纠正弹层：独立表写入，只影响回显，不改自动识别的指标。
+  function openCorrectionForm(answerId) {
+    var a = state.answers.filter(function (x) { return x.id === answerId; })[0];
+    if (!a) { G.toast("找不到这条回答"); return; }
+    var old = document.querySelector(".correction-form");
+    if (old) old.remove();
+    var c = a.correction || {};
+    var own = c.own_mentioned === null || c.own_mentioned === undefined ? "" : String(c.own_mentioned);
+    var sentiment = c.sentiment || "";
+    var box = document.createElement("div");
+    box.className = "correction-form";
+    box.dataset.answer = answerId;
+    box.innerHTML = '<h4>人工纠正 · ' + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</h4>" +
+      '<label>本品牌是否提及</label><select data-field="own_mentioned">' +
+        '<option value="">未判定</option>' +
+        '<option value="1"' + (own === "1" ? " selected" : "") + ">提及</option>" +
+        '<option value="0"' + (own === "0" ? " selected" : "") + ">未提及</option></select>" +
+      '<label>情感</label><select data-field="sentiment">' +
+        '<option value="">未判定</option>' +
+        ["pos", "neu", "neg"].map(function (v) {
+          return '<option value="' + v + '"' + (sentiment === v ? " selected" : "") + ">" +
+            esc(SENTI_TEXT[v] || v) + "</option>";
+        }).join("") + "</select>" +
+      '<label>位次（≥1）</label><input data-field="position" type="number" min="1" value="' +
+        (c.position == null ? "" : c.position) + '">' +
+      '<label>备注</label><textarea data-field="note" maxlength="2000">' + esc(c.note || "") + "</textarea>" +
+      '<div class="row"><button type="button" data-act="cancel">取消</button>' +
+      '<button type="button" data-act="save">保存纠正</button></div>';
+    document.body.appendChild(box);
+    // 填过的纠正要能读回来改，所以打开时异步拉一次权威值，避免列表缓存过期
+    G.get("/answers/" + encodeURIComponent(answerId) + "/correction").then(function (d) {
+      if (!box.isConnected) return;
+      var fresh = (d && d.correction) || {};
+      box.querySelector('[data-field="own_mentioned"]').value =
+        fresh.own_mentioned == null ? "" : String(fresh.own_mentioned);
+      box.querySelector('[data-field="sentiment"]').value = fresh.sentiment || "";
+      box.querySelector('[data-field="position"]').value = fresh.position == null ? "" : fresh.position;
+      box.querySelector('[data-field="note"]').value = fresh.note || "";
+    }).catch(function () { /* 打不开就沿用列表里的值，不阻断人工录入 */ });
+  }
+
+  async function saveCorrection(box) {
+    var id = box.dataset.answer;
+    var payload = {};
+    Array.prototype.forEach.call(box.querySelectorAll("[data-field]"), function (el) {
+      var field = el.dataset.field;
+      var raw = el.value.trim();
+      if (field === "note") payload.note = raw;
+      else if (field === "position") payload.position = raw === "" ? null : Number(raw);
+      else if (field === "own_mentioned") payload.own_mentioned = raw === "" ? null : Number(raw);
+      else payload[field] = raw === "" ? null : raw;
+    });
+    var btn = box.querySelector('[data-act="save"]');
+    btn.disabled = true;
+    try {
+      await G.post("/answers/" + encodeURIComponent(id) + "/correction", payload);
+      box.remove();
+      G.toast("已保存纠正（只在人工层回显，不改自动指标）");
+      await loadAnswerPage();  // 回显"已纠正"标记，必须重新取数
+    } catch (e) {
+      G.toast("保存纠正失败：" + e.message, "error");
+      btn.disabled = false;
+    }
+  }
+
   var PAGE_SIZE = 10;
 
   // 一条回答的「标签区」：阅读视图与表格视图共用，避免两处各自维护导致口径分叉。
@@ -742,13 +883,30 @@
       '" title="复制这条回答全文">复制</button>';
   }
 
+  // P2：行内截图与纠正。三个按钮共用一条回答的 id，事件委托在 tabBody 上统一处理。
+  function answerActions(a) {
+    return copyButton(a) +
+      '<button type="button" class="answer-shot" data-shot="' + esc(a.id) +
+      '" title="导出这条回答为图片">截图</button>' +
+      '<button type="button" class="answer-correct" data-correct="' + esc(a.id) +
+      '" title="人工纠正这条回答的识别结果">纠正</button>';
+  }
+
+  // P2：纠正回显标记。纠正独立表、不改自动识别，所以这里只标"人工已纠正"，
+  // 不覆盖 answerTags 里的自动识别标签——两套口径并列，不静默替换。
+  function correctionTag(a) {
+    return a.correction
+      ? '<span class="tag corrected" title="人工纠正，不参与自动指标">已纠正</span>'
+      : "";
+  }
+
   function renderAnswerReading() {
     return state.answers.map(function (a) {
       return '<div class="answer' + (a.id === state.selectedAnswer ? " sel" : "") +
         '" data-answer="' + esc(a.id) + '"><div class="head">' +
-        answerTags(a) +
+        answerTags(a) + correctionTag(a) +
         '<span class="muted">' + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</span>" +
-        '<span class="spacer"></span>' + copyButton(a) +
+        '<span class="spacer"></span>' + answerActions(a) +
         '<a class="plain" href="/answer/' + esc(a.id) + '">证据详情 →</a></div>' +
         '<div class="text">' + esc((a.text || "").slice(0, 320)) + ((a.text || "").length > 320 ? "…" : "") + "</div>" +
         '<div class="cite">引用 ' + (a.citations || []).length + " 条 · 通道 " + esc(a.channel) + "</div></div>";
@@ -767,10 +925,14 @@
           (a.id === state.selectedAnswer ? ' class="sel"' : "") + ">" +
           "<td>" + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</td>" +
           "<td>" + esc(a.model_key) + "</td>" +
-          "<td>" + (own ? "第 " + G.num(own.position) + " 位" : "未提及") + "</td>" +
+          "<td>" + (a.correction && a.correction.own_mentioned !== null
+            ? (a.correction.own_mentioned === 1
+                ? (a.correction.position ? "人工：第 " + G.num(a.correction.position) + " 位" : "人工：提及")
+                : "人工：未提及")
+            : (own ? "第 " + G.num(own.position) + " 位" : "未提及")) + "</td>" +
           "<td>" + esc((a.text || "").slice(0, 90)) + ((a.text || "").length > 90 ? "…" : "") + "</td>" +
           "<td>" + (a.citations || []).length + "</td>" +
-          '<td>' + copyButton(a) + '<a class="plain" href="/answer/' + esc(a.id) + '">详情</a></td>' +
+          '<td>' + answerActions(a) + '<a class="plain" href="/answer/' + esc(a.id) + '">详情</a></td>' +
           "</tr>";
       }).join("") + "</tbody></table></div>";
   }
@@ -1354,6 +1516,19 @@
       copyAnswerText(cp.dataset.copy);
       return;
     }
+    // P2：截图与纠正同为行内操作，都要先拦住，不能冒成"选中这条回答"
+    var shot = e.target.closest("[data-shot]");
+    if (shot) {
+      e.preventDefault(); e.stopPropagation();
+      shotAnswer(shot.dataset.shot);
+      return;
+    }
+    var correct = e.target.closest("[data-correct]");
+    if (correct) {
+      e.preventDefault(); e.stopPropagation();
+      openCorrectionForm(correct.dataset.correct);
+      return;
+    }
     var vb = e.target.closest("[data-view]");
     if (vb) {
       if (vb.dataset.view === state.answerView) return;
@@ -1680,6 +1855,21 @@
     if (!wanted) { $("tabBody").innerHTML = G.empty("还没有监控对象"); return; }
     await renderTab();
   })();
+
+  // P2 纠正弹层的按钮不在 tabBody 里（挂 body 上），单独委托一次。
+  document.addEventListener("click", function (e) {
+    var box = e.target.closest(".correction-form");
+    if (!box) {
+      // 点弹层外面：关闭而不保存。纠正弹层不是模态，关掉不该写任何东西。
+      var open = document.querySelector(".correction-form");
+      if (open && !e.target.closest("[data-correct]")) open.remove();
+      return;
+    }
+    var act = e.target.closest("[data-act]");
+    if (!act) return;
+    if (act.dataset.act === "cancel") box.remove();
+    else if (act.dataset.act === "save") saveCorrection(box);
+  });
 })();
 </script>
 </body>

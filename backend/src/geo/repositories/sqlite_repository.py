@@ -273,6 +273,8 @@ def list_answers(
     items = []
     for r in rows:
         item = dict(r)
+        # P2：人工纠正与自动识别分列返回，互不覆盖。前端据此回显"已纠正"标记。
+        item["correction"] = _correction_of(conn, r["id"])
         item["mentions"] = [
             dict(m)
             for m in conn.execute(
@@ -698,6 +700,16 @@ def coverage_rows(
     return [dict(r) for r in rows]
 
 
+def _correction_of(conn: sqlite3.Connection, answer_id: str) -> dict | None:
+    """P2：一条回答的人工纠正记录（不存在返回 None）。单独函数，列表与详情共用同一口径。"""
+    row = conn.execute(
+        """SELECT own_mentioned, sentiment, position, note, corrected_by, created_at, updated_at
+           FROM answer_correction WHERE answer_id = ?""",
+        (answer_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def get_answer_detail(conn: sqlite3.Connection, answer_id: str, tenant_id: str) -> dict | None:
     row = conn.execute(
         """
@@ -713,6 +725,7 @@ def get_answer_detail(conn: sqlite3.Connection, answer_id: str, tenant_id: str) 
     if not row:
         return None
     detail = dict(row)
+    detail["correction"] = _correction_of(conn, answer_id)
     detail["mentions"] = [
         dict(r)
         for r in conn.execute(

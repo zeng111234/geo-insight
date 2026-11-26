@@ -108,7 +108,7 @@ python backend/run.py
 | tab | 状态 |
 |---|---|
 | 指标看板 | **已接** `/metrics/overview` + `/metrics/by-question` + `/metrics/trend`：5 张指标卡 + 12 个问题的分问题表现（含对比条）+ 提及率趋势（缺数据断开）+ 引用概览 |
-| 问答明细 | **已接**：问题下拉 + 回答列表（服务端分页）+ 右栏引用信源，点一条回答右栏跟着换 |
+| 问答明细 | **已接**：问题下拉 + 回答列表（服务端分页）+ 右栏引用信源，点一条回答右栏跟着换；行内「截图」导出该回答 PNG，「纠正」人工标注并回显 |
 | 指标明细 | **已接** `/metrics/{m}/samples`：5 个指标可切，表里标出**哪些样本进了分母**，12 行/页 |
 | 趋势分析 | **已接** `/metrics/trend`：按日 / 按周切换（`granularity=week`，周一为起点，标出实际天数），提及率折线（缺数据断开）+ 摘要表；平均排名按「位次和 ÷ 位次数」重算，不是日平均值再平均 |
 | 信源分析 | **已接** `/citations/summary` + `/citations`：总量、类型分布、媒体排行、URL 去重明细（服务端分页） |
@@ -122,6 +122,13 @@ python backend/run.py
 答案正文一个核心词都没出现时，问答明细里标「疑似跑题」；没配核心词时接口返回 `off_topic: null`
 （未判定），不会把「没配置」显示成「全都跑题」。这条判断由服务端算（`domain/relevance.py`），
 前端只负责显示，避免两个地方各写一套字符串匹配。
+
+**人工纠正（P2）**：问答明细每条回答有「纠正」，写入 `/v1/answers/{id}/correction`
+（GET 回显 / POST 保存 / DELETE 撤销），可标「本品牌是否提及 / 情感 / 位次 / 备注」。
+纠正存**独立表**，不写回 `mention`——黄金窗口的 19 项手算值基于自动识别，
+写回会让已验收基准作废；纠正作为人工事实源单独可查、可审计、回显「已纠正」标记。
+截图用 canvas 把该回答正文画成 PNG 下载，零前端依赖、不靠 CDN。
+CDP 真点由 `p2check.mjs` 守（8 条，含刷新后回显与取消不改），跑在新实例端口、不碰 8123。
 
 10 个 tab 全部接真实数据，没有占位或写死数字。新增的三个聚合接口（竞品排名、竞品共现、情感按模型）
 与既有口径做了交叉校验：情感按模型合并后与看板总览逐字段相等，采集健康的「已采」等于总览 `valid_total`。
@@ -349,7 +356,18 @@ python scripts/baijiahao_check.py --init            # 百家号:开放平台 API
 ### 上线前自检 + 进程守护
 
 服务器和"两台电脑轮流跑"最大的差别是：**本地能跑，上线才炸的那几项没人拦**。
-上线前先跑这条（叠加在普通自检之上，只读、不改配置）：
+
+**第一道门：空库首启演练**（所有单测都在已建好的库上跑，从零起服务这条路以前没人验过）：
+
+```bash
+python backend/scripts/deploy_rehearse.py     # 临时空库+随机端口，跑真 run.py，退出码必须 0
+```
+
+它起一个真服务（不碰真实 geo.db），验：空库→迁移全链→seed→`/health`→13 个页面与
+4 个首屏接口全 200→迁移版本等于仓库最高版本。以后谁加了迁移却没接上，这条会先红，
+而不是等服务器首启才炸。注：`GEO_AUTH_REQUIRED=0` 只是让页面能直接打开，鉴权链路另有测试。
+
+**第二道门：配置自检**（叠加在普通自检之上，只读、不改配置）：
 
 ```bash
 python backend/scripts/doctor.py --server     # 退出码必须是 0
@@ -404,7 +422,7 @@ systemctl list-timers geo-insight-backup.timer     # 确认下次触发时间
 4. 数据库路径固定（默认项目根 `geo.db`，可用 `GEO_DB_PATH` 指到数据盘）；
 5. `pip install -r backend/requirements.lock.txt`（不要用宽松声明）；
 6. 定时备份 timer 已 `enable --now`，两套 unit 的 `GEO_DB_PATH` 一致，手动跑一次确认；
-7. `doctor.py --server` 退出码 0，再 `systemctl enable --now geo-insight`。
+7. `deploy_rehearse.py` 与 `doctor.py --server` 都退出 0，再 `systemctl enable --now geo-insight`。
 
 ## 接口
 
@@ -467,6 +485,9 @@ node scripts/browsercheck.mjs                                 # 75 条真实浏�
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 node scripts/interactioncheck.mjs                             # 46 条 CDP 真实点击（删除确认/暂停恢复/新建抽屉+字段落库/表格浏览/首页下钻+口径/报告打印/采集任务/设置删除确认，需 Chrome/Edge）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）
+python scripts/deploy_rehearse.py                              # 部署首启演练：临时空库起真服务，验迁移链+seed+13页+4接口
+# P2 专项：先在 8137 起新实例（GEO_PORT=8137），再跑：
+GEO_BASE=http://127.0.0.1:8137 node scripts/p2check.mjs        # 8 条 CDP 真点：截图产图/纠正落库回显/取消不改
 ```
 
 全部通过。各脚本精确条数以 `specs/003-next-stage-roadmap/tasks.md` 的「验证状态」为准
