@@ -100,6 +100,11 @@
   var stat = function (l, v, s) {
     return '<div class="card"><div class="label">' + esc(l) + '</div><div class="value">' + esc(v) + '</div><div class="sub">' + esc(s) + "</div></div>";
   };
+  // 与 tasks.html 同口径：http(s) 且不是种子 demo-article 假链才算有效回链。
+  // 假链渲染成可点「回链 →」会让人以为真发布成功过——诚实起见标出来。
+  function isValidUrl(u) {
+    return typeof u === "string" && /^https?:\/\//i.test(u) && !/demo-article/i.test(u);
+  }
   var PUB_TEXT = {
     queued: "排队中", running: "发布中…", published: "已发布",
     draft_saved: "已存草稿", blocked: "被平台拦", failed: "失败", unknown: "待人工确认",
@@ -154,7 +159,8 @@
         '<span class="muted">' + esc(x.r.title) + "</span>" +
         '<span class="spacer"></span>' +
         '<span class="muted">' + esc((p.published_at || "").slice(0, 16).replace("T", " ")) + "</span>" +
-        (p.published_url ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链 →</a>'
+        (isValidUrl(p.published_url) ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链 →</a>'
+         : p.published_url ? '<span class="muted" title="种子演示数据，不是真实发布">演示回链（非真实发布）</span>'
                          : '<span class="muted">无回链</span>') +
         // 失败原因单独占一行：长文本塞进行内胶囊会被挤成一条读不下去的红字。
         (p.failure_reason ? '<div class="pub-fail">失败原因：' + esc(p.failure_reason) + "</div>" : "") + "</div>";

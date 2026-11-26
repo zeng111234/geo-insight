@@ -345,5 +345,20 @@ class OpportunityToStudioLoopContractTest(unittest.TestCase):
         self.assertIn("sel.value = wanted", js)
 
 
+class PublishLinkHonestyContractTest(unittest.TestCase):
+    """发布页回链：种子 demo 假链不能渲染成可点真实回链。
+
+    隔壁在 tasks.html 做了 isValidUrl 排除 demo-article，publish.html 曾漏掉——
+    4 条 published 全是假 URL 却显示可点「回链 →」，像是真发布成功过。
+    """
+
+    def test_publish_page_excludes_demo_fake_links(self):
+        html = (PROJECT_ROOT / "frontend" / "static" / "publish.html").read_text(encoding="utf-8")
+        self.assertIn("function isValidUrl", html)
+        self.assertIn("/demo-article/i", html)
+        self.assertIn("演示回链", html)
+        self.assertIn("isValidUrl(p.published_url)", html)
+
+
 if __name__ == "__main__":
     unittest.main()
