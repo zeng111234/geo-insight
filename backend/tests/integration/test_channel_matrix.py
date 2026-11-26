@@ -186,6 +186,33 @@ class ChannelHttpTest(unittest.TestCase):
         self.assertEqual(len(data["items"]), 16)
         self.assertEqual(data["unavailable"], 13)
 
+    def test_tab_counts_accepts_client_and_echoes_it(self):
+        """P3:tab-counts 端点认 client、回显 filters；非法端值明确拒绝。"""
+        base = (
+            f"/v1/trackers/{self.tracker_id}/metrics/tab-counts"
+            "?from=2026-11-01&to=2026-11-30"
+        )
+        ok = self.client.get(base + "&client=mobile")
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["filters"]["client"], "mobile")
+
+        bad = self.client.get(base + "&client=tablet")
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("client", bad.json().get("message", "").lower())
+
+    def test_overview_endpoint_filters_by_client(self):
+        """P3:端点把 client 透传到 service/repo——seed 库全是 web，选 mobile 应全 0。
+
+        若端点漏传 client，mobile 会拿到全端数字（非 0），这条就会红。
+        """
+        base = f"/v1/trackers/{self.tracker_id}/metrics/overview"
+        all_data = self.client.get(base + "?from=2026-11-01&to=2026-11-30").json()
+        web = self.client.get(base + "?from=2026-11-01&to=2026-11-30&client=web").json()
+        mobile = self.client.get(base + "?from=2026-11-01&to=2026-11-30&client=mobile").json()
+        self.assertGreater(all_data["sample_total"], 0, "seed 库应有样本")
+        self.assertEqual(web["sample_total"], all_data["sample_total"], "全库皆 web")
+        self.assertEqual(mobile["sample_total"], 0, "无手机端样本时应为 0，不是回退到全端")
+
 
 if __name__ == "__main__":
     unittest.main()

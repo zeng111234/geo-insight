@@ -259,6 +259,7 @@
             <label>品牌 <select id="brandFilter" aria-label="品牌"><option value="">加载中…</option></select></label>
             <label>问题 <select id="questionFilter" aria-label="问题"><option value="">全部问题</option></select></label>
             <label>模型 <select id="modelFilter" aria-label="模型"><option value="">全部模型</option></select></label>
+            <label>端 <select id="clientFilter" aria-label="端"><option value="">全部端</option><option value="web">网页</option><option value="mobile">手机</option></select></label>
             <span class="muted" id="modelChannelHint" style="font-size:var(--fs-caption)"></span>
             <label>日期 <span class="dates" id="filterDates"></span></label>
             <button type="button" class="small" id="clearFilters">清除筛选</button>
@@ -362,6 +363,7 @@
     questionId: "",
     filterQuestion: "",
     filterModel: "",
+    filterClient: "",
     tabCounts: {},
     answers: [],
     answerTotal: 0,
@@ -400,6 +402,7 @@
       answerView: q.get("view") === "table" ? "table" : "reading",
       filterQuestion: q.get("question") || "",
       filterModel: q.get("model") || "",
+      filterClient: q.get("client") || "",
       granularity: q.get("g") === "week" ? "week" : "day"
     };
   }
@@ -407,7 +410,8 @@
 
   function filterQuery() {
     return (state.filterQuestion ? "&questionId=" + encodeURIComponent(state.filterQuestion) : "") +
-      (state.filterModel ? "&model=" + encodeURIComponent(state.filterModel) : "");
+      (state.filterModel ? "&model=" + encodeURIComponent(state.filterModel) : "") +
+      (state.filterClient ? "&client=" + encodeURIComponent(state.filterClient) : "");
   }
 
   function syncFilterControls() {
@@ -436,18 +440,21 @@
     }
     var msel = $("modelFilter");
     if (msel && !msel.dataset.ready) {
-      // 现有采集只有网页渠道（domain/channels.py 的 AVAILABLE_KEYS）。
-      // 选项标「·网页」并在下方说明手机端未接入——不让用户误以为能对比 16 个渠道。
-      // value 仍是纯 model_key，API 口径不变；这只是诚实的展示标注。
+      // 模型与端是两个独立维度：模型从 8 个里选，端从独立下拉选。
+      // 下拉不再写「·网页」——端由 clientFilter 决定，避免两处口径打架。
       msel.innerHTML = '<option value="">全部模型</option>' +
-        ["doubao", "deepseek", "kimi", "qwen", "yuanbao"].map(function (m) {
-          return '<option value="' + m + '">' + m + " · 网页</option>";
+        ["doubao", "deepseek", "kimi", "qwen", "yuanbao", "wenxin", "quark", "bing"].map(function (m) {
+          return '<option value="' + m + '">' + m + "</option>";
         }).join("");
-      var hint = $("modelChannelHint");
-      if (hint) hint.textContent = "当前仅网页渠道有数据；手机端未接入";
       msel.dataset.ready = "1";
     }
     if (msel) msel.value = state.filterModel;
+    var csel = $("clientFilter");
+    if (csel) csel.value = state.filterClient;
+    var hint = $("modelChannelHint");
+    if (hint) hint.textContent = state.filterClient === "mobile"
+      ? "手机端尚未接入采集，筛选结果可能为 0"
+      : "模型按 8 个渠道选；端可单独筛选";
   }
 
   async function applyFilters() {
@@ -476,6 +483,8 @@
     else url.searchParams.delete("question");
     if (state.filterModel) url.searchParams.set("model", state.filterModel);
     else url.searchParams.delete("model");
+    if (state.filterClient) url.searchParams.set("client", state.filterClient);
+    else url.searchParams.delete("client");
     if (state.tab === "trend" && state.granularity === "week") url.searchParams.set("g", "week");
     else url.searchParams.delete("g");
     if (state.tab === "answers" && state.answerView === "table") url.searchParams.set("view", "table");
@@ -1619,8 +1628,11 @@
   $("modelFilter").addEventListener("change", function () {
     state.filterModel = this.value; applyFilters();
   });
+  $("clientFilter").addEventListener("change", function () {
+    state.filterClient = this.value; applyFilters();
+  });
   $("clearFilters").addEventListener("click", function () {
-    state.filterQuestion = ""; state.filterModel = "";
+    state.filterQuestion = ""; state.filterModel = ""; state.filterClient = "";
     applyFilters();
   });
   ["from", "to"].forEach(function (id) {
@@ -1816,6 +1828,7 @@
     state.answerView = q.answerView;
     state.filterQuestion = q.filterQuestion;
     state.filterModel = q.filterModel;
+    state.filterClient = q.filterClient;
     syncFilterControls();
     if ($("citeView")) $("citeView").value = state.citeView;
     if (q.tracker && q.tracker !== state.trackerId) {
@@ -1838,6 +1851,7 @@
     state.answerView = q.answerView;
     state.filterQuestion = q.filterQuestion;
     state.filterModel = q.filterModel;
+    state.filterClient = q.filterClient;
     syncFilterControls();
     if ($("citeView")) $("citeView").value = state.citeView;
     await G.fillTrackers();

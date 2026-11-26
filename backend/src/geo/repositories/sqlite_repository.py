@@ -34,6 +34,7 @@ def _filters(
     end: str,
     model: str | None,
     channel: str | None,
+    client: str | None = None,
     alias: str = "a",
 ) -> tuple[str, list[Any]]:
     clauses = [
@@ -49,6 +50,9 @@ def _filters(
     if channel:
         clauses.append(f"{alias}.channel = ?")
         params.append(channel)
+    if client:
+        clauses.append(f"{alias}.client = ?")
+        params.append(client)
     return " AND ".join(clauses), params
 
 
@@ -163,8 +167,9 @@ def overview_counts(
     end: str,
     model: str | None,
     channel: str | None,
+    client: str | None = None,
 ) -> dict:
-    where, params = _filters(tracker_id, start, end, model, channel)
+    where, params = _filters(tracker_id, start, end, model, channel, client)
 
     sample_row = conn.execute(
         f"SELECT COUNT(*) AS sample_total FROM answer a WHERE {where}",
@@ -219,8 +224,9 @@ def trend_rows(
     end: str,
     model: str | None,
     channel: str | None,
+    client: str | None = None,
 ) -> list[dict]:
-    where, params = _filters(tracker_id, start, end, model, channel)
+    where, params = _filters(tracker_id, start, end, model, channel, client)
     rows = conn.execute(
         f"""
         SELECT {day_of('a.collected_at')} AS day,
@@ -251,8 +257,9 @@ def list_answers(
     limit: int,
     cite_type: str | None = None,
     cite_view: str = "all",
+    client: str | None = None,
 ) -> tuple[list[dict], int]:
-    where, params = _filters(tracker_id, start, end, model, None)
+    where, params = _filters(tracker_id, start, end, model, None, client)
     if question_id:
         where += " AND a.question_id = ?"
         params.append(question_id)
@@ -314,9 +321,10 @@ def citation_summary(
     end: str,
     model: str | None,
     channel: str | None,
+    client: str | None = None,
     cite_type: str | None = None,
 ) -> dict:
-    where, params = _filters(tracker_id, start, end, model, channel)
+    where, params = _filters(tracker_id, start, end, model, channel, client)
     if cite_type:  # H2-7:合法值由 domain.citation.citation_type_filter 保证
         where += " AND c.cite_type = ?"
         params = [*params, cite_type]
@@ -644,9 +652,10 @@ def metric_sample_rows(
     end: str,
     model: str | None,
     channel: str | None,
+    client: str | None = None,
 ) -> list[dict]:
     """一条答案一行，带提及信息；由服务层按指标决定谁进入分母。"""
-    where, params = _filters(tracker_id, start, end, model, channel)
+    where, params = _filters(tracker_id, start, end, model, channel, client)
     rows = conn.execute(
         f"""
         SELECT a.id AS answer_id, a.question_id, q.text AS question_text, q.tier,
@@ -670,6 +679,7 @@ def coverage_rows(
     end: str,
     model: str | None,
     channel: str | None,
+    client: str | None = None,
 ) -> list[dict]:
     """以问题为分母：没有样本的问题也必须在列表里，否则覆盖率会被高估。"""
     on_clause = f"a.question_id = q.id AND a.is_valid = 1 AND {day_of('a.collected_at')} BETWEEN ? AND ?"
@@ -680,6 +690,9 @@ def coverage_rows(
     if channel:
         on_clause += " AND a.channel = ?"
         params.append(channel)
+    if client:
+        on_clause += " AND a.client = ?"
+        params.append(client)
     params.append(tracker_id)
     rows = conn.execute(
         f"""
@@ -751,9 +764,10 @@ def get_answer_detail(conn: sqlite3.Connection, answer_id: str, tenant_id: str) 
 
 
 def export_answer_rows(
-    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
 ) -> list[dict]:
-    where, params = _filters(tracker_id, start, end, None, None)
+    where, params = _filters(tracker_id, start, end, None, None, client)
     rows = conn.execute(
         f"""
         SELECT a.id AS answer_id, {day_of('a.collected_at')} AS day, a.collected_at,
@@ -797,6 +811,7 @@ def url_dedup_citations(
     limit: int = 100,
     offset: int = 0,
     media_type: str | None = None,
+    client: str | None = None,
     cite_type: str | None = None,
 ) -> dict:
     """FR-020：内容明细按 URL 去重，次数仍按出现次数累计。
@@ -804,7 +819,7 @@ def url_dedup_citations(
     totals 是全量口径（不是当前页）；items 按 limit/offset 分页，默认 100 行。
     以前 totals 在 LIMIT 后的行上求和，数据一厚就出现「3254 次引用只报 100 次出现」。
     """
-    where, params = _filters(tracker_id, start, end, None, None)
+    where, params = _filters(tracker_id, start, end, None, None, client)
     if media_type:
         where += " AND c.media_type = ?"
         params = [*params, media_type]
@@ -894,7 +909,8 @@ def competitor_cooccurrence_rows(
 
 
 def sentiment_by_model_rows(
-    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
 ) -> list[dict]:
     """按模型拆情感：只统计本方品牌的提及。
 
@@ -917,10 +933,11 @@ def sentiment_by_model_rows(
         LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
         WHERE a.tracker_id = ? AND a.is_valid = 1
           AND {day_of('a.collected_at')} BETWEEN ? AND ?
+          {'AND a.client = ?' if client else ''}
         GROUP BY a.model_key
         ORDER BY a.model_key
         """,
-        (tracker_id, start, end),
+        (tracker_id, start, end) + ((client,) if client else ()),
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -948,6 +965,7 @@ def tab_count_rows(
     end: str,
     question_id: str | None = None,
     model: str | None = None,
+    client: str | None = None,
 ) -> dict:
     """一次查询给工作台 10 个 tab 的计数。
 
@@ -971,6 +989,9 @@ def tab_count_rows(
     if model:
         clauses.append("a.model_key = ?")
         params.append(model)
+    if client:
+        clauses.append("a.client = ?")
+        params.append(client)
     where = " AND ".join(clauses)
 
     row = conn.execute(
@@ -1027,7 +1048,8 @@ def channel_sample_rows(
 
 
 def question_performance_rows(
-    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
 ) -> list[dict]:
     """按问题聚合：有效样本、本方提及、有位次的条数、平均位次。
 
@@ -1046,12 +1068,13 @@ def question_performance_rows(
         LEFT JOIN answer a
                ON a.question_id = q.id AND a.is_valid = 1
               AND {day_of('a.collected_at')} BETWEEN ? AND ?
+              {'AND a.client = ?' if client else ''}
         LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
         WHERE qs.tracker_id = ? AND q.status = 'active'
            AND qs.id = (SELECT t.active_question_set_id FROM tracker t WHERE t.id = qs.tracker_id)
         GROUP BY q.id, q.text, q.tier
         ORDER BY q.tier, q.created_at, q.id
         """,
-        (start, end, tracker_id),
+        (start, end) + ((client,) if client else ()) + (tracker_id,),
     ).fetchall()
     return [dict(r) for r in rows]

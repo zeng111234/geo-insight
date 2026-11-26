@@ -323,6 +323,18 @@ def _period(request: Request) -> tuple[str, str] | JSONResponse:
     return start.isoformat(), end.isoformat()
 
 
+def _client_param(request: Request) -> tuple[str | None, JSONResponse | None]:
+    """端筛选参数：只认 web/mobile（与 16 渠道矩阵的 client 维度同口径）。
+
+    返回 (client, error)。非法端值必须明确拒绝，不能静默当「全部」——否则
+    用户选了个拼错的端，看到的却是全端数字，比报错更误导。
+    """
+    client = request.query_params.get("client") or None
+    if client and not channels_domain.is_known_client(client):
+        return None, _error(request, "VALIDATION_ERROR", f"unknown client: {client}", 400)
+    return client, None
+
+
 def _frontend_dir() -> Path | None:
     """Locate frontend/static by walking up from this file.
 
@@ -424,8 +436,11 @@ async def metrics_by_question(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         return JSONResponse(
-            metric_service.build_question_performance(conn, tracker_id, period[0], period[1])
+            metric_service.build_question_performance(conn, tracker_id, period[0], period[1], client)
         )
     finally:
         conn.close()
@@ -469,8 +484,11 @@ async def metrics_sentiment_by_model(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         return JSONResponse(
-            metric_service.build_sentiment_by_model(conn, tracker_id, period[0], period[1])
+            metric_service.build_sentiment_by_model(conn, tracker_id, period[0], period[1], client)
         )
     finally:
         conn.close()
@@ -486,6 +504,9 @@ async def metrics_tab_counts(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         counts = repo.tab_count_rows(
             conn,
             tracker_id,
@@ -493,6 +514,7 @@ async def metrics_tab_counts(request: Request):
             period[1],
             request.query_params.get("questionId") or None,
             request.query_params.get("model") or None,
+            client,
         )
         samples = counts["samples"] or 0
         return JSONResponse(
@@ -512,6 +534,7 @@ async def metrics_tab_counts(request: Request):
                 "filters": {
                     "questionId": request.query_params.get("questionId") or "",
                     "model": request.query_params.get("model") or "",
+                    "client": client or "",
                 },
                 "window": {"from": period[0], "to": period[1]},
             }
@@ -529,6 +552,9 @@ async def metrics_overview(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         payload = metric_service.build_overview(
             conn,
             tracker_id,
@@ -536,6 +562,7 @@ async def metrics_overview(request: Request):
             period[1],
             request.query_params.get("model"),
             request.query_params.get("channel"),
+            client,
         )
         return JSONResponse(payload)
     finally:
@@ -554,6 +581,9 @@ async def metrics_trend(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         return JSONResponse(
             metric_service.build_trend(
                 conn,
@@ -562,7 +592,8 @@ async def metrics_trend(request: Request):
                 period[1],
                 request.query_params.get("model"),
                 request.query_params.get("channel"),
-                granularity,
+                granularity=granularity,
+                client=client,
             )
         )
     finally:
@@ -592,6 +623,9 @@ async def list_answers(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         tracker = repo.get_tracker(conn, tracker_id, _tenant(request))
         items, total = repo.list_answers(
             conn,
@@ -605,6 +639,7 @@ async def list_answers(request: Request):
             limit,
             cite_type=cite_type,
             cite_view=cite_view,
+            client=client,
         )
         # 没有核心词时 off_topic 为 None（未判定），不能当成 False;
         # H2-6:核心词取当前生效问题集(切换问题集,跑题判定跟随)
@@ -634,6 +669,9 @@ async def citations_summary(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         try:
             cite_type = citation_domain.citation_type_filter(request.query_params.get("citeType"))
         except ValueError as e:
@@ -646,6 +684,7 @@ async def citations_summary(request: Request):
                 period[1],
                 request.query_params.get("model"),
                 request.query_params.get("channel"),
+                client,
                 cite_type,
             )
         )
@@ -671,6 +710,9 @@ async def citations_detail(request: Request):
         # mediaType：视频/图文引用 tab 只需要某一类，在服务端过滤，
         # 否则前端得先拉全量再去重分页，页码会算错
         media_type = (request.query_params.get("mediaType") or "").strip() or None
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         try:
             cite_type = citation_domain.citation_type_filter(request.query_params.get("citeType"))
         except ValueError as e:
@@ -684,6 +726,7 @@ async def citations_detail(request: Request):
             offset=(page - 1) * limit,
             media_type=media_type,
             cite_type=cite_type,
+            client=client,
         )
         return JSONResponse({
             "items": detail["items"],
@@ -1634,6 +1677,9 @@ async def metric_samples(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         return JSONResponse(
             metric_service.build_samples(
                 conn,
@@ -1643,6 +1689,7 @@ async def metric_samples(request: Request):
                 metric,
                 request.query_params.get("model"),
                 request.query_params.get("channel"),
+                client,
             )
         )
     finally:
@@ -1731,7 +1778,10 @@ async def answers_export(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
-        rows = repo.export_answer_rows(conn, tracker_id, period[0], period[1])
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
+        rows = repo.export_answer_rows(conn, tracker_id, period[0], period[1], client)
         filename = f"answers-{tracker_id[:8]}-{period[0]}_{period[1]}.{fmt}"
         if fmt == "jsonl":
             body = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)

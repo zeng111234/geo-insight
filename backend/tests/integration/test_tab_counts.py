@@ -54,6 +54,29 @@ class TabCountTest(unittest.TestCase):
         self.assertEqual(self._counts(model="kimi")["samples"], 2)
         self.assertEqual(self._counts(model="qwen")["samples"], 0)
 
+    def test_client_filter_changes_all_tab_counts(self):
+        """P3:选端后每个 tab 的数字都只算该端——10 个 tab 共用同一 WHERE。"""
+        # 两端用不同的日子段，避免 row_hash 撞车（hash 不含 client）
+        for client, days in (("web", ("11-10", "11-11", "11-12")),
+                             ("mobile", ("11-13", "11-14"))):
+            for day in days:
+                answer_id = fixtures.add_answer(
+                    self.conn, f"2026-{day}T10:00:00+08:00", model_key="doubao", client=client
+                )
+                fixtures.add_mention(self.conn, answer_id)
+        # 不筛选：两端合计
+        self.assertEqual(self._counts()["samples"], 5)
+        self.assertEqual(self._counts()["mentions"], 5)
+        # 按端筛选：samples 与 mentions 只算该端（共用 WHERE，不会只变一半）
+        mobile = self._counts(client="mobile")
+        self.assertEqual(mobile["samples"], 2)
+        self.assertEqual(mobile["mentions"], 2)
+        web = self._counts(client="web")
+        self.assertEqual(web["samples"], 3)
+        self.assertEqual(web["mentions"], 3)
+        # 未采集的端返回 0 而不是报错，也不是回退到全端
+        self.assertEqual(self._counts(client="mobile", model="kimi")["samples"], 0)
+
     def test_question_filter_changes_counts(self):
         other = fixtures.add_question(self.conn, "沈阳交通事故律师怎么选")
         fixtures.add_answer(self.conn, "2026-11-10T10:00:00+08:00")

@@ -66,8 +66,9 @@ def build_overview(
     end: str,
     model: str | None,
     channel: str | None,
+    client: str | None = None,
 ) -> dict:
-    counts = repo.overview_counts(conn, tracker_id, start, end, model, channel)
+    counts = repo.overview_counts(conn, tracker_id, start, end, model, channel, client)
     positions = counts["positions"]
     valid_total = counts["valid_total"]
 
@@ -107,6 +108,7 @@ def build_trend(
     model: str | None,
     channel: str | None,
     granularity: str = "day",
+    client: str | None = None,
 ) -> dict:
     """按日或按周的趋势。
 
@@ -118,7 +120,7 @@ def build_trend(
     if granularity not in {"day", "week"}:
         raise ValueError("granularity 只能是 day 或 week")
 
-    rows = repo.trend_rows(conn, tracker_id, start, end, model, channel)
+    rows = repo.trend_rows(conn, tracker_id, start, end, model, channel, client)
     raw = [
         {
             "date": r["day"],
@@ -182,9 +184,10 @@ def build_citation_summary(
     end: str,
     model: str | None,
     channel: str | None,
+    client: str | None = None,
     cite_type: str | None = None,
 ) -> dict:
-    return repo.citation_summary(conn, tracker_id, start, end, model, channel, cite_type)
+    return repo.citation_summary(conn, tracker_id, start, end, model, channel, client, cite_type)
 
 
 # ---------------------------------------------------------------------------
@@ -211,13 +214,14 @@ def build_samples(
     metric: str,
     model: str | None,
     channel: str | None,
+    client: str | None = None,
 ) -> dict | None:
     if metric not in SAMPLE_METRICS:
         return None
     label, rule = SAMPLE_METRICS[metric]
 
     if metric == "coverage_rate":
-        rows = repo.coverage_rows(conn, tracker_id, start, end, model, channel)
+        rows = repo.coverage_rows(conn, tracker_id, start, end, model, channel, client)
         items = [
             {
                 "question_id": r["question_id"],
@@ -233,7 +237,7 @@ def build_samples(
         covered = sum(1 for i in items if i["mentioned"])
         value = metrics.coverage_rate(covered, len(items))
     else:
-        rows = repo.metric_sample_rows(conn, tracker_id, start, end, model, channel)
+        rows = repo.metric_sample_rows(conn, tracker_id, start, end, model, channel, client)
         items = []
         for r in rows:
             mentioned = r["mention_id"] is not None
@@ -355,14 +359,15 @@ def build_competitor_cooccurrence(
 
 
 def build_sentiment_by_model(
-    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
 ) -> dict:
     """按模型拆分情感分布。
 
     每个模型独立判样本是否足够：不足就标 ``insufficient_samples``，
     不给三个看起来能比较、其实没法比较的比例。
     """
-    rows = repo.sentiment_by_model_rows(conn, tracker_id, start, end)
+    rows = repo.sentiment_by_model_rows(conn, tracker_id, start, end, client)
     items: list[dict] = []
     pooled: list[str] = []
     for r in rows:
@@ -397,14 +402,15 @@ def build_sentiment_by_model(
 
 
 def build_question_performance(
-    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
 ) -> dict:
     """分问题表现：每个问题的样本数、提及率、平均位次。
 
     样本不足 min_samples 的问题不给提及率 —— 1 条样本的 100% 和 30 条样本的 40%
     放在一张表里比，只会误导。样本为 0 的问题单独标 "no_samples"。
     """
-    rows = repo.question_performance_rows(conn, tracker_id, start, end)
+    rows = repo.question_performance_rows(conn, tracker_id, start, end, client)
     items: list[dict] = []
     total_samples = total_mentions = covered = 0
     for r in rows:
