@@ -318,5 +318,32 @@ class CsrfInjectionContractTest(unittest.TestCase):
             )
 
 
+class OpportunityToStudioLoopContractTest(unittest.TestCase):
+    """「发现机会 → 写这篇」闭环：真实试点对象必须能落成草稿。
+
+    之前 studio.html 把 TRACKER 写死成演示对象，机会页跳过来时问题归属
+    被后端拒（QuestionNotFoundError），真实数据所在对象 0 篇文章。
+    """
+
+    def test_studio_tracker_comes_from_url(self):
+        html = STUDIO.read_text(encoding="utf-8")
+        self.assertIn('new URLSearchParams(location.search).get("tracker")', html)
+        self.assertNotIn(
+            'const TRACKER = "11111111-1111-1111-1111-111111111111";',
+            html,
+            "TRACKER 又写死成演示对象了",
+        )
+
+    def test_opportunity_link_carries_tracker(self):
+        html = (PROJECT_ROOT / "frontend" / "static" / "opportunities.html").read_text(encoding="utf-8")
+        self.assertIn("/studio?tracker=", html)
+        self.assertIn("encodeURIComponent(G.tracker())", html)
+
+    def test_fill_trackers_honors_url_tracker(self):
+        js = (PROJECT_ROOT / "frontend" / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('new URLSearchParams(location.search).get("tracker")', js)
+        self.assertIn("sel.value = wanted", js)
+
+
 if __name__ == "__main__":
     unittest.main()

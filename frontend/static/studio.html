@@ -324,7 +324,10 @@ if (location.protocol === "file:") {
 
 <script>
 const API = (location.protocol === "file:" ? "http://127.0.0.1:8123" : "") + "/v1";
-const TRACKER = "11111111-1111-1111-1111-111111111111";
+// 从机会分「写这篇」跳过来时带 tracker——真实采集的试点对象必须能落草稿，
+// 不能把所有文章都塞进写死的演示对象（后端会拒问题归属）。
+const TRACKER = new URLSearchParams(location.search).get("tracker")
+  || "11111111-1111-1111-1111-111111111111";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -812,8 +815,20 @@ async function selectArticle(id) {
   renderStages();
 }
 
+// 顶部对象名要跟当前 TRACKER 走——从机会分跳到试点对象时不能还显示演示对象名。
+async function loadTrackerLabel() {
+  try {
+    const data = await api("/trackers");
+    const cur = (data.items || []).find(function (t) { return t.id === TRACKER; });
+    // 用对象名而非品牌名：试点对象和演示对象可能同品牌，显示品牌会让用户
+    // 分不清自己在哪个对象里写稿（真实数据就在试点对象）。
+    if (cur) $("trackerLabel").textContent = (cur.name || cur.brand_name) + " · 内容成稿与发布";
+  } catch (e) { /* 名字读不到不影响主流程，保留默认文案 */ }
+}
+
 async function load() {
   loadCredits();  // 余额和文章列表互不依赖，不必串行等
+  loadTrackerLabel();
   try {
     const [list, channels] = await Promise.all([
       api("/trackers/" + TRACKER + "/articles"),

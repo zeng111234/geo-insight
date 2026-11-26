@@ -69,7 +69,8 @@
         '<span class="tag ' + (x.tier === "core" ? "core" : "") + '">' +
         (x.tier === "core" ? "核心" : "长尾") + "</span>" +
         '<span class="tag ' + (x.status === "ok" ? "" : "warn") + '">' + esc(statusText) + "</span>" +
-        '<span class="spacer"></span><a class="plain" href="/studio?question=' +
+        '<span class="spacer"></span><a class="plain" href="/studio?tracker=' +
+        encodeURIComponent(G.tracker()) + '&question=' +
         encodeURIComponent(x.question_id) + '">写这篇 →</a></div>' +
         '<div class="act">' + esc(x.next_action) + "</div>" +
         '<div class="why">' + esc((x.reasons || []).join("；")) + "</div></div>";

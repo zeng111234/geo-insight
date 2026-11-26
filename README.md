@@ -520,6 +520,7 @@ node scripts/imagecheck.mjs                                   # 8 条 CDP 真点
 node scripts/p3check.mjs                                      # 8 条 CDP 真点：模型×端筛选（选端→URL带client→API/竞品tab请求带client→刷新保持→清除还原，需 Chrome/Edge）
 node scripts/p7check.mjs                                      # 5 条 CDP 真点：19 个监控对象（左栏数→搜索可筛→切空对象显示诚实空态→无 JS 异常）
 node scripts/p5check.mjs                                      # 9 条 CDP 真点：A3 壳（徽章余额=API真账本→AI助手开抽屉明写未接入→无假生成→打印页无按钮）
+node scripts/loopcheck.mjs                                    # 7 条 CDP 真点：业务闭环（机会页写这篇→正确对象建草稿→演示对象不受影响）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）
 python scripts/deploy_rehearse.py                              # 部署首启演练：临时空库起真服务，验迁移链+seed+13页+4接口
 python scripts/restore_rehearse.py                             # 恢复演练：真实旧备份→临时库，验迁移补齐+数据完整+安全副本

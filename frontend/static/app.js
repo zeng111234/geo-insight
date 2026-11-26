@@ -84,7 +84,12 @@
       sel.innerHTML = items.map(function (x) {
         return '<option value="' + esc(x.id) + '">' + esc(x.brand_name || x.name || x.id) + "</option>";
       }).join("");
-      return items.length ? items[0].id : "";
+      // URL 带 tracker 时选中它（首页下钻/机会页「写这篇」跳转靠这个，
+      // 否则永远选第一个演示对象，真实试点对象上的问题会被塞错对象）。
+      var wanted = new URLSearchParams(location.search).get("tracker");
+      var hit = wanted && items.some(function (x) { return x.id === wanted; });
+      if (hit) sel.value = wanted;
+      return sel.value || (items.length ? items[0].id : "");
     } catch (e) {
       sel.innerHTML = '<option value="">无监控对象</option>';
       return "";
