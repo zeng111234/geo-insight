@@ -8,10 +8,15 @@ lives here, not in the HTTP layer.
 import json
 import sqlite3
 
+from geo.business_time import business_today
 from geo.domain import relevance
 from geo.repositories import config_repository as config
 from geo.repositories import sqlite_repository as repo
 from geo.settings import settings
+
+# 新建对象默认采集模型：deepseek 是当前唯一配 key、真跑通过的采集器。
+# 调用方可传 model_keys 覆盖；豆包配 key 后可把这里改成多模型。
+DEFAULT_MODEL_KEYS = ["deepseek"]
 
 
 def _models(plan: dict | None) -> list[str]:
@@ -57,7 +62,21 @@ def create(conn: sqlite3.Connection, tenant_id: str, payload: dict, now: str) ->
         raise ValueError("；".join(problems))
 
     settings_json = json.dumps({"website": website}, ensure_ascii=False) if website else "{}"
-    return config.create_tracker(
+
+    # 采样计划必须随对象一起建。seed 和 setup_pilot 各自建了，唯独这条 create 路径
+    # 漏了——通过界面新建的对象 daily_planned=0、models=[]，采集链路永远不覆盖它，
+    # 用户配完问题也等不到数据。这里补上，默认 deepseek（当前唯一真跑通的采集器），
+    # 调用方可传 model_keys 覆盖。
+    model_keys = payload.get("model_keys") or DEFAULT_MODEL_KEYS
+    if not isinstance(model_keys, list) or not all(isinstance(v, str) and v.strip() for v in model_keys):
+        raise ValueError("model_keys 必须是非空字符串数组")
+    core_times = payload.get("core_times", 3)
+    long_tail_times = payload.get("long_tail_times", 1)
+    for label, value in (("core_times", core_times), ("long_tail_times", long_tail_times)):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ValueError(f"{label} 必须是 ≥1 的整数")
+
+    created = config.create_tracker(
         conn,
         tenant_id=tenant_id,
         name=name,
@@ -70,6 +89,17 @@ def create(conn: sqlite3.Connection, tenant_id: str, payload: dict, now: str) ->
         now=now,
         settings_json=settings_json,
     )
+    # create_tracker 内部已提交，这里没能和它同一事务——但刚建的对象 id 一定有效，
+    # 这条 INSERT 失败的概率极低；真失败会抛异常让调用方看到，不静默吞掉。
+    conn.execute(
+        """INSERT INTO sampling_plan
+           (id, tracker_id, channel, model_keys, core_times, long_tail_times, timezone, effective_from)
+           VALUES (?, ?, 'api', ?, ?, ?, 'Asia/Shanghai', ?)""",
+        (config.uid(), created["tracker_id"], json.dumps(model_keys, ensure_ascii=False),
+         core_times, long_tail_times, business_today()),
+    )
+    conn.commit()
+    return created
 
 
 def sampling_overview(

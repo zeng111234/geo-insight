@@ -27,7 +27,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -110,6 +109,11 @@ def setup(conn, args: argparse.Namespace) -> dict:
             "brand_name": args.brand.strip(),
             "brand_aliases": _split(args.aliases),
             "competitor_names": _split(args.competitors),
+            # 采样计划随对象一起建（config_service.create 内部写），不再单独 INSERT，
+            # 否则同一对象两条计划、测试取到第一条（默认 deepseek）而非试点指定的模型。
+            "model_keys": [args.model],
+            "core_times": args.core_times,
+            "long_tail_times": args.long_tail_times,
         },
         now,
     )
@@ -135,20 +139,8 @@ def setup(conn, args: argparse.Namespace) -> dict:
     if words:
         tracker_service.update_question_set(conn, set_id, tenant, None, words)
 
-    # 采样计划没有写入接口，这里直接写。channel='api' 对应联网采集通道。
-    conn.execute(
-        """INSERT INTO sampling_plan(id, tracker_id, channel, model_keys,
-                                     core_times, long_tail_times, timezone, effective_from)
-           VALUES (?, ?, 'api', ?, ?, ?, 'Asia/Shanghai', ?)""",
-        (
-            config_repo.uid(),
-            tracker_id,
-            json.dumps([args.model], ensure_ascii=False),
-            args.core_times,
-            args.long_tail_times,
-            date.today().isoformat(),
-        ),
-    )
+    # 采样计划已由 config_service.create 随对象一起建（见上方 model_keys 传参），
+    # 这里不再重复 INSERT——否则同一对象出现两条计划，缺口计算和指标都会混乱。
     conn.commit()
 
     # 自校验：缺口算不出来就说明上面哪一步没接上，整笔回滚。
