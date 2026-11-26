@@ -496,6 +496,7 @@ node scripts/pagecheck.mjs                                    # 77 条页面字�
 node scripts/browsercheck.mjs                                 # 75 条真实浏览器 DOM 检查（需系统 Chrome / Edge）
 node scripts/pagercheck.mjs                                   # 22 条分页组件行为测试（真实 app.js + 模拟点击/跳转）
 node scripts/interactioncheck.mjs                             # 46 条 CDP 真实点击（删除确认/暂停恢复/新建抽屉+字段落库/表格浏览/首页下钻+口径/报告打印/采集任务/设置删除确认，需 Chrome/Edge）
+node scripts/imagecheck.mjs                                   # 8 条 CDP 真点：文章配图 选图→上传→预览取真 PNG 字节→删除→无 JS 异常（自包含测试图，需 Chrome/Edge）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）
 python scripts/deploy_rehearse.py                              # 部署首启演练：临时空库起真服务，验迁移链+seed+13页+4接口
 python scripts/restore_rehearse.py                             # 恢复演练：真实旧备份→临时库，验迁移补齐+数据完整+安全副本
