@@ -52,7 +52,13 @@
     { key: "review", name: "待审", tag: "warn" },
     { key: "published", name: "已发布", tag: "ok" }
   ];
-  var PUB_TEXT = { queued: "待发布（演示态）", published: "已发布", failed: "失败" };
+  // 真实浏览器发布器执行的状态；不叫「演示态」也不吹「已发布」——
+  // 库里 published 多为种子假链接，有效回链按 URL 另判（见下）。
+  var PUB_TEXT = { queued: "待发布", published: "已发布", failed: "失败", blocked: "被平台拦截" };
+  // 只有 http(s) 且不是种子 demo-article 假链的才算有效回链。
+  function isValidUrl(u) {
+    return typeof u === "string" && /^https?:\/\//i.test(u) && !/demo-article/i.test(u);
+  }
   var STATUS_TEXT = { draft: "草稿", review: "待审", published: "已发布" };
 
   function renderArticles(items) {
@@ -113,9 +119,9 @@
         return '<div class="pub-row"><span class="tag">' + esc(p.platform_name) + "</span>" +
           '<span class="tag ' + (p.status === "published" ? "ok" : "") + '">' + esc(PUB_TEXT[p.status] || p.status) + "</span>" +
           '<span class="muted">' + esc(x.title.slice(0, 30)) + "</span><span class=\"spacer\"></span>" +
-          (p.published_url ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链 →</a>'
-                           : '<span class="muted">演示态，无真实回链</span>') + "</div>";
-      }).join("") : G.empty("还没有发布记录，可在内容工作室点「一键发布」生成演示记录");
+          (isValidUrl(p.published_url) ? '<a class="plain" href="' + esc(p.published_url) + '" target="_blank" rel="noreferrer">回链 →</a>'
+                           : '<span class="muted">无有效回链（未真发或为演示链接）</span>') + "</div>";
+      }).join("") : G.empty("还没有发布记录，可在内容工作室点「一键发布」发起真实发布");
     } catch (e) { G.fail(e, ["kanban", "pubs", "articleTable"]); }
   }
 
