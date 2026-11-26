@@ -21,6 +21,30 @@
   .mention .snippet { font-size: var(--fs-meta); color: var(--text-body); line-height: 1.7; }
   .block-list { display: flex; flex-wrap: wrap; gap: 6px; }
   .block-item { border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; font-size: var(--fs-label); background: var(--panel); }
+
+  /* 对话气泡：把答案原文呈现成「用户提问 / AI 回答」的对话，而不是纯文字墙。
+     头像用 CSS 首字母+品牌色，不依赖外部图片——离线可用、无版权问题。 */
+  .chat-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-bottom: 1px solid var(--border); background: var(--panel-2); border-radius: 8px 8px 0 0; }
+  .chat-head .meta { display: flex; flex-direction: column; gap: 2px; }
+  .chat-head .meta b { font-size: var(--fs-body); color: var(--text-strong); }
+  .chat-head .meta small { font-size: var(--fs-caption); color: var(--muted); }
+  .chat-body { border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px;
+    padding: 16px 14px; background: var(--subtle); display: flex; flex-direction: column; gap: 14px; }
+  .bubble-row { display: flex; gap: 9px; align-items: flex-start; max-width: 100%; }
+  .bubble-row.mine { flex-direction: row-reverse; }
+  .bubble-av { flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; display: flex;
+    align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+    color: #fff; background: var(--accent); letter-spacing: -0.3px; }
+  .bubble-av.mine { background: #e08a3c; }
+  .bubble { max-width: calc(100% - 42px); border-radius: 10px; padding: 10px 13px;
+    font-size: var(--fs-body); line-height: 1.85; color: var(--text-body); word-break: break-word; }
+  .bubble.ai { background: var(--panel); border: 1px solid var(--border);
+    border-top-left-radius: 3px; white-space: pre-wrap; }
+  .bubble.user { background: #fff3e6; border: 1px solid #f5d9b8;
+    border-top-right-radius: 3px; color: #6b4220; }
+  .bubble-role { font-size: var(--fs-caption); color: var(--muted); margin: 0 0 4px 40px; }
+  .bubble-row.mine .bubble-role { margin: 0 40px 4px 0; text-align: right; }
 </style>
 </head>
 <body>
@@ -66,6 +90,22 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const SENTI = { pos: "正面", neu: "中性", neg: "负面" };
 const answerId = location.pathname.split("/").pop();
 
+// 模型显示名与头像，与后端 domain/channels.py 的 8 模型口径一致。
+// 头像用缩写字母 + 品牌色（CSS 画，不依赖图片），离线也能显示。
+const MODEL_META = {
+  doubao:   { label: "豆包",      abbr: "豆", color: "#3b6cf0" },
+  deepseek: { label: "DeepSeek",  abbr: "D",  color: "#4d6bfe" },
+  kimi:     { label: "Kimi",      abbr: "K",  color: "#1f2430" },
+  qwen:     { label: "千问",      abbr: "千", color: "#6155d6" },
+  yuanbao:  { label: "元宝",      abbr: "元", color: "#e05a4d" },
+  wenxin:   { label: "文心一言",  abbr: "文", color: "#2b7a5e" },
+  quark:    { label: "夸克 AI",   abbr: "夸", color: "#5a67d8" },
+  bing:     { label: "Bing AI",   abbr: "B",  color: "#0f7fb8" },
+};
+function modelMeta(key) {
+  return MODEL_META[key] || { label: key || "AI", abbr: (key || "AI").slice(0, 1).toUpperCase(), color: "#6c5ce7" };
+}
+
 function renderMentions(mentions, brandName) {
   if (!mentions.length) {
     return '<div class="empty">这条答案里没有识别到品牌或竞品提及</div>';
@@ -98,6 +138,29 @@ function renderCitations(citations) {
       <td>${c.published_at_unknown ? '<span class="tag warn">未知</span>' : esc((c.published_at || "").slice(0, 10))}</td>
       <td><a href="${esc(c.url)}" target="_blank" rel="noreferrer">打开</a></td>
     </tr>`).join("")}</tbody></table></div>`;
+}
+
+function renderChat(d) {
+  const m = modelMeta(d.model_key);
+  const date = (d.collected_at || "").slice(0, 16).replace("T", " ");
+  const channel = d.channel === "web" ? "网页端" : "API";
+  return `
+    <div class="chat-head">
+      <div class="bubble-av" style="background:${esc(m.color)}">${esc(m.abbr)}</div>
+      <div class="meta"><b>${esc(m.label)}</b><small>${esc(date)} · ${esc(channel)}</small></div>
+      <span class="spacer"></span>
+      <span class="tag ${d.is_valid ? "ok" : "warn"}">${d.is_valid ? "有效样本" : "无效样本"}</span>
+    </div>
+    <div class="chat-body">
+      <div class="bubble-row mine">
+        <div class="bubble-av mine">我</div>
+        <div><div class="bubble-role">用户提问</div><div class="bubble user">${esc(d.question_text)}</div></div>
+      </div>
+      <div class="bubble-row">
+        <div class="bubble-av" style="background:${esc(m.color)}">${esc(m.abbr)}</div>
+        <div><div class="bubble-role">${esc(m.label)} 的回答</div><div class="bubble ai">${esc(d.text)}</div></div>
+      </div>
+    </div>`;
 }
 
 function render(d) {
@@ -136,8 +199,8 @@ function render(d) {
 
       <div>
         <section class="panel">
-          <h2>答案原文 <span class="badge">完整文本</span></h2>
-          <div class="body"><div class="answer-text">${esc(d.text)}</div></div>
+          <h2>对话原文 <span class="badge">用户提问 / AI 回答</span></h2>
+          <div class="body">${renderChat(d)}</div>
         </section>
 
         <section class="panel" style="margin-top:14px">

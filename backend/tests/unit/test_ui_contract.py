@@ -360,5 +360,30 @@ class PublishLinkHonestyContractTest(unittest.TestCase):
         self.assertIn("isValidUrl(p.published_url)", html)
 
 
+class AnswerChatViewContractTest(unittest.TestCase):
+    """回答详情呈现为对话气泡（头像+名字+左右气泡），不是纯文字墙。
+
+    老板反馈：回答页纯文字不合格，要像参考系统那样带模型头像和名字。
+    守模型显示名口径与后端 domain/channels.py 一致。
+    """
+
+    def test_answer_page_renders_chat_bubbles(self):
+        html = (PROJECT_ROOT / "frontend" / "static" / "answer.html").read_text(encoding="utf-8")
+        self.assertIn("chat-head", html)
+        self.assertIn("bubble-row mine", html, "用户提问气泡要在右侧")
+        self.assertIn("bubble ai", html)
+        self.assertIn("MODEL_META", html)
+        for label in ("DeepSeek", "Kimi", "豆包", "文心一言"):
+            self.assertIn(label, html, f"模型显示名缺失: {label}")
+
+    def test_model_labels_match_backend_channels(self):
+        from geo.domain.channels import CHANNELS
+        labels = {c["label"] for c in CHANNELS}
+        html = (PROJECT_ROOT / "frontend" / "static" / "answer.html").read_text(encoding="utf-8")
+        # 前端至少要有后端 8 模型对应的显示名
+        for label in ("豆包", "DeepSeek", "Kimi", "千问", "元宝", "文心一言", "夸克 AI", "Bing AI"):
+            self.assertIn(label, html, f"模型 {label} 前端缺失")
+
+
 if __name__ == "__main__":
     unittest.main()
