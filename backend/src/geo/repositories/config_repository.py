@@ -585,7 +585,11 @@ def failure_stats(
 # - tracker.active_question_set_id（迁移 010）反过来引用 question_set，
 #   所以删问题集之前要先把 tracker 上的这个指针断开；
 # - answer 被 citation/mention/answer_block 引用，先删子表再删父表。
-_ANSWER_CHILDREN = ("citation", "mention", "answer_block")
+# answer 的子表。answer_correction 是 020 迁移新增的人工纠正，同属这一类。
+_ANSWER_CHILDREN = ("citation", "mention", "answer_block", "answer_correction")
+# article 的子表。publication 没有 ON DELETE CASCADE，真实库有发布记录时
+# 不先删它会让 DELETE article 撞外键、整个删对象事务回滚（老测试没造发布记录）。
+_ARTICLE_CHILDREN = ("article_fact", "article_stage", "publication")
 
 
 def delete_tracker(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) -> dict | None:
@@ -625,13 +629,22 @@ def delete_tracker(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) ->
     )
     deleted["report_snapshot"] = cur.rowcount
 
-    # article 引用 question，必须先于 question 删
-    cur = conn.execute(
-        "DELETE FROM article_fact WHERE article_id IN "
-        "(SELECT id FROM article WHERE tracker_id = ?)",
-        (tracker_id,),
-    )
-    deleted["article_fact"] = cur.rowcount
+    # article 引用 question，必须先于 question 删；它的子表又必须先于 article 删。
+    # publication 无 ON DELETE CASCADE，是真库里删对象失败的直接原因。
+    for table in _ARTICLE_CHILDREN:
+        cur = conn.execute(
+            f"DELETE FROM {table} WHERE article_id IN "
+            "(SELECT id FROM article WHERE tracker_id = ?)",
+            (tracker_id,),
+        )
+        deleted[table] = cur.rowcount
+
+    # 顺序是硬约束：answer.run_item_id REFERENCES run_item(id)。
+    # 必须先删 answer 再删 run_item，否则真实库里 1510 条带 run_item_id 的答案
+    # 会让 DELETE run_item 撞外键、整个删除事务回滚（接口 500，对象删不掉）。
+    # 老测试只造 run_item_id=NULL 的 answer，全绿但覆盖不到——这是补上的真缺口。
+    cur = conn.execute("DELETE FROM answer WHERE tracker_id = ?", (tracker_id,))
+    deleted["answer"] = cur.rowcount
 
     # run_item 引用 question，必须先于 question 删
     cur = conn.execute(
@@ -640,7 +653,7 @@ def delete_tracker(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) ->
     )
     deleted["run_item"] = cur.rowcount
 
-    for table in ("answer", "report", "article", "run"):
+    for table in ("report", "article", "run"):
         cur = conn.execute(f"DELETE FROM {table} WHERE tracker_id = ?", (tracker_id,))
         deleted[table] = cur.rowcount
 

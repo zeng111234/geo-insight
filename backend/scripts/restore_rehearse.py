@@ -139,6 +139,47 @@ def rehearse() -> dict:
             conn.close()
         print("  ✓ 恢复后迁移新增的列与表齐全（含 019 images 列 / 020 纠正表），当前代码可查询")
 
+        # 表存在 ≠ 功能可用。恢复后的库要真能写入 P2 的人工纠正，
+        # 且 answer 删掉时纠正随之外键级联消失——否则备份恢复完，
+        # 用户点的"纠正"会写不进去，或留一堆孤儿行。
+        from geo.services import correction_service
+
+        conn = sqlite3.connect(target)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            answer_id = conn.execute("SELECT id FROM answer ORDER BY id LIMIT 1").fetchone()[0]
+            correction_service.upsert_correction(
+                conn,
+                answer_id=answer_id,
+                tenant_id="00000000-0000-0000-0000-000000000001",
+                payload={"note": "恢复演练临时写入"},
+            )
+            conn.commit()
+            read = correction_service.get_correction(
+                conn, answer_id, "00000000-0000-0000-0000-000000000001"
+            )
+            if not read or read["note"] != "恢复演练临时写入":
+                raise RehearsalError("恢复后的纠正写不进/读不回，P2 功能在这份库上不可用")
+            # 级联：走真实的 delete_tracker（它会按依赖顺序删子表）。
+            # 不能直接 DELETE answer——answer 还被 citation/mention/run_item 引用，
+            # 单独删会撞外键，那是测试写法错，不是产品 bug。
+            from geo.repositories import config_repository as config_repo
+
+            tracker_id = conn.execute(
+                "SELECT tracker_id FROM answer WHERE id = ?", (answer_id,)
+            ).fetchone()[0]
+            config_repo.delete_tracker(conn, tracker_id, "00000000-0000-0000-0000-000000000001")
+            conn.commit()
+            left = conn.execute(
+                "SELECT COUNT(*) FROM answer_correction WHERE answer_id = ?", (answer_id,)
+            ).fetchone()[0]
+            if left != 0:
+                raise RehearsalError(f"删对象后纠正留了 {left} 条孤儿行")
+        finally:
+            conn.close()
+        print("  ✓ 恢复后纠正可写入回显，删除对象时级联清掉纠正")
+
         return {
             "source": source.name,
             "from_version": source_version,
