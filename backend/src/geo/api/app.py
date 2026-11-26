@@ -465,9 +465,12 @@ async def tracker_opportunities(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         return JSONResponse(
             opportunity_service.build_opportunities(
-                conn, tracker_id, period[0], period[1], limit=limit
+                conn, tracker_id, period[0], period[1], limit=limit, client=client
             )
         )
     finally:
@@ -1380,8 +1383,11 @@ async def competitors_ranking(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         return JSONResponse(
-            metric_service.build_competitor_ranking(conn, tracker_id, period[0], period[1])
+            metric_service.build_competitor_ranking(conn, tracker_id, period[0], period[1], client)
         )
     finally:
         conn.close()
@@ -1397,8 +1403,11 @@ async def competitors_cooccurrence(request: Request):
         tracker_id = request.path_params["tracker_id"]
         if not repo.get_tracker(conn, tracker_id, _tenant(request)):
             return _error(request, "NOT_FOUND", "tracker not found", 404)
+        client, client_err = _client_param(request)
+        if client_err:
+            return client_err
         return JSONResponse(
-            metric_service.build_competitor_cooccurrence(conn, tracker_id, period[0], period[1])
+            metric_service.build_competitor_cooccurrence(conn, tracker_id, period[0], period[1], client)
         )
     finally:
         conn.close()

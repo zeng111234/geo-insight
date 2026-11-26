@@ -85,6 +85,23 @@ try {
   check(reqWithClient.length > 0, "选端后 API 请求带 client=mobile（数字会随端变）",
     reqWithClient.slice(0, 1).join(""));
 
+  // 切到竞品 tab，验证它的请求也带 client——本轮补全了机会分/竞品的端筛选，
+  // 这条守的是「选端后不是只有部分 tab 变」。
+  await evaluate(`
+    (function () {
+      var b = document.querySelector('[data-tab="competitors"]');
+      if (b) b.click();
+    })()
+  `);
+  await sleep(1000);
+  const compReq = await evaluate(`
+    (window.__p3Urls || []).filter(function (u) {
+      return u.indexOf('client=mobile') >= 0 && u.indexOf('/competitors/') >= 0;
+    })
+  `);
+  check(compReq.length > 0, "竞品 tab 请求也带 client=mobile（非假筛选）",
+    compReq.slice(0, 1).join(""));
+
   // tab-counts 响应的 filters.client 应为 mobile（从 state 读，因为响应已被前端消费）
   const stateClient = await evaluate(`
     (function () {

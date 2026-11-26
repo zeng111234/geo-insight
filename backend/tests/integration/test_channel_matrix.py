@@ -213,6 +213,25 @@ class ChannelHttpTest(unittest.TestCase):
         self.assertEqual(web["sample_total"], all_data["sample_total"], "全库皆 web")
         self.assertEqual(mobile["sample_total"], 0, "无手机端样本时应为 0，不是回退到全端")
 
+    def test_opportunities_and_competitors_follow_client(self):
+        """P3 补全:机会分/竞品也随端变——选了端不能只有部分 tab 变。"""
+        q = f"from=2026-11-01&to=2026-11-30"
+        # 机会分:question_performance 从问题表左连，无样本的问题仍在列表里（samples=0），
+        # 所以判据看样本数总和，不是条目数。
+        opp_web = self.client.get(f"/v1/trackers/{self.tracker_id}/opportunities?{q}&client=web").json()
+        opp_mobile = self.client.get(f"/v1/trackers/{self.tracker_id}/opportunities?{q}&client=mobile").json()
+        samples_of = lambda d: sum(x.get("samples", 0) for x in d["items"])
+        self.assertGreater(samples_of(opp_web), 0)
+        self.assertEqual(samples_of(opp_mobile), 0, "手机端无样本时机会分样本数应为 0")
+        # 竞品排名:分母 valid_total 随端变
+        rank_web = self.client.get(f"/v1/trackers/{self.tracker_id}/competitors/ranking?{q}&client=web").json()
+        rank_mobile = self.client.get(f"/v1/trackers/{self.tracker_id}/competitors/ranking?{q}&client=mobile").json()
+        self.assertGreater(rank_web["valid_total"], 0)
+        self.assertEqual(rank_mobile["valid_total"], 0, "手机端无样本时分母应为 0")
+        # 竞品共现:手机端无品牌对
+        cooc_mobile = self.client.get(f"/v1/trackers/{self.tracker_id}/competitors/cooccurrence?{q}&client=mobile").json()
+        self.assertEqual(len(cooc_mobile["labels"]), 0, "手机端无样本时共现矩阵应为空")
+
 
 if __name__ == "__main__":
     unittest.main()

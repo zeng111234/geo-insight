@@ -102,10 +102,11 @@ def build_opportunities(
     end: str,
     *,
     limit: int | None = None,
+    client: str | None = None,
 ) -> dict:
-    rows = repo.question_performance_rows(conn, tracker_id, start, end)
-    competitors = opp_repo.competitor_rows(conn, tracker_id, start, end)
-    domain_rows = opp_repo.citation_domain_rows(conn, tracker_id, start, end)
+    rows = repo.question_performance_rows(conn, tracker_id, start, end, client)
+    competitors = opp_repo.competitor_rows(conn, tracker_id, start, end, client)
+    domain_rows = opp_repo.citation_domain_rows(conn, tracker_id, start, end, client)
 
     # 引用按问题聚合：总数、可发布平台条数、各平台明细
     citations: dict[str, dict] = {}

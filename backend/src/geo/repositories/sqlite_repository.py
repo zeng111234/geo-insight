@@ -618,7 +618,10 @@ def get_publication_channels(conn: sqlite3.Connection, pub_ids: list[str]) -> li
     return [dict(r) for r in rows]
 
 
-def window_counts(conn: sqlite3.Connection, tracker_id: str, start: str, end: str) -> dict:
+def window_counts(
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
+) -> dict:
     row = conn.execute(
         f"""
         SELECT COUNT(*) AS valid_total,
@@ -627,8 +630,9 @@ def window_counts(conn: sqlite3.Connection, tracker_id: str, start: str, end: st
         LEFT JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'own'
         WHERE a.tracker_id = ? AND a.is_valid = 1
           AND {day_of('a.collected_at')} BETWEEN ? AND ?
+          {'AND a.client = ?' if client else ''}
         """,
-        (tracker_id, start, end),
+        (tracker_id, start, end) + ((client,) if client else ()),
     ).fetchone()
     return {"valid_total": int(row["valid_total"] or 0), "mention_total": int(row["mention_total"] or 0)}
 
@@ -855,7 +859,8 @@ def url_dedup_citations(
 
 
 def competitor_ranking_rows(
-    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
 ) -> list[dict]:
     """竞品在答案里的表现：出现次数、平均位次、情感分布。
 
@@ -876,16 +881,18 @@ def competitor_ranking_rows(
         JOIN brand b ON b.id = m.brand_id
         WHERE a.tracker_id = ? AND a.is_valid = 1 AND m.subject_type = 'competitor'
           AND {day_of('a.collected_at')} BETWEEN ? AND ?
+          {'AND a.client = ?' if client else ''}
         GROUP BY b.id, b.name
         ORDER BY mentions DESC, avg_position ASC
         """,
-        (tracker_id, start, end),
+        (tracker_id, start, end) + ((client,) if client else ()),
     ).fetchall()
     return [dict(r) for r in rows]
 
 
 def competitor_cooccurrence_rows(
-    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
 ) -> list[dict]:
     """同一答案里同时出现的品牌对（含本方品牌）。
 
@@ -901,9 +908,10 @@ def competitor_cooccurrence_rows(
         JOIN brand b2 ON b2.id = m2.brand_id
         WHERE a.tracker_id = ? AND a.is_valid = 1
           AND {day_of('a.collected_at')} BETWEEN ? AND ?
+          {'AND a.client = ?' if client else ''}
         GROUP BY b1.name, b2.name
         """,
-        (tracker_id, start, end),
+        (tracker_id, start, end) + ((client,) if client else ()),
     ).fetchall()
     return [dict(r) for r in rows]
 

@@ -12,7 +12,8 @@ from geo.repositories.sqlutil import day_of
 
 
 def competitor_rows(
-    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
 ) -> dict[str, dict]:
     """每个问题里出现过竞品的答案数。
 
@@ -28,9 +29,10 @@ def competitor_rows(
         JOIN mention m ON m.answer_id = a.id AND m.subject_type = 'competitor'
         WHERE a.tracker_id = ? AND a.is_valid = 1
           AND {day_of('a.collected_at')} BETWEEN ? AND ?
+          {'AND a.client = ?' if client else ''}
         GROUP BY a.question_id
         """,
-        (tracker_id, start, end),
+        (tracker_id, start, end) + ((client,) if client else ()),
     ).fetchall()
     return {
         row["question_id"]: {"answers": int(row["answers"] or 0), "mentions": int(row["mentions"] or 0)}
@@ -39,7 +41,8 @@ def competitor_rows(
 
 
 def citation_domain_rows(
-    conn: sqlite3.Connection, tracker_id: str, start: str, end: str
+    conn: sqlite3.Connection, tracker_id: str, start: str, end: str,
+    client: str | None = None,
 ) -> list[dict]:
     """每个问题下、按域名聚合的引用条数。"""
     rows = conn.execute(
@@ -49,9 +52,10 @@ def citation_domain_rows(
         JOIN answer a ON a.id = c.answer_id
         WHERE a.tracker_id = ? AND a.is_valid = 1
           AND {day_of('a.collected_at')} BETWEEN ? AND ?
+          {'AND a.client = ?' if client else ''}
         GROUP BY a.question_id, COALESCE(c.domain, '')
         """,
-        (tracker_id, start, end),
+        (tracker_id, start, end) + ((client,) if client else ()),
     ).fetchall()
     return [
         {"question_id": r["question_id"], "domain": r["domain"], "n": int(r["n"] or 0)}
