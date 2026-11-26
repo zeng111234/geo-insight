@@ -162,6 +162,20 @@ def inject_footer(html: str) -> str:
     return html.replace("</body>", PAGE_FOOTER + "\n</body>", 1)
 
 
+# A3 壳（决策 009）：全局积分徽章 + AI 助手按钮，由一段公共脚本注入。
+# 只在服务端出餐口插一次，15 个页面的 top 栏 HTML 一个字都不动。
+# 打印/详情页排除——那些页要的是干净的可打印视图，不该有交互按钮。
+GLOBAL_BAR_SCRIPT = '<script src="/static/global-bar.js" defer></script>'
+NO_GLOBAL_BAR = {"report.html", "pilot.html", "answer.html"}
+
+
+def inject_global_bar(html: str) -> str:
+    """把公共顶栏脚本插到 </body> 前；页面已有则不重复插。"""
+    if GLOBAL_BAR_SCRIPT in html or "</body>" not in html:
+        return html
+    return html.replace("</body>", GLOBAL_BAR_SCRIPT + "\n</body>", 1)
+
+
 def render_page(static_dir: Path | None, name: str, active: str):
     """读取静态页并注入导航与页脚，返回 HTMLResponse（调用方负责 404 文案）。"""
     from starlette.responses import HTMLResponse, JSONResponse
@@ -172,7 +186,10 @@ def render_page(static_dir: Path | None, name: str, active: str):
             status_code=404,
         )
     html = (static_dir / name).read_text(encoding="utf-8")
-    return HTMLResponse(inject_footer(inject_sidebar(html, active)))
+    html = inject_footer(inject_sidebar(html, active))
+    if name not in NO_GLOBAL_BAR:
+        html = inject_global_bar(html)
+    return HTMLResponse(html)
 
 
 def render_login(static_dir: Path | None, next_url: str, email: str, error: bool, cooldown: int = 0):

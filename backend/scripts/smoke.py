@@ -431,12 +431,44 @@ def main() -> None:
         # 决策 003 曾要求页面不得出现积分/AI 成稿；决策 009 覆盖 003，
         # 明确要求把积分账本做真（账本是真的，定价是假的）。按决策 009 文档
         # 第 33 行的要求，这里显式改成正向断言，不悄悄删掉旧断言。
-        # AI 真调仍依赖 key、尚未接入，所以「AI 助手」仍为负向断言——不编造入口。
+        # 2026-11-26 拍板 A3：全局放积分徽章 + AI 助手按钮，但明写「需 key，未接入」。
+        # 因此「AI 助手」从负向词移出，改为正向契约——不是放宽检查，是加严：
+        # 入口必须在、必须诚实标注未接入、余额必须来自真账本、不得偷带生成动作。
         check("studio shows real credit ledger", "creditBalance" in html
               and "账本是真的" in html, "missing credit ledger badge")
-        for forbidden in ("5 积分", "AI 生成草稿", "AI 助手"):
+        for forbidden in ("5 积分", "AI 生成草稿"):
             check(f"studio has no fake affordance [{forbidden}]", forbidden not in html, {"found": forbidden})
         check("studio states human authorship", "人工成稿" in html, "missing 人工成稿 statement")
+
+        # A3 正向契约：每个路由页都注入公共顶栏脚本；打印/详情页排除。
+        hook = '/static/global-bar.js'
+        for page in ("/", "/monitor", "/assets", "/insight", "/opportunities",
+                     "/sources", "/publish", "/tasks", "/settings", "/reports",
+                     "/studio", "/update"):
+            code, _, page_html = get_html(page)
+            check(f"A3 global bar injected [{page}]", code == 200 and hook in page_html,
+                  {"status": code, "hook": hook in page_html})
+        for page in ("/pilot",):
+            code, _, page_html = get_html(page)
+            check(f"A3 global bar excluded [{page}]", code == 200 and hook not in page_html,
+                  {"status": code, "hook": hook in page_html})
+
+        # JS 源文本：必须明写未接入、只从 /credits 读；不得有假生成/写操作。
+        code, _, js = get_html(hook)
+        check("A3 JS served", code == 200 and "global-bar.js" in hook, {"status": code})
+        for required in ("AI 助手", "需 key", "未接入", "/credits"):
+            check(f"A3 JS honest [{required}]", required in js, {"missing": required})
+        for forbidden in ("生成草稿", "立即分析", "开始分析", "/v1/assistant/",
+                          "method=\"post\"", "type=\"submit\""):
+            check(f"A3 JS no fake action [{forbidden}]", forbidden not in js, {"found": forbidden})
+
+        # 余额真值：活 API 与账本求和一致，JS 里没有写死余额数字。
+        credit_status, credit = get("/v1/credits")
+        check("A3 credits from real ledger",
+              credit_status == 200
+              and credit.get("unit") == "分"
+              and credit.get("balance") == sum(e.get("delta", 0) for e in credit.get("entries", [])),
+              {"status": credit_status, "balance": credit.get("balance")})
 
         status, body = get("/v1/channels")
         channels = body.get("items", [])

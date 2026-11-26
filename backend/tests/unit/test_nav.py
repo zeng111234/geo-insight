@@ -58,6 +58,21 @@ class NavContractTest(unittest.TestCase):
         hrefs = [href for _g, items in nav.NAV_GROUPS for _k, _l, href, _i in items]
         self.assertEqual(len(hrefs), len(set(hrefs)), f"菜单路径重复: {hrefs}")
 
+    def test_a3_global_bar_injected_once(self):
+        """A3 壳：公共顶栏脚本插到 </body> 前，且重复注入不会产生两份。"""
+        html = "<html><body><main>x</main></body></html>"
+        once = nav.inject_global_bar(html)
+        self.assertIn(nav.GLOBAL_BAR_SCRIPT, once)
+        self.assertLess(once.index(nav.GLOBAL_BAR_SCRIPT), once.index("</body>"))
+        twice = nav.inject_global_bar(once)
+        self.assertEqual(twice.count(nav.GLOBAL_BAR_SCRIPT), 1)
+
+    def test_a3_excludes_print_and_detail_pages(self):
+        """打印/详情页不注入交互按钮——那些页要的是干净的可打印视图。"""
+        self.assertEqual(nav.NO_GLOBAL_BAR, {"report.html", "pilot.html", "answer.html"})
+        self.assertNotIn("index.html", nav.NO_GLOBAL_BAR)  # 首页要有徽章
+        self.assertNotIn("monitor.html", nav.NO_GLOBAL_BAR)
+
 
 if __name__ == "__main__":
     unittest.main()
