@@ -259,6 +259,7 @@
             <label>品牌 <select id="brandFilter" aria-label="品牌"><option value="">加载中…</option></select></label>
             <label>问题 <select id="questionFilter" aria-label="问题"><option value="">全部问题</option></select></label>
             <label>模型 <select id="modelFilter" aria-label="模型"><option value="">全部模型</option></select></label>
+            <span class="muted" id="modelChannelHint" style="font-size:var(--fs-caption)"></span>
             <label>日期 <span class="dates" id="filterDates"></span></label>
             <button type="button" class="small" id="clearFilters">清除筛选</button>
           </div>
@@ -435,10 +436,15 @@
     }
     var msel = $("modelFilter");
     if (msel && !msel.dataset.ready) {
+      // 现有采集只有网页渠道（domain/channels.py 的 AVAILABLE_KEYS）。
+      // 选项标「·网页」并在下方说明手机端未接入——不让用户误以为能对比 16 个渠道。
+      // value 仍是纯 model_key，API 口径不变；这只是诚实的展示标注。
       msel.innerHTML = '<option value="">全部模型</option>' +
         ["doubao", "deepseek", "kimi", "qwen", "yuanbao"].map(function (m) {
-          return '<option value="' + m + '">' + m + "</option>";
+          return '<option value="' + m + '">' + m + " · 网页</option>";
         }).join("");
+      var hint = $("modelChannelHint");
+      if (hint) hint.textContent = "当前仅网页渠道有数据；手机端未接入";
       msel.dataset.ready = "1";
     }
     if (msel) msel.value = state.filterModel;
