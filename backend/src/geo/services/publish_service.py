@@ -34,6 +34,7 @@ from typing import Any
 
 from geo import db
 from geo.repositories import sqlite_repository as repo
+from geo.services import article_image_service
 from geo.settings import settings
 
 BACKEND_DIR = Path(__file__).resolve().parents[3]
@@ -332,6 +333,12 @@ def dispatch_publication(pub_id: str, channel_key: str, article: dict) -> None:
         DRAFT_DIR.mkdir(parents=True, exist_ok=True)
         draft_path = DRAFT_DIR / f"{pub_id}.json"
         draft = {"title": article["title"], "content_html": markdown_to_html(article["body"])}
+        # 文章图片 → 发布器要的本地绝对路径。调用方传进来的 article 来自
+        # repo.get_article，images 已反序列化成 list；不在这构造就只有抖音/
+        # 小红书发布器能看到图片要求，而系统永远给空、必然 rejected。
+        images = article_image_service.absolute_paths(article.get("images") or [])
+        if images:
+            draft["images"] = images
         draft_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
 
         try:

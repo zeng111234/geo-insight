@@ -36,6 +36,7 @@ from geo.repositories import config_repository as config_repo
 from geo.repositories import report_repository as report_repo
 from geo.repositories import sqlite_repository as repo
 from geo.services import (
+    article_image_service,
     article_stage_service,
     audit_service,
     auth_service,
@@ -896,6 +897,82 @@ async def article_detail(request: Request):
         return JSONResponse(article)
     finally:
         conn.close()
+
+
+async def upload_article_image(request: Request):
+    """上传文章图片：保存到 backend/data/article_images，文件名记进 article.images。
+
+    文件名由服务端生成（uuid），调用方给的名字只用来取扩展名——杜绝目录穿越。
+    """
+    article_id = request.path_params["article_id"]
+    conn = db.connect()
+    try:
+        article = repo.get_article(conn, article_id)
+        if not article or article["tenant_id"] != _tenant(request):
+            return _error(request, "NOT_FOUND", "article not found", 404)
+        try:
+            form = await request.form()
+            upload = form.get("file")
+            if upload is None or not hasattr(upload, "read"):
+                return _error(request, "VALIDATION_ERROR", "需要 file 字段上传图片")
+            data = await upload.read()
+            name = article_image_service.save(data, getattr(upload, "filename", ""))
+        except article_image_service.ImageError as exc:
+            return _error(request, "VALIDATION_ERROR", str(exc))
+
+        images = [*article["images"], name]
+        updated = repo.update_article_images(conn, article_id, images, _now())
+        return JSONResponse(
+            {"name": name, "images": updated["images"], "url": f"/v1/articles/{article_id}/images/{name}"},
+            status_code=201,
+        )
+    finally:
+        conn.close()
+
+
+async def delete_article_image(request: Request):
+    """删除文章的一张图片：同时删文件和 article.images 里的记录。"""
+    article_id = request.path_params["article_id"]
+    name = request.path_params["name"]
+    conn = db.connect()
+    try:
+        article = repo.get_article(conn, article_id)
+        if not article or article["tenant_id"] != _tenant(request):
+            return _error(request, "NOT_FOUND", "article not found", 404)
+        if name not in article["images"]:
+            return _error(request, "NOT_FOUND", "图片不属于这篇文章", 404)
+        try:
+            article_image_service.delete(name)
+        except article_image_service.ImageError as exc:
+            return _error(request, "VALIDATION_ERROR", str(exc))
+        updated = repo.update_article_images(
+            conn, article_id, [n for n in article["images"] if n != name], _now()
+        )
+        return JSONResponse({"images": updated["images"]})
+    finally:
+        conn.close()
+
+
+async def get_article_image(request: Request):
+    """取图片文件本身：走鉴权，不让未登录访问文章内容附件。"""
+    article_id = request.path_params["article_id"]
+    name = request.path_params["name"]
+    conn = db.connect()
+    try:
+        article = repo.get_article(conn, article_id)
+        if not article or article["tenant_id"] != _tenant(request):
+            return _error(request, "NOT_FOUND", "article not found", 404)
+        if name not in article["images"]:
+            return _error(request, "NOT_FOUND", "图片不属于这篇文章", 404)
+    finally:
+        conn.close()
+    try:
+        path = article_image_service.path_for(name)
+    except article_image_service.ImageError:
+        return _error(request, "VALIDATION_ERROR", "非法的图片文件名", 400)
+    if not path.is_file():
+        return _error(request, "NOT_FOUND", "图片文件已丢失", 404)
+    return FileResponse(path, media_type="image/png")
 
 
 async def article_stages(request: Request):
@@ -1877,6 +1954,12 @@ Route(f"{settings.api_prefix}/channels/{{channel_id}}/check", check_channel, met
             article_stages,
             methods=["GET", "POST"],
         ),
+        Route(f"{settings.api_prefix}/articles/{{article_id}}/images", upload_article_image, methods=["POST"]),
+        Route(
+            f"{settings.api_prefix}/articles/{{article_id}}/images/{{name}}",
+            delete_article_image, methods=["DELETE"],
+        ),
+        Route(f"{settings.api_prefix}/articles/{{article_id}}/images/{{name}}", get_article_image),
         Route(f"{settings.api_prefix}/articles/{{article_id}}/publish", publish_article, methods=["POST"]),
         Route(f"{settings.api_prefix}/articles/{{article_id}}/impact", article_impact),
     ]

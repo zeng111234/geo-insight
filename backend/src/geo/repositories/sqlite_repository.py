@@ -5,6 +5,7 @@ filter by tenant/tracker/date/model/channel, then aggregate. Swapping the
 storage only replaces this module.
 """
 
+import json
 import sqlite3
 import uuid
 from typing import Any
@@ -412,11 +413,39 @@ def list_articles(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) -> 
     return [dict(r) for r in rows]
 
 
+def _parse_article_images(raw) -> list[str]:
+    """DB 里的 images 是 JSON 字符串;空/坏数据一律当空列表,不让坏值 500。"""
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(x) for x in parsed if isinstance(x, (str, int, float))]
+
+
+def update_article_images(
+    conn: sqlite3.Connection, article_id: str, images: list[str], updated_at: str
+) -> dict | None:
+    """只改 images 列,不碰 title/body/version——上传图片不算新版本。"""
+    conn.execute(
+        "UPDATE article SET images = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(images, ensure_ascii=False), updated_at, article_id),
+    )
+    conn.commit()
+    return get_article(conn, article_id)
+
+
 def get_article(conn: sqlite3.Connection, article_id: str) -> dict | None:
     row = conn.execute("SELECT * FROM article WHERE id = ?", (article_id,)).fetchone()
     if not row:
         return None
     article = dict(row)
+    # 迁移 019 之后 images 是 JSON 字符串;老库(迁移未跑)可能没有这一列,
+    # 用 get 兜底成空列表,不让详情接口因为升级中间态 500。
+    article["images"] = _parse_article_images(article.get("images"))
     article["facts"] = [
         dict(r)
         for r in conn.execute(
