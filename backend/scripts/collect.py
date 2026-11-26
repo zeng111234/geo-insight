@@ -181,6 +181,10 @@ def run_loop(conn, tracker_id: str, args) -> int:
                 # 提前收手时要说清原因，否则会被当成"采完了"
                 print("    本轮提前结束（认证失败 / 采满 / 连续限流）。间隔后重试")
 
+            if args.rounds and rounds >= args.rounds:
+                # 跑满指定轮数就收工，不再睡——定时任务靠退出码判断成败，
+                # 白睡一个 interval（默认 3600s）会被当成卡死。
+                break
             if stats["remaining_missing"] == 0:
                 print(f"    今天已经采满，{args.interval} 秒后再检查")
             time.sleep(args.interval)

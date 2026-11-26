@@ -68,6 +68,28 @@ class RoundsTest(unittest.TestCase):
             code = self.cli.run_loop(mock.MagicMock(), "tracker-1", self.args(rounds))
         return code, len(calls)
 
+    def test_rounds_one_does_not_sleep_after_last_round(self):
+        """定时任务用 --rounds 1 跑完就该退出，不能白睡一个 interval。
+
+        run_loop 原来在每轮末尾无条件 sleep(3600)，--rounds 1 也要挂 1 小时
+        才退出——定时任务会误以为卡死。sleep 只在「还会跑下一轮」时发生。
+        """
+        with mock.patch.object(self.cli.collect_service, "fill_gaps",
+                               side_effect=lambda *a, **k: empty_gap()), \
+             mock.patch("time.sleep") as sleeper:
+            code = self.cli.run_loop(mock.MagicMock(), "tracker-1", self.args(1))
+        self.assertEqual(code, 0)
+        sleeper.assert_not_called()
+
+    def test_rounds_two_sleeps_only_between_rounds(self):
+        """两轮之间睡一次，最后一轮之后不睡。"""
+        with mock.patch.object(self.cli.collect_service, "fill_gaps",
+                               side_effect=lambda *a, **k: empty_gap()), \
+             mock.patch("time.sleep") as sleeper:
+            code = self.cli.run_loop(mock.MagicMock(), "tracker-1", self.args(2))
+        self.assertEqual(code, 0)
+        self.assertEqual(sleeper.call_count, 1, "2 轮之间应只睡 1 次")
+
     def test_rounds_one_runs_exactly_once(self):
         code, n = self.run_with(1, lambda *a, **k: empty_gap(), 1)
         self.assertEqual((code, n), (0, 1))
