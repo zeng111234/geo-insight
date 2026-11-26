@@ -615,11 +615,19 @@ paths:
         - csv
         - jsonl
         default: csv
+    - name: client
+      in: query
+      schema:
+        type: string
+        enum:
+        - web
+        - mobile
+      description: 按端过滤（与指标筛选同口径）；文件名带端口径，CSV/JSONL 列含 client。
     get:
       tags:
       - answers
       summary: 原始答案批量导出
-      description: CSV 带 UTF-8 BOM，列含答案原文、提及位次、情感、引用数量；JSONL 每行一条。
+      description: CSV 带 UTF-8 BOM，列含答案原文、提及位次、情感、引用数量、client 端；JSONL 每行一条。
       responses:
         '200':
           description: 文件流

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import csv
 import tempfile
 import unittest
 from pathlib import Path
@@ -212,6 +213,25 @@ class ChannelHttpTest(unittest.TestCase):
         self.assertGreater(all_data["sample_total"], 0, "seed 库应有样本")
         self.assertEqual(web["sample_total"], all_data["sample_total"], "全库皆 web")
         self.assertEqual(mobile["sample_total"], 0, "无手机端样本时应为 0，不是回退到全端")
+
+    def test_export_keeps_client_column_and_filename_tag(self):
+        """P3 收尾:导出带 client 列与文件名端口径——导出后可验是哪一端的数据。"""
+        base = f"/v1/trackers/{self.tracker_id}/answers/export"
+        web = self.client.get(base + "?from=2026-11-01&to=2026-11-30&client=web")
+        self.assertEqual(web.status_code, 200)
+        self.assertIn("-web-", web.headers["content-disposition"])
+        rows = list(csv.DictReader(web.text.lstrip("\ufeff").splitlines()))
+        self.assertIn("client", rows[0] if rows else {})
+        self.assertTrue(all(r["client"] == "web" for r in rows), "导出行应全为 web")
+
+        mobile = self.client.get(base + "?from=2026-11-01&to=2026-11-30&client=mobile")
+        self.assertEqual(mobile.status_code, 200)
+        self.assertIn("-mobile-", mobile.headers["content-disposition"])
+        mrows = list(csv.DictReader(mobile.text.lstrip("\ufeff").splitlines()))
+        self.assertEqual(len(mrows), 0, "无手机端样本时导出应只有表头")
+
+        all_export = self.client.get(base + "?from=2026-11-01&to=2026-11-30")
+        self.assertNotIn("-web-", all_export.headers["content-disposition"])
 
     def test_opportunities_and_competitors_follow_client(self):
         """P3 补全:机会分/竞品也随端变——选了端不能只有部分 tab 变。"""

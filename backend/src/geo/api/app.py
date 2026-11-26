@@ -65,6 +65,7 @@ EXPORT_FIELDS = (
     "tier",
     "model_key",
     "channel",
+    "client",
     "mentioned",
     "position",
     "sentiment",
@@ -1794,7 +1795,8 @@ async def answers_export(request: Request):
         if client_err:
             return client_err
         rows = repo.export_answer_rows(conn, tracker_id, period[0], period[1], client)
-        filename = f"answers-{tracker_id[:8]}-{period[0]}_{period[1]}.{fmt}"
+        client_tag = f"-{client}" if client else ""
+        filename = f"answers-{tracker_id[:8]}{client_tag}-{period[0]}_{period[1]}.{fmt}"
         if fmt == "jsonl":
             body = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
             content = body.encode("utf-8")

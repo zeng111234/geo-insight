@@ -776,7 +776,7 @@ def export_answer_rows(
         f"""
         SELECT a.id AS answer_id, {day_of('a.collected_at')} AS day, a.collected_at,
                a.question_id, q.text AS question_text, q.tier,
-               a.model_key, a.channel, a.is_valid, a.text,
+               a.model_key, a.channel, a.client, a.is_valid, a.text,
                CASE WHEN m.id IS NULL THEN 0 ELSE 1 END AS mentioned,
                m.position, m.sentiment, m.snippet,
                (SELECT COUNT(*) FROM citation c WHERE c.answer_id = a.id) AS citation_count
