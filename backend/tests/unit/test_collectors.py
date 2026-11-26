@@ -18,11 +18,24 @@ from tests.fixtures import QUESTION_TEXT, TENANT, TRACKER, build_minimal_db
 NOW = "2026-11-24T12:00:00+08:00"
 
 
+def preserve_registry(test):
+    """谁往全局注册表塞临时采集器,谁负责还原。
+
+    run_once() 会把指向临时目录的实例注册成 csv_bank。临时目录删除后该实例
+    available()=False,不还原就会污染后续用 registry 的测试(典型症状:
+    test_collect_slot 单独跑全绿、全量跑 10 条红)。注册表是进程级单例,
+    所以每个会 register 的测试类都要在 setUp 里调这个。
+    """
+    original = registry.get("csv_bank")
+    test.addCleanup(registry.register, original)
+
+
 class CsvBankCollectorTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
+        preserve_registry(self)
 
     def bank(self, rows: list[dict], name: str = "bank.jsonl") -> CsvBankCollector:
         path = self.root / name
@@ -83,6 +96,7 @@ class CollectServiceTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
+        preserve_registry(self)
         self.conn = build_minimal_db(self.root / "geo.db")
         self.addCleanup(self.conn.close)
 
