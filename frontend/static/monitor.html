@@ -289,9 +289,11 @@
         <section class="panel mon-cite" id="citeRail">
           <div class="cite-head">
             <span>引用信源</span>
+            <!-- 文章监控名单尚未接入（后端 monitoring_available=false）；点前就标出，
+                 不让客户选了才发现是空功能。保留可选以维持 citeView=monitored 深链与诚实提示。 -->
             <select id="citeView" aria-label="引用视图">
               <option value="all">全部</option>
-              <option value="monitored">已监控</option>
+              <option value="monitored">已监控（未接入）</option>
             </select>
           </div>
           <div class="cite-body" id="citeBody"><div class="empty">选一条回答看它的引用</div></div>
