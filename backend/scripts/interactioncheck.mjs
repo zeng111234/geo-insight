@@ -337,6 +337,39 @@ try {
   check(beforePrint === 0 && afterPrint === 1,
     "点「打印 / 导出 PDF」真的调用 window.print", `计数 ${beforePrint}→${afterPrint}`);
 
+  // 12.5 采集健康：从接口拿真实 run 数，验证页面任务表渲染出同样多的行——
+  // P6 是新接口，只验「有表格」会因空壳假绿；必须行数与接口一致、进度格式正确。
+  await send("Page.navigate", { url: `${BASE}/monitor?tab=health` });
+  await sleep(4000);
+  const runsApi = await (await fetch(
+    `${BASE}/v1/trackers/11111111-1111-1111-1111-111111111111/runs?from=2026-11-01&to=2026-11-30`
+  )).json();
+  const apiCount = (runsApi.items || []).length;
+  const runsUi = await evaluate(`(function () {
+    var rules = Array.from(document.querySelectorAll('#tabBody .rule'))
+      .filter(function (e) { return e.textContent.indexOf('采集任务') >= 0; });
+    if (!rules.length) return { found: false };
+    var sib = rules[0].nextElementSibling;
+    var rows = sib && sib.classList.contains('table-wrap')
+      ? Array.from(sib.querySelectorAll('tbody tr')).map(function (tr) {
+          return Array.from(tr.querySelectorAll('td')).map(function (c) { return c.textContent.trim(); });
+        }) : [];
+    return {
+      found: true,
+      label: rules[0].textContent.trim(),
+      rows: rows,
+      failedNotice: document.getElementById('tabBody').textContent.indexOf('采集任务列表暂时读取失败') >= 0,
+    };
+  })()`);
+  check(runsUi.found && !runsUi.failedNotice, "采集健康页渲染出采集任务区块、无读取失败提示");
+  check(runsUi.rows && runsUi.rows.length === apiCount,
+    "采集任务行数 = 接口真实 run 数", `页面 ${runsUi.rows ? runsUi.rows.length : 0} / 接口 ${apiCount}`);
+  check(/采集任务（\d+ 次）/.test(runsUi.label || ""), "任务区块标题带真实次数", runsUi.label || "无");
+  check(runsUi.rows && runsUi.rows.length > 0 && runsUi.rows.every(
+    (cols) => cols.length === 6 && /^\d+\/\d+$|^—$/.test(cols[3])
+  ), "每行 6 列、进度为 成功/总数 格式",
+    runsUi.rows && runsUi.rows[0] ? runsUi.rows[0].join(" | ") : "无行");
+
   // 13. 设置页删除确认：点别名 × → 弹框说清后果 → 取消不掉数据（只读，不写库）
   await send("Page.navigate", { url: `${BASE}/settings` });
   await sleep(3500);
