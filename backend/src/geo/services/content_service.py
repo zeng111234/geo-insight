@@ -18,6 +18,7 @@ import uuid
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 
+from geo.business_time import business_today
 from geo.collectors.citations import normalize_url
 from geo.domain import metrics
 from geo.repositories import effect_repository as effect_repo
@@ -235,7 +236,8 @@ def _baseline_preview(
     而不是等发完了再说「样本不足」。
     """
     _, last_data = repo.data_date_range(conn, tracker_id)
-    anchor = last_data or date.today().isoformat()
+    # 无历史数据时以业务时区今天为锚点；服务器本地 date.today() 在 UTC 机器上凌晨会错一天。
+    anchor = last_data or business_today()
     start = _shift(anchor, -(window_days - 1))
     counts = effect_repo.window_counts(conn, tracker_id, start, anchor, question_id=question_id)
     needed = PILOT_RULE["min_window_samples"]

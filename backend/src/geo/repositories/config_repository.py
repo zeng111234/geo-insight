@@ -8,8 +8,8 @@ storage means replacing these two files, nothing else.
 import re
 import sqlite3
 import uuid
-from datetime import date, timedelta
 
+from geo.business_time import business_tomorrow
 from geo.repositories.sqlutil import day_of
 
 TIERS = ("core", "long_tail")
@@ -30,7 +30,8 @@ def normalize(text: str) -> str:
 
 
 def tomorrow() -> str:
-    return (date.today() + timedelta(days=1)).isoformat()
+    # FR-012 生效日按业务时区算，不能用服务器本地 date.today()（UTC 服务器凌晨会错一天）。
+    return business_tomorrow()
 
 
 # ---------------------------------------------------------------------------

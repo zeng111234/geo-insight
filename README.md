@@ -433,8 +433,10 @@ python backend/scripts/restore_rehearse.py
 3. `GEO_PUBLISH_HEADLESS=1`，本地登录好的 `.browser-profiles/` 传到同一路径；
 4. 数据库路径固定（默认项目根 `geo.db`，可用 `GEO_DB_PATH` 指到数据盘）；
 5. `pip install -r backend/requirements.lock.txt`（不要用宽松声明）；
-6. 定时备份 timer 已 `enable --now`，两套 unit 的 `GEO_DB_PATH` 一致，手动跑一次确认；
-7. `deploy_rehearse.py` 与 `doctor.py --server` 都退出 0，再 `systemctl enable --now geo-insight`。
+6. 业务日期按北京时间算，不跟服务器时区（`date.today()` 在 UTC 机器上凌晨会错一天；
+   采集/指标已用 `business_time` + `substr` 收口，见决策 007）；
+7. 定时备份 timer 已 `enable --now`，两套 unit 的 `GEO_DB_PATH` 一致，手动跑一次确认；
+8. `deploy_rehearse.py` 与 `doctor.py --server` 都退出 0，再 `systemctl enable --now geo-insight`。
 
 ## 接口
 
