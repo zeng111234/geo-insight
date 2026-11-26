@@ -875,8 +875,7 @@ components:
           - disabled
         daily_samples:
           type: integer
-          description: core=3
-          long_tail=1: null
+          description: 问题层级次数 × 采样计划中的模型数（core_times 或 long_tail_times 乘 model_keys 长度）
         created_at:
           type: string
           format: date-time

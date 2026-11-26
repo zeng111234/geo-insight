@@ -8,6 +8,7 @@
 - 竞品集合变更必须递增版本（FR-003）。
 """
 
+import json
 import unittest
 from datetime import date, timedelta
 
@@ -48,6 +49,27 @@ class ConfigFlowTest(unittest.TestCase):
         self.assertEqual(updated["effective_from"], expected)
         self.assertTrue(updated["history_unchanged"])
         self.assertEqual(updated["previous_tier"], "long_tail")
+
+    def test_daily_samples_match_sampling_plan_not_hardcoded(self):
+        """问题列表的「每日采样」必须 = 层级次数 × 模型数，不能写死 3/1。
+
+        assets 页同一屏上方卡片按此公式算，下方表格曾写死常量，页面自相矛盾。
+        """
+        plan = config.latest_plan(self.conn, TRACKER)
+        model_count = len(json.loads(plan["model_keys"]))
+        items = config.list_questions(self.conn, TRACKER)["items"]
+        self.assertGreater(len(items), 0)
+        self.assertGreater(model_count, 0)
+        for q in items:
+            times = plan["core_times"] if q["tier"] == "core" else plan["long_tail_times"]
+            self.assertEqual(
+                q["daily_samples"], times * model_count,
+                f"{q['tier']} 问题的每日采样应随计划×模型数变",
+            )
+        # 当前 seed 是 3 模型，core_times=3 → 核心问题应为 9，不是写死的 3
+        self.assertNotEqual(
+            [q["daily_samples"] for q in items if q["tier"] == "core"][0], 3
+        )
 
     def test_sampling_plan_expands_by_model(self):
         plan = config_service.sampling_overview(self.conn, TRACKER)

@@ -5,6 +5,7 @@ dashboard stays small. Both modules are "the repository layer": swapping
 storage means replacing these two files, nothing else.
 """
 
+import json
 import re
 import sqlite3
 import uuid
@@ -377,10 +378,21 @@ def list_questions(conn: sqlite3.Connection, tracker_id: str) -> dict:
         """,
         (tracker_id,),
     ).fetchall()
+    # 每日采样 = 问题层级次数 × 模型数——与同页上方「每日计划采样」卡片
+    # (config_service.sampling_overview) 同一口径。之前这里写死 core=3/long_tail=1，
+    # 页面文案却声明是乘积：seed 有 3 个模型，表格显示 3 而卡片显示 9，自相矛盾。
+    plan = latest_plan(conn, tracker_id)
+    try:
+        model_count = len(json.loads(plan["model_keys"])) if plan and plan.get("model_keys") else 0
+    except (TypeError, ValueError):
+        model_count = 0
+    core_times = plan["core_times"] if plan else 3
+    long_tail_times = plan["long_tail_times"] if plan else 1
     items = []
     for row in rows:
         item = dict(row)
-        item["daily_samples"] = 3 if item["tier"] == "core" else 1
+        times = core_times if item["tier"] == "core" else long_tail_times
+        item["daily_samples"] = times * model_count
         items.append(item)
     return {
         "items": items,
