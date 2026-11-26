@@ -10,6 +10,10 @@
 而不是靠记忆逐条想。
 
 只读检查，不改任何文件。退出码：全部必需项通过 = 0，否则 = 1。
+
+服务器部署前再加一层：`python backend/scripts/doctor.py --server`。
+它叠在基础自检之上，查的是"本地能跑、上线才炸"的那几项——
+演示默认密码、鉴权被关、无显示器却没开 headless、/dev/shm、磁盘、HTTPS 反代。
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import shutil
 import socket
 import sqlite3
 import sys
@@ -51,6 +56,73 @@ def stray_verdict(db_path: Path, stray: Path) -> tuple[str, str, str]:
         "backend/geo.db 也有内容：老版本按 cwd 建库留下的。确认哪份是最新后删掉另一份，"
         "否则换启动方式会看到不同数据",
     )
+
+
+# ---- 服务器就绪判据（纯函数，便于测试；--server 才跑）----
+#
+# 这些是"本地能跑、上线才炸"的那类坑：默认密码裸奔、无显示器却开有头浏览器、
+# cookie 只在 HTTPS 下才带 Secure/None。写成纯函数是为了让测试能造出
+# "Linux 无 DISPLAY" 这种本地再造不出来的场景，而不是等真上了服务器才发现。
+
+
+def security_verdict(password: str, auth_required: bool, demo_password: str) -> tuple[str, str, str]:
+    """鉴权必须开、密码必须不是演示值。两者任一不满足都不能对外。"""
+    if not auth_required:
+        return (
+            FAIL,
+            "鉴权",
+            "GEO_AUTH_REQUIRED=0 是自动化测试专用；对外服务开着等于任何人都能看全部数据",
+        )
+    if password == demo_password:
+        return (
+            FAIL,
+            "管理员密码",
+            "还在用演示默认密码。必须设 GEO_ADMIN_PASSWORD（决策 008），否则等于没锁门",
+        )
+    return OK, "鉴权与密码", "鉴权已开，且不是演示默认密码"
+
+
+def headless_verdict(is_linux: bool, headless: bool, has_display: bool) -> tuple[str, str, str]:
+    """服务器无显示器时不设 headless，五个浏览器渠道会在启动那步直接崩。"""
+    if is_linux and not headless:
+        if not has_display:
+            return (
+                FAIL,
+                "无头发布",
+                "Linux 无显示器必须设 GEO_PUBLISH_HEADLESS=1，否则知乎/公众号/抖音等渠道浏览器启动即崩",
+            )
+        return (
+            WARN,
+            "无头发布",
+            "Linux 有 DISPLAY 但没开 headless；服务器建议统一设 1，别依赖 X11 转发",
+        )
+    if headless:
+        return OK, "无头发布", "已开启（指纹更易被风控识别，见 README 安全取舍）"
+    return OK, "无头发布", "本机有头模式，无需改动"
+
+
+def shm_verdict(total_mb: int) -> tuple[str, str, str]:
+    """Docker 默认 /dev/shm 只有 64MB，Chrome 容易崩（-1 表示读不到）。"""
+    if total_mb < 0:
+        return WARN, "/dev/shm", "读不到大小；非 Linux 可忽略，容器里请确认 --shm-size"
+    if total_mb < 64:
+        return (
+            FAIL,
+            "/dev/shm",
+            f"只有 {total_mb}MB，Chrome 会崩。加 --shm-size=512m（代码已带 --disable-dev-shm-usage，但别赌）",
+        )
+    if total_mb < 256:
+        return WARN, "/dev/shm", f"只有 {total_mb}MB，发布多并发时可能不足"
+    return OK, "/dev/shm", f"{total_mb}MB"
+
+
+def disk_verdict(free_gb: float, minimum_gb: float = 1.0, comfortable_gb: float = 5.0) -> tuple[str, str, str]:
+    """原始响应按天落盘、备份也占空间；给个下限免得跑到一半写不进去。"""
+    if free_gb < minimum_gb:
+        return FAIL, "磁盘空间", f"只剩 {free_gb:.1f}GB，原始响应与备份都写不下"
+    if free_gb < comfortable_gb:
+        return WARN, "磁盘空间", f"剩 {free_gb:.1f}GB，建议 ≥ {comfortable_gb:.0f}GB（raw + 备份会持续增长）"
+    return OK, "磁盘空间", f"剩 {free_gb:.1f}GB"
 
 
 def check_python() -> None:
@@ -196,6 +268,46 @@ def check_collect_keys() -> None:
         )
 
 
+def check_server_readiness() -> None:
+    """服务器专项检查，叠在基础自检之后。只读，不改配置。"""
+    from geo.settings import DEMO_ADMIN_PASSWORD, settings
+
+    level, item, detail = security_verdict(
+        settings.admin_password, settings.auth_required, DEMO_ADMIN_PASSWORD
+    )
+    record(level, item, detail)
+
+    is_linux = sys.platform.startswith("linux")
+    has_display = bool(os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"))
+    level, item, detail = headless_verdict(is_linux, settings.publish_headless, has_display)
+    record(level, item, detail)
+
+    if is_linux:
+        try:
+            shm_mb = shutil.disk_usage("/dev/shm").total // (1024 * 1024)
+        except OSError:
+            shm_mb = -1
+        level, item, detail = shm_verdict(shm_mb)
+        record(level, item, detail)
+
+    try:
+        free_gb = shutil.disk_usage(ROOT).free / (1024 ** 3)
+        level, item, detail = disk_verdict(free_gb)
+    except OSError as exc:
+        level, item, detail = WARN, "磁盘空间", f"读不到：{exc}"
+    record(level, item, detail)
+
+    # cookie 的 Secure/None 由「请求看起来是不是 HTTPS」决定（app.py 的 _is_https）。
+    # 反代不透传 X-Forwarded-Proto 时它是 false，应用卡 iframe 里会被弹回登录页——
+    # 这是线上白屏的唯一已知原因，必须专门提示，不能混在"网络配置"里。
+    record(
+        WARN,
+        "HTTPS 反代",
+        "对外必须 HTTPS，反代要透传 X-Forwarded-Proto: https；"
+        "否则 cookie 不带 Secure/None，应用卡 iframe 登录后白屏（决策 010）",
+    )
+
+
 def check_port(port: int) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.5)
@@ -219,6 +331,10 @@ def check_writable() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="换机器后先跑一遍环境自检")
     parser.add_argument("--port", type=int, default=int(os.getenv("GEO_PORT", "8123")))
+    parser.add_argument(
+        "--server", action="store_true",
+        help="叠加服务器部署检查（默认密码、鉴权、headless、shm、磁盘、HTTPS 反代）",
+    )
     args = parser.parse_args()
 
     check_python()
@@ -230,6 +346,8 @@ def main() -> int:
     check_local_files()
     check_writable()
     check_port(args.port)
+    if args.server:
+        check_server_readiness()
 
     width = max(len(item) for _l, item, _d in _rows)
     for level, item, detail in _rows:

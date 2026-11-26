@@ -1,0 +1,56 @@
+# GEO Insight 的 systemd 单元模板（Linux 服务器）。
+#
+# 用法（在服务器上，按实际路径/用户改三处后安装）：
+#   1. 编辑下面 User / WorkingDirectory / Environment=GEO_ADMIN_PASSWORD
+#   2. sudo cp infra/geo-insight.service /etc/systemd/system/geo-insight.service
+#   3. sudo systemctl daemon-reload && sudo systemctl enable --now geo-insight
+#   4. sudo journalctl -u geo-insight -f       # 看日志
+#   5. python backend/scripts/doctor.py --server   # 上线前自检，必须 0 退出码
+#
+# 为什么不用 Docker：决策 002。仓库是 SQLite 单文件 + 静态页，一个 uvicorn 进程就够，
+# 引入容器只增加数据卷和登录态挂载的复杂度，对这个规模没有收益。
+#
+# 单进程约束（决策 012）：session、发布并发闸门都是进程内的，所以这里只起 1 个 worker。
+# 想上多 worker 得先把 session 挪到共享存储，否则登录状态会随 worker 漂移。
+#
+# 未在真实 Linux 实机验证：本模板来自 Windows 开发环境的配置推演，
+# 首次部署请按上面第 5 步自检 + 手动 `python backend/run.py --no-browser` 起一次确认。
+
+[Unit]
+Description=GEO Insight dashboard
+After=network.target
+
+[Service]
+Type=simple
+# 改成服务器上的实际用户；不要用 root 跑浏览器（root 下要 --no-sandbox，见 GEO_CHROME_SANDBOX）
+User=geo
+# 改成代码实际放置的路径
+WorkingDirectory=/opt/geo-insight/backend
+
+# ---- 必改 ----
+Environment=GEO_ADMIN_PASSWORD=CHANGE_ME_TO_A_STRONG_PASSWORD
+# ---- 服务器运行时 ----
+Environment=GEO_HOST=127.0.0.1
+Environment=GEO_PORT=8123
+Environment=GEO_AUTH_REQUIRED=1
+Environment=GEO_PUBLISH_HEADLESS=1
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+# 数据库默认落在项目根的 geo.db；要挪到别处就加：
+# Environment=GEO_DB_PATH=/var/lib/geo-insight/geo.db
+# 线上 HTTPS 反代要透传 X-Forwarded-Proto: https，否则 cookie 不带 Secure/None，
+# 应用卡 iframe 里登录后会被弹回登录页（决策 010）。本服务自身不终结 TLS。
+
+# 用 venv 的 python；按实际路径改
+ExecStart=/opt/geo-insight/.venv/bin/python run.py --no-browser
+
+Restart=on-failure
+RestartSec=5
+# 浏览器发布会开子进程，超时给足（settings 默认 600s）
+TimeoutStopSec=30
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

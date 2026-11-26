@@ -341,6 +341,37 @@ python scripts/baijiahao_check.py --init            # 百家号:开放平台 API
 **验证到哪**：参数拼接与平台判断有 8 条单测 + 3 次变异守着；真实服务器端到端发布**没有跑过**
 （需要真实账号登录态和平台网络），属于"代码就位、未实机验证"。
 
+### 上线前自检 + 进程守护
+
+服务器和"两台电脑轮流跑"最大的差别是：**本地能跑，上线才炸的那几项没人拦**。
+上线前先跑这条（叠加在普通自检之上，只读、不改配置）：
+
+```bash
+python backend/scripts/doctor.py --server     # 退出码必须是 0
+```
+
+它额外查：演示默认密码还没改 / 鉴权被关（FAIL）、Linux 无显示器却没开
+`GEO_PUBLISH_HEADLESS`（FAIL）、`/dev/shm` 与磁盘空间、以及 HTTPS 反代提示。
+前两项是决策 008「部署前必须改密码」从文档约定变成真能拦的检查；
+HTTPS 那条守的是应用卡 iframe 白屏——cookie 只在请求"看起来是 HTTPS"时才带
+`Secure; SameSite=None`，反代没透传 `X-Forwarded-Proto: https` 就会弹回登录页。
+判据写成纯函数，13 条测试 + 2 次变异守着（本地造不出"Linux 无 DISPLAY"，所以造函数入参）。
+
+**进程守护**：`infra/geo-insight.service` 是 systemd 模板，按注释改好用户/路径/密码后：
+`sudo cp … /etc/systemd/system/` → `daemon-reload` → `enable --now` → `journalctl -u geo-insight -f`。
+只起 **1 个 worker**：session 和发布并发闸门都是进程内的，多 worker 会让登录态漂移。
+**未在真实 Linux 实机验证**——首次部署先手动 `python backend/run.py --no-browser` 起一次确认，
+再交给 systemd。
+
+**上线清单**（缺一项就别开公网）：
+
+1. `GEO_ADMIN_PASSWORD` 换成强密码，`GEO_AUTH_REQUIRED=1`；
+2. 反代终结 TLS 并透传 `X-Forwarded-Proto: https`，否则应用卡白屏；
+3. `GEO_PUBLISH_HEADLESS=1`，本地登录好的 `.browser-profiles/` 传到同一路径；
+4. 数据库路径固定（默认项目根 `geo.db`，可用 `GEO_DB_PATH` 指到数据盘）；
+5. 定时备份：`backend/scripts/backup.py --keep 7`，恢复前先停服务；
+6. `doctor.py --server` 退出码 0，再 `systemctl enable --now`。
+
 ## 接口
 
 契约权威源：`specs/001-geo-insight-platform/contracts/openapi.yaml`（OpenAPI 3.1，21 路径），根目录 `contracts/openapi.yaml` 是同步副本。

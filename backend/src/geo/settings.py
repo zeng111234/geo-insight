@@ -6,6 +6,11 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 # 项目根（backend 的上一级）。路径必须从这里推，不能靠 cwd。
 PROJECT_ROOT = BACKEND_DIR.parent
 
+# 演示默认密码。只在 `start.bat` 的本机演示场景用；对外服务必须设 GEO_ADMIN_PASSWORD。
+# 单独提出来是因为 doctor --server 要拿它做守门——文档里写"部署前要改"没人拦，
+# 得有一条命令真能查出"还在用演示密码"。决策 008。
+DEMO_ADMIN_PASSWORD = "geo-demo-2026"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -44,7 +49,7 @@ class Settings:
     auth_required: bool = os.getenv("GEO_AUTH_REQUIRED", "1") != "0"
     admin_email: str = os.getenv("GEO_ADMIN_EMAIL", "demo@example.com")
     # 演示默认密码。真实使用必须用环境变量覆盖，README 里写明了。
-    admin_password: str = os.getenv("GEO_ADMIN_PASSWORD", "geo-demo-2026")
+    admin_password: str = os.getenv("GEO_ADMIN_PASSWORD", DEMO_ADMIN_PASSWORD)
     session_hours: int = int(os.getenv("GEO_SESSION_HOURS", "12"))
     cookie_name: str = "geo_session"
     # CSRF 双提交 cookie 名(登录后非 HttpOnly 下发,页面 JS 读它放进 X-CSRF-Token)
