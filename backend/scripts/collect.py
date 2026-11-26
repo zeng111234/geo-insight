@@ -69,9 +69,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--interval", type=int, default=3600, help="--loop 的间隔秒数，默认 3600",
     )
+    parser.add_argument(
+        "--rounds", type=int, default=0,
+        help="--loop 最多跑几轮后正常退出；0 表示一直跑（默认）。"
+             "自动化/定时任务请显式给 1，别靠 Ctrl+C",
+    )
     args = parser.parse_args(argv)
     if args.once:
         args.limit = 1
+    if args.rounds < 0:
+        print("[x] --rounds 不能是负数（0 表示无限循环）", file=sys.stderr)
+        return 1
 
     if args.list:
         return show_collectors()
@@ -145,7 +153,7 @@ def run_loop(conn, tracker_id: str, args) -> int:
 
     rounds = 0
     try:
-        while True:
+        while args.rounds == 0 or rounds < args.rounds:
             rounds += 1
             try:
                 stats = collect_service.fill_gaps(
@@ -179,6 +187,10 @@ def run_loop(conn, tracker_id: str, args) -> int:
     except KeyboardInterrupt:
         print(f"\n已停止（共 {rounds} 轮）。")
         return 0
+    # 跑满指定轮数后要正常退出，不能停在"等下一轮"的姿态：
+    # 定时任务靠退出码判断成败，而 --rounds 1 的整条命令已经在上面打完账了。
+    print(f"\n已完成 {rounds} 轮（--rounds {args.rounds}），正常退出。")
+    return 0
 
 
 if __name__ == "__main__":

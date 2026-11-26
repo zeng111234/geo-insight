@@ -209,21 +209,32 @@ python scripts/import_answers.py --delete-batch <id>             # 真回滚
 - **竞品的 `brand` 行不跟着删**：那是「主体注册」，可能被别的批次的提及引用，跟着删会让别人的提及失去主语。
 - 回滚后可以重新导入同一份文件，此时会正常新增而不是判重复。
 
-**② 采集器（接口已就位，等平台权限）**
+**② 采集器（DeepSeek 真实调用已跑通，豆包待 key）**
 
 `collectors/` 定义 `Collector` 协议（`available / supports / collect`），注册表显式登记，不做目录扫描。
-目前只有一个离线实现 `csv_bank`：从本地答案库按 (问题, 模型) 取答案，用来把「采集 → 落库 → 出指标」
-这条链路先跑通。拿到平台 API 后新增一个 `kind="api"` 的实现即可，写入与指标层不用动。
+`deepseek`（官方 API · 联网搜索）已做真实调用；`doubao`（火山方舟）代码在但没配 key、没做真实验证；
+`csv_bank` 是离线兜底。真实 key 放 `backend/data/keys.local.json`（已 gitignore），日志只报来源、不打印 key 片段。
 
 ```bash
 cd backend
-python scripts/collect.py --list
-GEO_COLLECTOR_CSV=data/import-sample.jsonl python scripts/collect.py \
-  --question "沈阳哪一家律所最专业" --model doubao
+python scripts/collect.py --list                       # 看哪个采集器可用
+# 建独立试点对象（真实答案只进这个对象，不灌演示对象）
+python scripts/setup_pilot.py --name "辽征试点" --brand "辽宁辽征" \
+  --target "沈阳哪一家律所最专业" --control "沈阳律师事务所排名前十" \
+  --model deepseek --core-times 3 --long-tail-times 1 --dry-run
+# 去掉 --dry-run 真正建；然后跑一轮，跑完打印账并正常退出（不靠 Ctrl+C）
+python scripts/collect.py --tracker <上一步的 tracker id> --model deepseek --collector deepseek \
+  --loop --rounds 1
 ```
 
-**说明**：采集器只负责拿回原文，不做提及识别；`mention` 目前仍由 seed 或导入时的 `mentions` 字段写入。
-自动识别提及是下一步的事，不假装已经做了。
+- **一天只采计划里的缺口**：同日再跑一次缺口为 0，一次 API 都不调（已实测 `inserted=0`）；
+  超计划要加 `--force`，超出的样本会多算进指标。
+- `--rounds 1` 是给脚本/定时任务用的：跑完一轮打印账并退出 0；不加则一直循环，靠 Ctrl+C 停。
+- `--loop` 每轮打印「缺口 → 补采数 → 失败数 → 今日还差」；连续 3 次限流/超时收手，认证失败立即停。
+- 采集后**立刻跑提及识别**（不用等下一步）；原始响应落 `backend/data/raw/<日期>/`，`answer.raw_uri` 可回溯。
+- `answer.cost` 故意留空：单价随账号与时段变，写死会埋错账；只记 `token_in/token_out`。
+
+**不做的路**：不爬网页、不模拟登录、不碰风控对抗。产品形态是 1–2 人内部工具，走官方 API + 人工兜底。
 
 **③ 缺样本清单（人工采集的日常闭环）**
 
@@ -458,8 +469,9 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
 
 ## 尚未实现（按用户要求暂缓）
 
-- **真实平台采集**：登录态、风控、DOM 稳定性全部未验证。采集器协议与离线实现已就位（见「数据接入」），
-  但没有接任何平台 API；提及识别 v1 已交付（精确/归一化匹配，重算入审计），不再依赖导入时的 `mentions` 字段
+- **真实平台采集**：DeepSeek 已跑真实调用并入库（见「数据接入②」），含 1 条最小验证与 6 条试点基线；
+  豆包采集器已实现但未配 key、未做真实验证；Kimi 等尚未接。不爬网页、不模拟登录、不做验证码对抗。
+  提及识别 v1 已交付（精确/归一化匹配，重算入审计），且采集后自动执行，不再依赖导入时的 `mentions` 字段
 - **多用户与角色**：只有一个预置账号，没有注册、改密、角色区分（`app_user.role` 已在表里但没启用）；
   session 存在进程内，重启即失效，多进程部署会互相看不见。**决策 012 已明确：当前只服务 1–2 人，
   不做多用户/租户隔离/PostgreSQL，这不是待办**
