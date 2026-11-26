@@ -1,0 +1,28 @@
+# 服务器部署锁定版本 —— 与之配套的是宽松声明 requirements.txt。
+#
+# 为什么单独有一份 lock：requirements.txt 写的是 starlette>=0.40、uvicorn>=0.32，
+# 而本机全量回归实际跑在 starlette 1.3.1 / uvicorn 0.51.0 —— 后者已经跨过 1.0 大版本，
+# 用宽松声明在服务器重装可能装到行为不同的版本，且 playwright（发布必需）压根没被声明。
+# 部署时用本文件：  pip install -r backend/requirements.lock.txt
+# 日常开发仍可用 requirements.txt，装新版前先跑全量回归再更新这里的 pin。
+#
+# 版本来源：2026-11-26 本机 Python 3.12.3 上全量 pytest 579 项通过时的 pip freeze。
+# 只列运行时闭包，不含 pytest 等测试依赖。
+
+# ---- 直接依赖 ----
+starlette==1.3.1
+uvicorn==0.51.0
+playwright==1.61.0        # 渠道发布必需；doctor.py 里列为可选，服务器要发布就不能少
+
+# ---- 传递依赖（starlette / uvicorn / playwright 的闭包）----
+anyio==4.13.0             # starlette -> anyio
+typing_extensions==4.15.0 # starlette / anyio / pyee
+click==8.4.2              # uvicorn -> click
+h11==0.16.0               # uvicorn -> h11
+pyee==13.0.1              # playwright -> pyee
+greenlet==3.5.0           # playwright -> greenlet
+idna==3.13                # anyio -> idna
+colorama==0.4.6           # click 在 Windows 下的依赖；Linux 装上无害，两份电脑/服务器通用
+
+# exceptiongroup 只在 Python < 3.11 需要（anyio 条件依赖）；本项目要求 3.10+，
+# 若服务器用 3.10 需补 exceptiongroup==1.2.0。推荐 3.12，与本 lock 验证环境一致。

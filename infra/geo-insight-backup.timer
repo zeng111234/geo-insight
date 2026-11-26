@@ -1,0 +1,26 @@
+# 每天凌晨 3:17 备份。选 3:17 而不是 3:00 是为了避开整点其它任务；
+# 时间本身不重要，重要的是每天都在跑、且失败能被看见。
+#
+# 安装：
+#   sudo cp infra/geo-insight-backup.* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now geo-insight-backup.timer
+#   systemctl list-timers geo-insight-backup.timer   # 确认下次触发时间
+#   sudo journalctl -u geo-insight-backup.service -f # 看备份日志
+#
+# 未在真实 Linux 实机验证：按 systemd 标准写法给出，首次部署用上面 list-timers
+# 和手动 start 确认一遍再放手。
+
+[Unit]
+Description=Daily GEO Insight database backup
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+# 服务器在备份点时关机/宕机，开机后补跑一次，避免"那天空过去了却没备份"
+Persistent=true
+# 开机 2 分钟后也跑一次：长期开机的机器靠 OnCalendar，刚重启的机器靠这个兜底
+OnBootSec=2min
+# 两个时间取较早者触发
+
+[Install]
+WantedBy=timers.target

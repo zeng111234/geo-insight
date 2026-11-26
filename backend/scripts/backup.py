@@ -25,6 +25,25 @@ from geo.services import backup_service  # noqa: E402
 from geo.services.backup_service import BackupError  # noqa: E402
 
 
+def resolve_backup_arg(raw: str) -> str:
+    """把用户给的备份名解析成能打开的路径。
+
+    `--list` 打印的是文件名（`geo-2026...db`），照抄去 `--verify` / `--restore`
+    时如果按 cwd 解析就找不到——备份实际在 backups/ 子目录。所以先按文件名在
+    backup_dir() 里找；传的是完整路径、或 backups 里没有时，原样返回交给
+    verify_backup 报 NOT_FOUND，不静默改写成别的路径。
+    """
+    from pathlib import Path
+
+    given = Path(raw)
+    if given.is_file():
+        return raw  # 完整路径/相对 cwd 已存在，照用
+    candidate = backup_service.backup_dir() / given.name
+    if candidate.is_file():
+        return str(candidate)
+    return raw  # 找不到时保留原值，错误信息里显示用户实际输入
+
+
 def _mb(size: int) -> str:
     return f"{size / 1024 / 1024:.1f} MB"
 
@@ -67,7 +86,7 @@ def cmd_list() -> int:
 
 
 def cmd_verify(path: str) -> int:
-    info = backup_service.verify_backup(path)
+    info = backup_service.verify_backup(resolve_backup_arg(path))
     state = "可用" if info["ok"] else "不可用"
     print(f"[{state}] {path}")
     print(f"  integrity_check: {info['integrity']}")
@@ -77,7 +96,7 @@ def cmd_verify(path: str) -> int:
 
 def cmd_restore(path: str) -> int:
     print("恢复会覆盖当前数据库。如果服务还在跑，请先关掉它的窗口。")
-    result = backup_service.restore_backup(path)
+    result = backup_service.restore_backup(resolve_backup_arg(path))
     before, after = result["before"], result["after"]
     print(f"[ok] 已用 {Path(result['from']).name} 恢复到 {result['path']}")
     print(

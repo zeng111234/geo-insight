@@ -1,0 +1,30 @@
+# 一次性备份任务，由 geo-insight-backup.timer 每天触发。也可手动：
+#   sudo systemctl start geo-insight-backup
+#
+# 关键：环境变量必须和 geo-insight.service 保持一致，尤其 GEO_DB_PATH。
+# 主服务把库放在哪，备份就得备哪一份——两套配置不一致时，备份出来的是空库/旧库，
+# 平时看不出来，等恢复才发现备错了。这是本文件最容易配错的一处。
+
+[Unit]
+Description=GEO Insight database backup (VACUUM INTO, service can stay running)
+Documentation=file:/opt/geo-insight/README.md
+
+[Service]
+Type=oneshot
+User=geo
+WorkingDirectory=/opt/geo-insight/backend
+
+# 必须与 geo-insight.service 相同的数据库位置；没设 GEO_DB_PATH 就删掉这行用默认（项目根 geo.db）
+Environment=GEO_DB_PATH=/var/lib/geo-insight/geo.db
+# 备份保留目录（可选；默认 backend/backups）。建议放数据盘，别和系统盘抢空间
+# Environment=GEO_BACKUP_DIR=/var/lib/geo-insight/backups
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+
+# --keep 7：备份后只留最近 7 份常规备份。注意 --keep 是"跟着备份一起清理"，
+# 不要改成 --prune（那个只清不备，早期踩过这个坑，见 backup.py 注释）。
+ExecStart=/opt/geo-insight/.venv/bin/python scripts/backup.py --keep 7
+
+# 备份用 VACUUM INTO 读一致性快照，服务在跑也能做，不需要停 geo-insight.service。
+# 若源库正被写、拿不到锁，backup.py 返回非 0，systemd 记为失败——这是对的，
+# 宁可报警也不要静默产出残缺备份。

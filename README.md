@@ -363,14 +363,43 @@ HTTPS 那条守的是应用卡 iframe 白屏——cookie 只在请求"看起来�
 **未在真实 Linux 实机验证**——首次部署先手动 `python backend/run.py --no-browser` 起一次确认，
 再交给 systemd。
 
+**依赖版本**：`requirements.txt` 是宽松声明（开发时装新版用），服务器**必须用锁文件**：
+
+```bash
+pip install -r backend/requirements.lock.txt
+```
+
+lock 固定了全量 579 项测试通过时的确切版本（starlette 1.3.1 / uvicorn 0.51.0 /
+playwright 1.61.0 及传递依赖）。为什么不能直接装宽松声明：`>=0.40` 允许装到 1.x 大版本，
+行为可能变；且 playwright 没被宽松声明覆盖——服务器照它装完，发布功能直接不可用。
+6 条测试守着「直接/传递依赖齐全、每行精确 pin、不含测试依赖、与宽松声明不打架」。
+升级依赖的做法：本地先跑全量回归，绿了再更新 lock 的 pin。
+
+**定时备份**：`infra/geo-insight-backup.service` + `.timer` 每天 03:17 跑 `backup.py --keep 7`，
+`Persistent=true` 保证宕机那天的备份在开机后补跑。备份用 `VACUUM INTO` 读一致性快照，
+**服务不用停**；恢复才要先停服务。安装：
+
+```bash
+sudo cp infra/geo-insight-backup.* /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now geo-insight-backup.timer
+systemctl list-timers geo-insight-backup.timer     # 确认下次触发时间
+```
+
+**两套 unit 的 `GEO_DB_PATH` 必须一致**——主服务把库放哪，备份就得备哪份；配置不一致时
+备份出的是空库/旧库，平时看不出来，恢复才发现。.timer 未在真实 Linux 实机验证，
+首次部署用 `sudo systemctl start geo-insight-backup` 手动跑一次、看 journalctl 确认再放手。
+备份名解析也修了一处真 bug：`--list` 打印的裸文件名现在能直接喂给 `--verify`/`--restore`
+（此前按 cwd 解析会 NOT_FOUND），4 条测试守着。
+
 **上线清单**（缺一项就别开公网）：
 
 1. `GEO_ADMIN_PASSWORD` 换成强密码，`GEO_AUTH_REQUIRED=1`；
 2. 反代终结 TLS 并透传 `X-Forwarded-Proto: https`，否则应用卡白屏；
 3. `GEO_PUBLISH_HEADLESS=1`，本地登录好的 `.browser-profiles/` 传到同一路径；
 4. 数据库路径固定（默认项目根 `geo.db`，可用 `GEO_DB_PATH` 指到数据盘）；
-5. 定时备份：`backend/scripts/backup.py --keep 7`，恢复前先停服务；
-6. `doctor.py --server` 退出码 0，再 `systemctl enable --now`。
+5. `pip install -r backend/requirements.lock.txt`（不要用宽松声明）；
+6. 定时备份 timer 已 `enable --now`，两套 unit 的 `GEO_DB_PATH` 一致，手动跑一次确认；
+7. `doctor.py --server` 退出码 0，再 `systemctl enable --now geo-insight`。
 
 ## 接口
 
