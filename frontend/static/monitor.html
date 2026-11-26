@@ -957,7 +957,7 @@
       ? '<span class="tag source-' + esc(kind) + '" title="数据来源：' + esc(a.source_label || kind) + '">' +
         esc(a.source_label || kind) + "</span>"
       : "";
-    return '<span class="tag">' + esc(a.model_key) + "</span>" + sourceTag +
+    return G.modelBadge(a.model_key) + sourceTag +
       (own ? '<span class="tag ok">本品牌 · 第 ' + G.num(own.position) + " 位</span>" : '<span class="tag">未提及</span>') +
       (own && own.sentiment ? '<span class="tag">' + esc(SENTI_TEXT[own.sentiment] || own.sentiment) + "</span>" : "") +
       (a.off_topic === true ? '<span class="tag warn" title="正文没有任何核心词">疑似跑题</span>' : "");
@@ -1011,7 +1011,7 @@
         return '<tr data-answer="' + esc(a.id) + '"' +
           (a.id === state.selectedAnswer ? ' class="sel"' : "") + ">" +
           "<td>" + esc(String(a.collected_at).slice(0, 16).replace("T", " ")) + "</td>" +
-          "<td>" + esc(a.model_key) + "</td>" +
+          "<td>" + G.modelBadge(a.model_key) + "</td>" +
           "<td>" + (a.correction && a.correction.own_mentioned !== null
             ? (a.correction.own_mentioned === 1
                 ? (a.correction.position ? "人工：第 " + G.num(a.correction.position) + " 位" : "人工：提及")
@@ -1106,7 +1106,7 @@
     box.innerHTML = "<table><thead><tr><th>问题</th><th>模型</th><th>采集时间</th>" +
       '<th class="num">进分母</th><th>提及</th><th class="num">位次</th><th>情感</th></tr></thead><tbody>' +
       st.slice.map(function (r) {
-        return "<tr><td>" + esc(r.question_text) + "</td><td>" + esc(r.model_key) + "</td>" +
+        return "<tr><td>" + esc(r.question_text) + "</td><td>" + G.modelBadge(r.model_key) + "</td>" +
           "<td>" + esc(String(r.collected_at).slice(0, 16).replace("T", " ")) + "</td>" +
           '<td class="num">' + (r.in_denominator ? "✓" : "—") + "</td>" +
           "<td>" + (r.mentioned ? '<span class="tag ok">提及</span>' : '<span class="tag">未提及</span>') + "</td>" +
@@ -1366,7 +1366,7 @@
     };
     var rows = items.map(function (it) {
       var ok = it.status === "ok";
-      return "<tr><td>" + esc(it.model_key) + "</td>" +
+      return "<tr><td>" + G.modelBadge(it.model_key) + "</td>" +
         '<td class="num">' + G.num(it.mentions) + "</td>" +
         '<td class="num">' + fmtNum(it.avg_position) + "</td>" +
         '<td class="num">' + (ok ? fmtPct(it.pos) : "—") + "</td>" +
@@ -1480,7 +1480,7 @@
         : '<span class="cmp-bar"><span style="width:' + (v * 100).toFixed(1) + '%"></span></span>';
     };
     var modelRows = (d.by_model || []).map(function (m) {
-      return "<tr><td>" + esc(m.model) + "</td>" +
+      return "<tr><td>" + G.modelBadge(m.model) + "</td>" +
         '<td class="num">' + G.num(m.expected) + "</td>" +
         '<td class="num">' + G.num(m.actual) + "</td>" +
         '<td class="num">' + G.num(m.missing) + "</td>" +

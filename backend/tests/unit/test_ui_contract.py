@@ -385,5 +385,29 @@ class AnswerChatViewContractTest(unittest.TestCase):
             self.assertIn(label, html, f"模型 {label} 前端缺失")
 
 
+class ModelBadgeContractTest(unittest.TestCase):
+    """全局模型名徽章：所有表格/列表用「头像+名字」，不再纯文字 model_key。
+
+    参考系统 AI平台列带 Kimi 头像+名字，我们此前全是纯文字。抽到 app.js
+    公共函数 + app.css 样式，各页面统一调用，避免重复代码与口径漂移。
+    """
+
+    def test_app_exports_model_badge(self):
+        js = (PROJECT_ROOT / "frontend" / "static" / "app.js").read_text(encoding="utf-8")
+        css = (PROJECT_ROOT / "frontend" / "static" / "app.css").read_text(encoding="utf-8")
+        self.assertIn("modelBadge: modelBadge", js, "app.js 未导出 modelBadge")
+        self.assertIn(".model-badge-av", css, "app.css 缺头像样式")
+        for label in ("豆包", "DeepSeek", "Kimi", "千问", "元宝", "文心一言", "夸克 AI", "Bing AI"):
+            self.assertIn(label, js, f"模型显示名缺失: {label}")
+
+    def test_pages_use_model_badge(self):
+        static = PROJECT_ROOT / "frontend" / "static"
+        # 这些页面有模型名表格/列表，必须走公共徽章函数
+        for name in ("index.html", "monitor.html", "insight.html",
+                     "opportunities.html", "pilot.html", "publish.html"):
+            html = (static / name).read_text(encoding="utf-8")
+            self.assertIn("modelBadge(", html, f"{name} 未使用模型徽章")
+
+
 if __name__ == "__main__":
     unittest.main()

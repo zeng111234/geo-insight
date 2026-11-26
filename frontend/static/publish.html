@@ -214,7 +214,7 @@
         : "口径：全对象（文章未绑定问题）";
 
       var modelRows = (im.by_model || []).map(function (m) {
-        return "<tr><td>" + esc(m.model_key) + "</td>" +
+        return "<tr><td>" + G.modelBadge(m.model_key) + "</td>" +
           '<td class="num">' + esc(rateText(m.before)) + "</td>" +
           '<td class="num">' + esc(rateText(m.after)) + "</td>" +
           '<td class="num"><span class="delta ' + deltaCls(m.delta_pp) + '" style="font-size: var(--fs-caption)">' +
@@ -235,7 +235,7 @@
       var samples = (afterHit.samples || []).slice(0, 3).map(function (s) {
         return '<a href="' + esc(s.url) + '" target="_blank" rel="noreferrer">' +
           esc(s.title || s.domain || s.url) + "</a> " +
-          '<span class="muted">' + esc(s.model_key) + " · " +
+          '<span class="muted">' + G.modelBadge(s.model_key) + " · " +
           esc(String(s.collected_at).slice(0, 16).replace("T", " ")) + "</span>";
       }).join("<br />");
 

@@ -158,7 +158,7 @@
       '<th class="num">发布前</th><th class="num">发布后</th><th class="num">变化</th>' +
       '<th class="num">引用命中</th></tr></thead><tbody>' +
       rows.map(function (m) {
-        return "<tr><td>" + esc(m.model_key) + "</td>" +
+        return "<tr><td>" + G.modelBadge(m.model_key) + "</td>" +
           '<td class="num">' + esc(pctOf(m.before)) + "</td>" +
           '<td class="num">' + esc(pctOf(m.after)) + "</td>" +
           "<td class=\"num\"><span" + deltaCls(m.delta_pp) + ">" + esc(deltaText(m.delta_pp)) + "</span></td>" +
@@ -180,7 +180,7 @@
       (after.matched_count || 0) + " 次。</div>";
     var samples = (after.samples || []).map(function (s) {
       return '<div class="evi"><a href="' + esc(s.url) + '" target="_blank" rel="noreferrer">' +
-        esc(s.title || s.domain || s.url) + "</a> · " + esc(s.model_key) + " · " +
+        esc(s.title || s.domain || s.url) + "</a> · " + G.modelBadge(s.model_key) + " · " +
         esc(String(s.collected_at).slice(0, 16).replace("T", " ")) + "</div>";
     }).join("");
     $("evidence").innerHTML = head + (samples || '<div class="notice" style="margin-top:8px">发布后窗口里没有匹配到这条链接：可能没被引用，也可能引用的是转载页。</div>');

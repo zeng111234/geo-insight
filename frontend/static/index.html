@@ -295,7 +295,7 @@ function renderAnswers(answers, pages) {
     const senti = m ? (SENTI[m.sentiment] || m.sentiment) : "—";
     return `<tr>
       <td>${esc(a.question_text)}</td>
-      <td>${esc(a.model_key)}</td>
+      <td>${GEO.modelBadge(a.model_key)}</td>
       <td class="nowrap">${a.collected_at.slice(0, 10)}</td>
       <td>${pos}</td>
       <td>${senti}</td>
@@ -412,7 +412,7 @@ async function showSamples(metric, label) {
       }
       return `<tr class="${it.in_denominator ? "" : "muted"}">
         <td class="nowrap">${it.day}</td>
-        <td>${esc(it.model_key)}</td>
+        <td>${GEO.modelBadge(it.model_key)}</td>
         <td>${esc(it.question_text)}</td>
         <td>${it.mentioned ? '<span class="tag ok">提及</span>' : '<span class="tag">未提及</span>'}</td>
         <td>${it.position === null ? "—" : "第 " + it.position + " 位"}</td>

@@ -110,7 +110,7 @@
       "<th>结果</th><th class=\"num\">位次</th><th>情感</th><th class=\"num\">计入分母</th></tr></thead><tbody>" +
       pg.slice.map(function (x) {
         return '<tr><td class="nowrap"><a class="plain" href="/answer/' + esc(x.answer_id) + '">' + esc(x.day) + "</a></td>" +
-          "<td>" + esc(x.question_text) + "</td><td>" + esc(x.model_key) + "</td><td>" +
+          "<td>" + esc(x.question_text) + "</td><td>" + G.modelBadge(x.model_key) + "</td><td>" +
           (x.mentioned ? '<span class="tag ok">已提及</span>' : '<span class="tag">未提及</span>') + "</td>" +
           '<td class="num">' + (x.position === null || x.position === undefined ? "无列表" : "第 " + G.num(x.position) + " 位") + "</td>" +
           "<td>" + esc(SENTI[x.sentiment] || "—") + "</td>" +

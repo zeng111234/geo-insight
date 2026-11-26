@@ -202,6 +202,11 @@ label.field > input, label.field > select, label.field > textarea { width: 100%;
 .tag.warn { color: var(--amber-ink); border-color: var(--amber-line); background: var(--amber-tint); }
 .tag.bad { color: var(--red-ink); border-color: var(--red-line); background: var(--red-tint); }
 .tag.core { color: var(--accent-ink); border-color: var(--accent-weak); background: var(--accent-weak); }
+
+/* 模型头像徽章：表格/列表里显示 AI 平台，头像+名字一眼可分（老板要求，不再纯文字） */
+.model-badge { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--fs-meta); color: var(--text-body); }
+.model-badge-av { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; font-size: var(--fs-caption); font-weight: 700; color: #fff; letter-spacing: -0.3px; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--panel); color: var(--muted); font-size: var(--fs-label);

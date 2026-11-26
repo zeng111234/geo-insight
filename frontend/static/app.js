@@ -176,10 +176,34 @@
     if (st && !isNaN(v)) { st.page = Math.max(1, Math.min(parseInt(e.target.max, 10) || 1, v)); st.redraw(); }
   });
 
+  // 模型头像徽章：所有显示模型名的地方共用，避免纯文字墙。
+  // 显示名与后端 domain/channels.py 的 8 模型一致；头像用 CSS 首字母+品牌色，
+  // 不依赖图片（离线可用、无版权问题）。
+  var MODEL_META = {
+    doubao:   { label: "豆包",      abbr: "豆", color: "#3b6cf0" },
+    deepseek: { label: "DeepSeek",  abbr: "D",  color: "#4d6bfe" },
+    kimi:     { label: "Kimi",      abbr: "K",  color: "#1f2430" },
+    qwen:     { label: "千问",      abbr: "千", color: "#6155d6" },
+    yuanbao:  { label: "元宝",      abbr: "元", color: "#e05a4d" },
+    wenxin:   { label: "文心一言",  abbr: "文", color: "#2b7a5e" },
+    quark:    { label: "夸克 AI",   abbr: "夸", color: "#5a67d8" },
+    bing:     { label: "Bing AI",   abbr: "B",  color: "#0f7fb8" }
+  };
+  var modelMeta = function (key) {
+    return MODEL_META[key] || { label: key || "未知", abbr: (key || "?").slice(0, 1).toUpperCase(), color: "#6c5ce7" };
+  };
+  // 返回完整 HTML 片段（已 esc），可直接塞进 <td>。
+  var modelBadge = function (key) {
+    var m = modelMeta(key);
+    return '<span class="model-badge"><span class="model-badge-av" style="background:' +
+      esc(m.color) + '">' + esc(m.abbr) + "</span><span>" + esc(m.label) + "</span></span>";
+  };
+
   window.GEO = {
     API: API, $: $, esc: esc, pct: pct, metricText: metricText, num: num,
     get: get, post: post, patch: patch, del: del, toast: toast, dates: dates, tracker: tracker,
     fillTrackers: fillTrackers, fail: fail, empty: empty,
+    modelBadge: modelBadge, modelMeta: modelMeta,
     pagerInit: pagerInit, pagerReset: pagerReset, pagerNav: pagerNav, pagerSlice: pagerSlice
   };
 })();

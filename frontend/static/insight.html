@@ -137,7 +137,7 @@
       "<th class=\"num\">提及率</th><th class=\"num\">平均排名</th><th class=\"num\">Top3</th><th>情感</th></tr></thead><tbody>" +
       rows.map(function (r) {
         var c = r.data.cards, s = c.sentiment;
-        return "<tr><td><strong>" + esc(r.model) + "</strong></td>" +
+        return "<tr><td>" + G.modelBadge(r.model) + "</td>" +
           "<td class=\"num\">" + G.num(r.data.valid_total) + "</td>" +
           "<td class=\"num\">" + G.num(c.mention_count) + "</td>" +
           "<td class=\"num\">" + G.metricText(c.mention_rate) + "</td>" +
@@ -241,7 +241,7 @@
           '<td class="num">' + G.pct(r.total ? r.hit / r.total : null) + "</td><td>" +
           Object.keys(r.models).map(function (m) {
             var v = r.models[m];
-            return esc(m) + " " + v.hit + "/" + v.total;
+            return G.modelBadge(m) + " " + v.hit + "/" + v.total;
           }).join(" · ") + "</td></tr>";
       }).join("") + "</tbody></table></div>" + pg.nav +
       '<div class="notice" style="margin-top:10px">只统计计入提及率分母的样本；无列表提及会出现在答案里，但不进平均排名分母。</div>';
