@@ -385,6 +385,7 @@ def seed() -> dict:
         seed_rich_period(conn)
         seed_studio(conn)
         seed_alt_tracker(conn)
+        seed_catalog_trackers(conn)
         conn.commit()
 
         # 演示报告也必须是种子数据的一部分：否则用户 --reset 后 /reports 是空的，
@@ -1107,6 +1108,54 @@ def seed_alt_tracker(conn) -> dict:
                         )
         day += timedelta(days=1)
     return {"tracker_id": TRACKER2, "brand": BRAND2_NAME, "answers": answers}
+
+
+# P7:左栏补到接近 19 个对象，让搜索/筛选有东西可筛。
+# 这些是真实落库的空对象(brand + tracker + keywords)，点进去会诚实显示
+# 「尚无数据」，不造 answer / mention / run / report——因此黄金窗口 9 样本、
+# 5 份报告、1516/214 等所有绑定 TRACKER 的口径一行不动。
+# UUID 前缀 c/b 避开已有(1/a/2/3/4/5/7)。
+CATALOG_TRACKERS = [
+    ("启明法律咨询", "律师事务所", "北京"),
+    ("正合物业", "物业服务", "上海"),
+    ("远景旅游", "旅游服务", "杭州"),
+    ("康桥医疗", "医疗服务", "广州"),
+    ("星辰科技", "互联网", "深圳"),
+    ("麦田餐饮", "餐饮服务", "成都"),
+    ("恒信房产", "房产中介", "南京"),
+    ("绿野家居", "家居建材", "苏州"),
+    ("博雅教育", "教育培训", "武汉"),
+    ("安泰保险", "金融服务", "天津"),
+    ("新月美妆", "美妆个护", "上海"),
+    ("速达物流", "物流运输", "广州"),
+    ("青禾食品", "食品饮料", "杭州"),
+    ("锐思数码", "数码电子", "深圳"),
+    ("同康药房", "医药零售", "北京"),
+    ("悦途出行", "出行服务", "成都"),
+    ("筑梦装修", "装修设计", "南京"),
+]
+
+
+def seed_catalog_trackers(conn) -> int:
+    """造 17 个空对象(连现有 2 个 = 19)，只写 brand + tracker + keywords。"""
+    now = "2026-11-01T08:00:00+08:00"
+    created = 0
+    for i, (brand_name, industry, region) in enumerate(CATALOG_TRACKERS, start=1):
+        brand_id = f"b0000000-0000-0000-0000-{i:012d}"
+        tracker_id = f"c0000000-0000-0000-0000-{i:012d}"
+        conn.execute(
+            "INSERT INTO brand(id, tenant_id, name, industry, region, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (brand_id, TENANT, brand_name, industry, region, now),
+        )
+        conn.execute(
+            """INSERT INTO tracker(id, tenant_id, brand_id, name, industry, region,
+                                   status, settings, keywords, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'active', '{}', ?, ?, ?)""",
+            (tracker_id, TENANT, brand_id, f"{brand_name} · {industry}", industry, region,
+             json.dumps([brand_name], ensure_ascii=False), now, now),
+        )
+        created += 1
+    return created
 
 
 def main() -> None:

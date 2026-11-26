@@ -252,7 +252,9 @@ def main() -> None:
         check("csrf 验证后重新登录", status == 303 and location == "/", (status, location))
 
         status, body = get("/v1/trackers")
-        check("tracker list", status == 200 and len(body["items"]) == 2, body)
+        # P7 后 seed 造 19 个对象（黄金 + 教培 + 17 个空对象）。这里守「列表能用、
+        # 数量符合当前 seed」，不再写死 2——对象数是演示规模，由 P7 测试单独守。
+        check("tracker list", status == 200 and len(body["items"]) == 19, body)
         golden = next(t for t in body["items"] if t["id"] == TRACKER)
         check(
             "question summary",
