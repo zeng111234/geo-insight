@@ -933,6 +933,41 @@ async def create_article(request: Request):
         conn.close()
 
 
+async def generate_ai_draft(request: Request):
+    """AI 写作：用已有素材真调 LLM 生成草稿，人工审核后才可用。
+
+    失败显式报错（不静默返回假文章）；一次生成记一条积分流水、落六阶段。
+    """
+    from geo.services import assistant_service
+    payload = await _json_body(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+    tracker_id = request.path_params["tracker_id"]
+    tenant_id = _tenant(request)
+    conn = db.connect()
+    try:
+        if not repo.get_tracker(conn, tracker_id, tenant_id):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        if not assistant_service.available():
+            return _error(request, "NOT_CONFIGURED", "没有配置 LLM key，AI 写作不可用", 503)
+        try:
+            article = assistant_service.generate_draft(
+                conn, tracker_id, tenant_id,
+                question_id=payload.get("question_id") or None,
+                reference=str(payload.get("reference") or "")[:2000],
+                actor_label=_actor_id(request) or "assistant",
+            )
+        except assistant_service.AssistantError as exc:
+            status = 404 if exc.code == "NOT_FOUND" else (503 if exc.code.startswith("NOT_") else 502)
+            return _error(request, exc.code, exc.message, status)
+        return JSONResponse(article, status_code=201)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 async def article_detail(request: Request):
     conn = db.connect()
     try:
@@ -2115,6 +2150,11 @@ def create_app() -> Starlette:
         Route(
             f"{settings.api_prefix}/trackers/{{tracker_id}}/articles",
             create_article,
+            methods=["POST"],
+        ),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/articles/generate",
+            generate_ai_draft,
             methods=["POST"],
         ),
 Route(f"{settings.api_prefix}/channels", list_channels),
