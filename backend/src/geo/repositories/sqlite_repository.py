@@ -12,6 +12,21 @@ from typing import Any
 from geo.repositories.sqlutil import day_of
 
 
+def active_question_clause(alias: str = "a") -> str:
+    """「当前生效问题集」谓词——所有按口径取数的查询都必须挂上它。
+
+    H2-6(003 FR-003):指标口径跟生效问题集走。相关子查询挂在 {alias}.tracker_id
+    上(该列已被外层绑定参数约束),所以不新增绑定参数;active 为 NULL 时集合为空
+    (无集可依)。抽成一处是为了让 models_in_period 之类的辅助查询不会漏挂——
+    漏挂会让非生效集的样本混进来(典型案例:报告可比性被无关模型误判成不可比)。
+    """
+    return (
+        f"{alias}.question_id IN (SELECT q.id FROM question q "
+        f"WHERE q.question_set_id = (SELECT t.active_question_set_id FROM tracker t "
+        f"WHERE t.id = {alias}.tracker_id))"
+    )
+
+
 def _filters(
     tracker_id: str,
     start: str,
@@ -24,12 +39,7 @@ def _filters(
         f"{alias}.tracker_id = ?",
         f"{alias}.is_valid = 1",
         f"{day_of(alias + '.collected_at')} BETWEEN ? AND ?",
-        # H2-6(003 FR-003):口径跟「当前生效问题集」走。相关子查询挂在
-        # {alias}.tracker_id 上(它已被上面的绑定参数约束),不新增参数,
-        # 全部指标查询一次接上;active 为 NULL 时集合为空(无集可依)
-        f"{alias}.question_id IN (SELECT q.id FROM question q "
-        f"WHERE q.question_set_id = (SELECT t.active_question_set_id FROM tracker t "
-        f"WHERE t.id = {alias}.tracker_id))",
+        active_question_clause(alias),
     ]
     params: list[Any] = [tracker_id, start, end]
     if model:
@@ -724,9 +734,13 @@ def export_answer_rows(
 def models_in_period(
     conn: sqlite3.Connection, tracker_id: str, start: str, end: str
 ) -> list[str]:
+    # 口径必须和 _filters / 各指标查询一致:只认当前生效问题集的样本。
+    # 漏挂这条会让非生效集里的模型混进可比性判定,把本可比的报告判成不可比、
+    # delta_pp 被置空——指标明明对得上账,报告却说没法比。
     rows = conn.execute(
         f"""SELECT DISTINCT model_key FROM answer
            WHERE tracker_id = ? AND is_valid = 1 AND {day_of('collected_at')} BETWEEN ? AND ?
+           AND {active_question_clause('answer')}
            ORDER BY model_key""",
         (tracker_id, start, end),
     ).fetchall()
