@@ -156,6 +156,15 @@
     cursor: pointer; }
   button.answer-shot:hover, button.answer-correct:hover { background: var(--accent-weak); }
   .tag.corrected { color: #8a5a00; background: #fff4d6; border-color: #e5c365; }
+  /* 数据来源标识：真实采集要醒目，演示/离线数据要一眼看出"不能当真"。 */
+  .tag.source-real { color: #0a6b32; background: #e6f6ec; border-color: #68bb8a; font-weight: 600; }
+  .tag.source-demo { color: #6b6b6b; background: #f2f2f2; border-color: #d0d0d0; }
+  .tag.source-offline, .tag.source-import, .tag.source-unknown { color: #7a5b00; background: #fff7e0; border-color: #e2c65e; }
+  .source-banner { margin: 8px 0 2px; padding: 7px 11px; border-radius: 8px; font-size: var(--fs-meta); line-height: 1.6; border: 1px solid; }
+  .source-banner.mixed { color: #8a4f0a; background: #fdf4e3; border-color: #f2dcb3; }
+  .source-banner.demo-only { color: #6b6b6b; background: #f6f6f6; border-color: #dcdcdc; }
+  .source-banner.real-only { color: #0a6b32; background: #e6f6ec; border-color: #68bb8a; }
+  .source-banner b { font-weight: 600; }
   .correction-form { position: fixed; z-index: 60; right: 24px; bottom: 24px; width: 340px;
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
     box-shadow: 0 12px 40px rgba(0,0,0,.18); padding: 16px; }
@@ -254,6 +263,8 @@
               </div>
             </div>
             <div class="meta" id="objMeta"></div>
+            <!-- 数据来源横幅：一眼看清当前对象的数据是真实采集还是演示数据。 -->
+            <div id="sourceBanner" class="source-banner" style="display:none" aria-live="polite"></div>
           </div>
           <div class="mon-filters" id="filterBar">
             <label>品牌 <select id="brandFilter" aria-label="品牌"><option value="">加载中…</option></select></label>
@@ -541,6 +552,36 @@
     $("pauseBtn").textContent = t.status === "paused" ? "恢复" : "暂停";
     $("pauseBtn").disabled = t.status === "archived";
     $("deleteBtn").disabled = t.status === "archived";
+    renderSourceBanner();
+  }
+
+  // 数据来源横幅：把"这个对象的数据能不能当真"摆在明面上，不让人对着混在一起的数字猜。
+  // 只做展示，不改任何数据；拿不准的来源统一按接口给的标签显示，前端不自己猜。
+  async function renderSourceBanner() {
+    var el = $("sourceBanner");
+    if (!state.trackerId) { el.style.display = "none"; return; }
+    try {
+      var d = await G.get("/trackers/" + state.trackerId + "/data-provenance");
+      if (d.total === 0) {
+        el.style.display = "none";
+        return;
+      }
+      var parts = Object.keys(d.by_kind || {}).map(function (k) {
+        return esc(d.labels[k] || k) + " " + d.by_kind[k] + " 条";
+      });
+      var cls = d.has_mixed ? "mixed" : (d.real_count > 0 ? "real-only" : "demo-only");
+      var lead = d.has_mixed
+        ? "混合数据：仅 <b>" + d.real_count + " 条</b>是真实采集，其余为演示/样例，看板数字不代表真实效果。"
+        : (d.real_count > 0
+          ? "真实数据：本对象 <b>" + d.real_count + " 条</b>均为真实平台采集。"
+          : "演示数据：本对象 <b>" + d.total + " 条</b>均为种子/演示，不是真实采集，勿据此判断效果。");
+      el.className = "source-banner " + cls;
+      el.innerHTML = lead + '<div class="muted" style="font-size:var(--fs-caption)">' + parts.join(" · ") + "</div>";
+      el.style.display = "";
+    } catch (e) {
+      // 横幅是提示，拿不到就藏起来，不能因为提示接口失败让整个页面崩掉。
+      el.style.display = "none";
+    }
   }
 
   function currentTracker() {
@@ -885,7 +926,13 @@
   // 一条回答的「标签区」：阅读视图与表格视图共用，避免两处各自维护导致口径分叉。
   function answerTags(a) {
     var own = (a.mentions || []).filter(function (m) { return m.subject_type === "own"; })[0];
-    return '<span class="tag">' + esc(a.model_key) + "</span>" +
+    // 数据来源标签：真实采集醒目，演示/离线一眼看出不是真数据。
+    var kind = a.source_kind || "";
+    var sourceTag = kind
+      ? '<span class="tag source-' + esc(kind) + '" title="数据来源：' + esc(a.source_label || kind) + '">' +
+        esc(a.source_label || kind) + "</span>"
+      : "";
+    return '<span class="tag">' + esc(a.model_key) + "</span>" + sourceTag +
       (own ? '<span class="tag ok">本品牌 · 第 ' + G.num(own.position) + " 位</span>" : '<span class="tag">未提及</span>') +
       (own && own.sentiment ? '<span class="tag">' + esc(SENTI_TEXT[own.sentiment] || own.sentiment) + "</span>" : "") +
       (a.off_topic === true ? '<span class="tag warn" title="正文没有任何核心词">疑似跑题</span>' : "");

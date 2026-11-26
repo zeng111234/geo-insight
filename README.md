@@ -471,6 +471,16 @@ curl "$B/articles/55555555-5555-5555-5555-555555555551/impact"
 
 ## 演示数据与预期
 
+**哪些是真数据、哪些是演示数据？** 看板里两者混在一起，界面现在会明确告诉你：
+
+- **问题监控页**对象头下方有「数据来源」横幅，写明当前对象是**演示数据**（种子造的，
+  不能据此判断真实效果）、**真实采集**（真调平台 API）还是**混合**；
+- 问答明细每条回答也有来源标签：真实采集（醒目绿）/ 演示数据（灰）/ 离线样例 / 导入 / 来源未知。
+- 判定依据是回答的 `raw_uri` 前缀（`s3://geo-raw/demo/`=种子演示、`collect://raw/`=真实采集），
+  集中在 `geo/data_provenance.py`，**拿不准一律标「来源未知」，不冒充真实**。
+- 当前状态：两个演示对象（1302 + 208 条）全为种子数据；试点对象「辽征试点-DeepSeek基线」
+  6 条为真实 DeepSeek 采集。真采集确实进了独立对象，没混进演示口径。
+
 演示数据分两层：**黄金窗口**（口径演示，数值被断言锁死）与**富数据窗口**（页面密度与内容故事）。
 全库规模：12 个问题（4 核心 + 8 长尾）、30 天、1302 条有效答案、1516 条采样记录（214 条失败）、
 8 篇文章 / 6 条发布记录、5 份报告、5 个竞品、约 2400 个去重 URL。
@@ -502,10 +512,12 @@ node scripts/interactioncheck.mjs                             # 46 条 CDP 真�
 node scripts/imagecheck.mjs                                   # 8 条 CDP 真点：文章配图 选图→上传→预览取真 PNG 字节→删除→无 JS 异常（自包含测试图，需 Chrome/Edge）
 node scripts/p3check.mjs                                      # 8 条 CDP 真点：模型×端筛选（选端→URL带client→API/竞品tab请求带client→刷新保持→清除还原，需 Chrome/Edge）
 node scripts/p7check.mjs                                      # 5 条 CDP 真点：19 个监控对象（左栏数→搜索可筛→切空对象显示诚实空态→无 JS 异常）
+node scripts/p5check.mjs                                      # 9 条 CDP 真点：A3 壳（徽章余额=API真账本→AI助手开抽屉明写未接入→无假生成→打印页无按钮）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）
 python scripts/deploy_rehearse.py                              # 部署首启演练：临时空库起真服务，验迁移链+seed+13页+4接口
 python scripts/restore_rehearse.py                             # 恢复演练：真实旧备份→临时库，验迁移补齐+数据完整+安全副本
 node scripts/authcheck.mjs                                    # 鉴权开启下的真浏览器端到端：登录→cookie→CSRF写操作（自起临时实例+库，9条）
+node scripts/provenancecheck.mjs                              # 数据来源标识 CDP 5 条：演示/真实对象的横幅与明细标签正确、不混淆
 # P2 专项：先在 8137 起新实例（GEO_PORT=8137），再跑：
 GEO_BASE=http://127.0.0.1:8137 node scripts/p2check.mjs        # 8 条 CDP 真点：截图产图/纠正落库回显/取消不改
 ```

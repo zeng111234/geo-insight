@@ -26,7 +26,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from geo import code_rev, db, observability
+from geo import code_rev, db, data_provenance, observability
 from geo.api import nav
 from geo.business_time import business_today
 from geo.domain import channels as channels_domain
@@ -653,6 +653,11 @@ async def list_answers(request: Request):
         keywords = tracker_service.active_keywords(conn, tracker_id)
         for item in items:
             item["off_topic"] = relevance.is_off_topic(item.get("text"), keywords)
+            # 数据来源标识：让每条回答能自证是真实采集还是演示/离线/导入。
+            kind = data_provenance.source_of(item)
+            item["source_kind"] = kind
+            item["source_label"] = data_provenance.label(kind)
+            item["is_real"] = kind == data_provenance.REAL
         return JSONResponse(
             {
                 "items": items,
@@ -1779,6 +1784,40 @@ async def answer_correction(request: Request):
         conn.close()
 
 
+async def tracker_provenance(request: Request):
+    """数据构成：这个对象里多少是真采集、多少是演示/离线/导入。
+
+    只做聚合计数（SQL GROUP BY 按 raw_uri 前缀），不拉回答正文——
+    页面顶部横幅要一眼看清"当前看到的数据能不能当真"，这是可信度的第一道提示。
+    """
+    conn = db.connect()
+    try:
+        tracker_id = request.path_params["tracker_id"]
+        tenant_id = _tenant(request)
+        if not repo.get_tracker(conn, tracker_id, tenant_id):
+            return _error(request, "NOT_FOUND", "tracker not found", 404)
+        rows = conn.execute(
+            "SELECT raw_uri, import_batch_id, COUNT(*) AS n FROM answer "
+            "WHERE tracker_id = ? GROUP BY raw_uri, import_batch_id",
+            (tracker_id,),
+        ).fetchall()
+        by_kind: dict[str, int] = {}
+        for row in rows:
+            kind = data_provenance.source_of(dict(row))
+            by_kind[kind] = by_kind.get(kind, 0) + row["n"]
+        real_count = by_kind.get(data_provenance.REAL, 0)
+        total = sum(by_kind.values())
+        return JSONResponse({
+            "total": total,
+            "by_kind": by_kind,
+            "labels": {k: data_provenance.label(k) for k in by_kind},
+            "real_count": real_count,
+            "has_mixed": real_count > 0 and any(k != data_provenance.REAL for k in by_kind),
+        })
+    finally:
+        conn.close()
+
+
 async def answers_export(request: Request):
     period = _period(request)
     if isinstance(period, JSONResponse):
@@ -1994,6 +2033,7 @@ def create_app() -> Starlette:
         Route(f"{settings.api_prefix}/trackers", list_trackers, methods=["GET"]),
         Route(f"{settings.api_prefix}/trackers", create_tracker, methods=["POST"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}", tracker_detail, methods=["GET", "PATCH"]),
+        Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/data-provenance", tracker_provenance),
         # 同路径单独一条路由：DELETE 的语义和 GET/PATCH 完全不同，不塞进同一个函数
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}", tracker_delete, methods=["DELETE"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/brand", brand_profile),
