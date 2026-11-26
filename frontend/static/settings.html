@@ -477,9 +477,9 @@ $("aliases").addEventListener("click", async (e) => {
   } catch (err) { toast("删除别名失败：" + err.message, "error"); }
 });
 
-$("importBtn").addEventListener("click", async () => {
 $("qsetSwitch").addEventListener("click", switchQset);
 $("qsetNew").addEventListener("click", newQset);
+$("importBtn").addEventListener("click", async () => {
   const text = $("importText").value;
   if (!text.trim()) { toast("先粘贴要导入的问题", "warn"); return; }
   $("importBtn").disabled = true;
