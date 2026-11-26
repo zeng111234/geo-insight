@@ -76,21 +76,21 @@
   }
 
   function loadStatus() {
-    G.get("/v1/system/update/status").then(renderCheck).catch(function (e) { G.fail(e); });
+    G.get("/system/update/status").then(renderCheck).catch(function (e) { G.fail(e); });
   }
 
   $("saveSource").addEventListener("click", function () {
     var url = $("sourceInput").value.trim();
     if (!url) { G.toast("先填更新源 URL", "warn"); return; }
-    G.post("/v1/system/update/source", { source_url: url }).then(function () {
+    G.post("/system/update/source", { source_url: url }).then(function () {
       G.toast("更新源已保存");
-      G.post("/v1/system/update/check").then(renderCheck).catch(function (e) { G.fail(e); });
+      G.post("/system/update/check").then(renderCheck).catch(function (e) { G.fail(e); });
     }).catch(function (e) { G.fail(e); });
   });
 
   $("check").addEventListener("click", function () {
     $("checkResult").innerHTML = '<div class="empty">检查中…</div>';
-    G.post("/v1/system/update/check").then(renderCheck).catch(function (e) { G.fail(e); });
+    G.post("/system/update/check").then(renderCheck).catch(function (e) { G.fail(e); });
   });
 
   $("apply").addEventListener("click", function () {
@@ -98,7 +98,7 @@
     if (!window.confirm("确认更新到 v" + latest.latest + "？\n服务会自动重启，数据不受影响。")) return;
     $("progress").hidden = false;
     $("apply").disabled = true;
-    G.post("/v1/system/update/apply").then(function (r) {
+    G.post("/system/update/apply").then(function (r) {
       G.toast("已开始应用 v" + r.version + "，等待服务重启…");
       waitForRestart(r.restart_seconds || 10);
     }).catch(function (e) {

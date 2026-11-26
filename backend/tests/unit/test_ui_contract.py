@@ -409,5 +409,30 @@ class ModelBadgeContractTest(unittest.TestCase):
             self.assertIn("modelBadge(", html, f"{name} 未使用模型徽章")
 
 
+class ApiPathPrefixContractTest(unittest.TestCase):
+    """G.get/post 内部 API 已含 /v1，页面调用不得再传 /v1 前缀。
+
+    update.html 曾 5 处写成 G.get("/v1/system/update/...")，拼成 /v1/v1/...
+    全 404——系统更新页整个坏掉。这里守住全站不再出现重复前缀。
+    """
+
+    def test_no_double_v1_prefix(self):
+        import re
+        static_dir = PROJECT_ROOT / "frontend" / "static"
+        violations = []
+        for path in static_dir.glob("*.html"):
+            text = path.read_text(encoding="utf-8")
+            for m in re.finditer(r"G\.(get|post|patch|del)\(\s*[\"'`]/v1/", text):
+                line = text[: m.start()].count("\n") + 1
+                violations.append(f"{path.name}:{line}")
+        self.assertEqual(violations, [], f"这些页面把 /v1 传给了已含 /v1 的 G 方法：{violations}")
+
+    def test_update_page_calls_correct_paths(self):
+        html = (PROJECT_ROOT / "frontend" / "static" / "update.html").read_text(encoding="utf-8")
+        self.assertIn('G.get("/system/update/status")', html)
+        self.assertNotIn('"/v1/system/update/', html)
+        self.assertEqual(html.count("/system/update/"), 5, "更新页 5 个接口路径应都不带 /v1")
+
+
 if __name__ == "__main__":
     unittest.main()
