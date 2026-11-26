@@ -756,8 +756,11 @@ async def connect_channel(request: Request):
         return _error(request, "CHANNEL_BUSY", f"{channel['platform_name']} 正在登录或发布中,稍后再试", 409)
 
     # 测试模式(GEO_PUBLISH_WORKER=0)不派登录子进程:冒烟跑在 uvicorn 子进程里,
-    # 不该真的弹浏览器;状态也不动,如实回 skipped
+    # 不该真的弹浏览器;状态也不动,如实回 skipped。
+    # 上面已经拿了渠道锁,而本分支不派 _monitor_login 去收尾释放——必须自己归还,
+    # 否则测试模式下第二次 connect/check 会永久 409。
     if not settings.publish_worker_enabled:
+        publish_service.release_channel_lock(key)
         return JSONResponse(
             {
                 "status": "skipped",
@@ -997,10 +1000,19 @@ async def publish_article(request: Request):
     finally:
         conn.close()
 
+    # 锁的责任分界:端点先拿锁,worker 收尾时才释放。若某个渠道没有 worker
+    # 被派发(这一轮全是 existing,create_publications 没建也没重排记录),
+    # 就没有人替它释放锁——不在这里归还的话,该渠道会永久 409 直到进程重启。
+    dispatched_keys: set[str] = set()
     if settings.publish_worker_enabled and pub_channels:
         key_of = {ch["id"]: ch["platform_key"] for ch in targets}
         for row in pub_channels:
-            publish_service.spawn_publication_worker(row["id"], key_of[row["channel_id"]], article)
+            key = key_of[row["channel_id"]]
+            dispatched_keys.add(key)
+            publish_service.spawn_publication_worker(row["id"], key, article)
+    for key in locked_keys:
+        if key not in dispatched_keys:
+            publish_service.release_channel_lock(key)
 
     return JSONResponse(
         {

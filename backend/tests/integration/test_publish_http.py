@@ -123,6 +123,23 @@ class PublishHttpTest(unittest.TestCase):
         self.assertEqual(updated["login_mode"], "browser")
         self.assertIn("登录成功", updated["last_check_note"])
 
+    def test_connect_in_test_mode_twice_does_not_leak_lock(self):
+        """测试模式(worker 关闭)下 connect 拿锁后无 monitor 收尾,必须自己归还。
+
+        否则第一次 skipped 后渠道锁永久占用,第二次同渠道 connect/check 全 409。
+        """
+        wechat = self._channel("wechat")
+        old = settings.publish_worker_enabled
+        object.__setattr__(settings, "publish_worker_enabled", False)
+        try:
+            for i in range(2):
+                resp = self.client.post(f"/v1/channels/{wechat['id']}/connect")
+                self.assertEqual(resp.status_code, 202, f"第 {i+1} 次 connect 不该被锁挡住")
+                self.assertEqual(resp.json()["status"], "skipped")
+            self.assertFalse(publish_service.channel_busy("wechat"))
+        finally:
+            object.__setattr__(settings, "publish_worker_enabled", old)
+
     def test_connect_while_busy_is_409(self):
         self.assertTrue(publish_service.try_channel_lock("zhihu"))
         try:
@@ -244,6 +261,54 @@ class PublishHttpTest(unittest.TestCase):
             object.__setattr__(settings, "publish_worker_enabled", old)
         final = self._wait_publication(seed.ART_REVIEW, "sohu", timeout=5, expect_terminal=False)
         self.assertEqual(final["status"], "queued")
+
+    def test_repeated_publish_of_existing_does_not_leak_channel_lock(self):
+        """重复发布(existing)时端点拿了锁但没有 worker 释放——必须自己归还。
+
+        否则用户以为没生效、再点一次发布,返回 202 却让该渠道永久 409。
+        """
+        wechat = self._connect_channel_in_db("wechat")
+
+        try:
+            # 先清掉可能残留的同文章+渠道记录,再手动建一条 published,
+            # 构造"全 existing"场景——完全自包含,不依赖用例执行顺序。
+            with closing(db.connect()) as conn:
+                conn.execute(
+                    "DELETE FROM publication WHERE article_id = ? AND channel_id = ?",
+                    (seed.ART_DRAFT, wechat["id"]),
+                )
+                conn.commit()
+                created, _, _ = repo.create_publications(
+                    conn, seed.ART_DRAFT, [wechat], "2026-11-26T12:00:00+08:00"
+                )
+                repo.update_publication_status(conn, created[0], "published")
+
+            # POST:create_publications 把这条归入 existing,不派 worker。
+            # 端点拿了锁却没有 worker 收尾,必须自己归还。
+            second = self.client.post(
+                f"/v1/articles/{seed.ART_DRAFT}/publish",
+                json={"channel_ids": [wechat["id"]]},
+            )
+            self.assertEqual(second.status_code, 202)
+            self.assertEqual(len(second.json()["existing"]), 1)
+            self.assertEqual(len(second.json()["created"]), 0)
+            self.assertFalse(
+                publish_service.channel_busy("wechat"),
+                "全 existing 的重复发布不该让渠道锁永久占用",
+            )
+            # 后续同渠道请求仍能正常发起(不会被 409)
+            third = self.client.post(
+                f"/v1/articles/{seed.ART_DRAFT}/publish",
+                json={"channel_ids": [wechat["id"]]},
+            )
+            self.assertEqual(third.status_code, 202)
+        finally:
+            with closing(db.connect()) as conn:
+                conn.execute(
+                    "DELETE FROM publication WHERE article_id = ? AND channel_id = ?",
+                    (seed.ART_DRAFT, wechat["id"]),
+                )
+                conn.commit()
 
     def test_publish_to_disconnected_channel_is_400(self):
         xhs = self._channel("xiaohongshu")
