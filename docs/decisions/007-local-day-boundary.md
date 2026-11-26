@@ -46,9 +46,17 @@ substr(collected_at, 1, 10)
 部署到 UTC 服务器后北京时间 00:00–07:59 会算成前一天。
 
 已收口到 `geo/business_time.py`（固定 +08:00、与采集端 `DEFAULT_TZ` 同偏移、
-不依赖系统 tzdata）：FR-012 层级变更生效日（`config_repository.tomorrow()`）、
-发布前基线锚点回退（`content_service`）都改用它。`api/app.py` 的 `_period()`
-默认日期范围仍有同类问题，因并行改动未在本轮覆盖，留待后续统一。
+不依赖系统 tzdata），三处全部改用它：
+
+- FR-012 层级变更生效日（`config_repository.tomorrow()`）；
+- 发布前基线锚点回退（`content_service`）；
+- 默认查询范围（`api/app.py` 的 `_period()`，16 个接口共用——这是影响面最大的一处，
+  报错前用 `date.today()` 会让这些接口在 UTC 服务器的默认范围集体错一天）。
+
+**不改的一处**：`app.py:_now()` 与 `audit_service` 的 `datetime.now().astimezone()`
+是"记录事件此刻"，存的是绝对时刻 + 服务器偏移，不是"按天分组"；UTC 机器上存
+`+00:00` 仍是正确时刻，不参与决策 007 的日期口径，因此保持原样。
 
 测试用注入 UTC 时刻验证：UTC 时钟是 11-26 16:30 时，业务日期必须是 11-27
-（次日 11-28），`date.today()` 在这条判据上必红。
+（次日 11-28），`date.today()` 在这条判据上必红。`_period()` 另用"冻结服务器日期
+与业务日期为不同两天"的方式验证默认范围取业务日期，退回 `date.today()` 精确红。

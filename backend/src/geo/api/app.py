@@ -28,6 +28,7 @@ from starlette.concurrency import run_in_threadpool
 
 from geo import code_rev, db, observability
 from geo.api import nav
+from geo.business_time import business_today
 from geo.domain import channels as channels_domain
 from geo.domain import citation as citation_domain
 from geo.domain import methodology as methodology_module
@@ -310,7 +311,9 @@ def _error(request: Request, code: str, message: str, status: int = 400) -> JSON
 
 
 def _period(request: Request) -> tuple[str, str] | JSONResponse:
-    today = date.today()
+    # 默认日期范围按业务时区（北京时间）算，不能用服务器本地 date.today()：
+    # 部署到 UTC 服务器后，北京时间凌晨会算成前一天，16 个接口的默认范围一起错。
+    today = date.fromisoformat(business_today())
     raw_from = request.query_params.get("from")
     raw_to = request.query_params.get("to")
     try:
