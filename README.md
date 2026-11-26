@@ -414,6 +414,18 @@ systemctl list-timers geo-insight-backup.timer     # 确认下次触发时间
 备份名解析也修了一处真 bug：`--list` 打印的裸文件名现在能直接喂给 `--verify`/`--restore`
 （此前按 cwd 解析会 NOT_FOUND），4 条测试守着。
 
+**恢复演练**（H4-4 判据）：备份能不能真恢复、旧备份跨迁移能不能自动补齐，
+别等真出事那天才发现。跑：
+
+```bash
+python backend/scripts/restore_rehearse.py
+```
+
+它拿 `backups/` 里真实的旧备份（当前是 v15），在临时库上演一遍恢复，验：迁移自动跑到
+当前版本（016–020 一个不落）、数据条数回来、`pre-restore-*` 安全副本生成、恢复后新列新表
+齐全。全程不碰真实 `geo.db` 与 `backups/`。**没验证的是**：真实停服后恢复（脚本用临时库，
+不干扰正在跑的服务）与恢复后的全量 HTTP/浏览器回归——那需要专门停服窗口。
+
 **上线清单**（缺一项就别开公网）：
 
 1. `GEO_ADMIN_PASSWORD` 换成强密码，`GEO_AUTH_REQUIRED=1`；
@@ -486,6 +498,7 @@ node scripts/pagercheck.mjs                                   # 22 条分页组�
 node scripts/interactioncheck.mjs                             # 46 条 CDP 真实点击（删除确认/暂停恢复/新建抽屉+字段落库/表格浏览/首页下钻+口径/报告打印/采集任务/设置删除确认，需 Chrome/Edge）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）
 python scripts/deploy_rehearse.py                              # 部署首启演练：临时空库起真服务，验迁移链+seed+13页+4接口
+python scripts/restore_rehearse.py                             # 恢复演练：真实旧备份→临时库，验迁移补齐+数据完整+安全副本
 # P2 专项：先在 8137 起新实例（GEO_PORT=8137），再跑：
 GEO_BASE=http://127.0.0.1:8137 node scripts/p2check.mjs        # 8 条 CDP 真点：截图产图/纠正落库回显/取消不改
 ```
