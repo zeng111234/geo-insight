@@ -20,7 +20,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from geo.publishers import _base, wechat, zhihu
+from geo.publishers import _base, douyin, wechat, xiaohongshu, zhihu
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -116,6 +116,54 @@ class TitleValidationTests(unittest.TestCase):
     def test_wechat_rejects_long_title(self):
         result = wechat.publish_draft(_draft(self.tmp, "标" * 65))
         self.assertEqual(result["status"], "rejected")
+
+
+class ImageRequirementTests(unittest.TestCase):
+    """抖音/小红书是图文平台:images 缺失或文件不存在必须在开浏览器前拒绝。
+
+    这是文章配图功能真正生效的最后一环——draft 带了路径但文件不在，
+    若放到浏览器里才发现，就白开一次 profile、白冒一次风控。防呆必须在
+    sync_playwright() 之前，所以用 mock 断言浏览器根本没启动。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def _draft(self, images=None):
+        payload = {"title": "测试标题", "content_html": "<p>正文</p>"}
+        if images is not None:
+            payload["images"] = images
+        p = self.root / "draft.json"
+        p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return str(p)
+
+    def _assert_rejected_before_browser(self, publisher, draft_path, reason_fragment):
+        # 打桩 sync_playwright：一旦被调用就说明防呆失败（开了浏览器）
+        with mock.patch.object(publisher, "sync_playwright", side_effect=AssertionError("不该开浏览器")):
+            result = publisher.publish_draft(draft_path)
+        self.assertEqual(result["status"], "rejected")
+        self.assertIn(reason_fragment, result["reason"])
+
+    def test_douyin_rejects_missing_images_before_browser(self):
+        self._assert_rejected_before_browser(douyin, self._draft(), "images")
+
+    def test_xiaohongshu_rejects_missing_images_before_browser(self):
+        self._assert_rejected_before_browser(xiaohongshu, self._draft(), "images")
+
+    def test_douyin_rejects_nonexistent_image_before_browser(self):
+        self._assert_rejected_before_browser(
+            douyin, self._draft([str(self.root / "不存在.png")]), "图片不存在"
+        )
+
+    def test_xiaohongshu_rejects_nonexistent_image_before_browser(self):
+        self._assert_rejected_before_browser(
+            xiaohongshu, self._draft([str(self.root / "不存在.jpg")]), "图片不存在"
+        )
+
+    def test_douyin_rejects_empty_images_list_before_browser(self):
+        self._assert_rejected_before_browser(douyin, self._draft([]), "images")
 
 
 class PasteHtmlTests(unittest.TestCase):
