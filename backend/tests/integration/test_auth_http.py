@@ -5,6 +5,7 @@
 """
 
 import unittest
+import urllib.parse
 from contextlib import closing
 
 try:
@@ -200,6 +201,21 @@ class AuthHttpTest(unittest.TestCase):
         response = self.login()
         self.assertIn("error=locked", response.headers.get("location", ""))
         # 未登录态保持
+        self.assertEqual(self.client.get("/v1/trackers").status_code, 401)
+
+    def test_login_lockout_cannot_be_bypassed_by_email_case(self):
+        """限流标识必须跟认证同口径：认证认大小写不敏感，换大小写就不该绕开锁定。"""
+        # 规范邮箱连错到锁定
+        for _ in range(settings.login_max_failures):
+            self.login(password="wrong-password")
+        self.assertIn("error=locked", self.login().headers.get("location", ""))
+
+        # 换大小写 + 首尾空格，用正确密码——认证侧 lower(email)+strip 认得，
+        # 限流侧若用原始 email 就是新 key，会成功登录、绕过锁定。
+        variant = f"  {settings.admin_email.upper()}  "
+        body = urllib.parse.urlencode({"email": variant, "password": settings.admin_password})
+        bypass = self.client.post("/login", content=body, headers=FORM, follow_redirects=False)
+        self.assertIn("error=locked", bypass.headers.get("location", ""))
         self.assertEqual(self.client.get("/v1/trackers").status_code, 401)
 
     def test_login_lockout_expires_and_allows_login(self):

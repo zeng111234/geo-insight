@@ -225,8 +225,11 @@ async def login_submit(request: Request):
     email = form.get("email", "")
 
     # 登录限流(FR-006):账号+IP 联合标识。锁定期内连正确密码都拒绝——
-    # 否则攻击者可以拿正确密码撞锁来试探
-    identifier = f"{email}@{request.client.host if request.client else '?'}"
+    # 否则攻击者可以拿正确密码撞锁来试探。
+    # email 必须与认证侧 find_user 的 lower(email)+strip 同口径：否则
+    # Demo@Example.com / demo@example.com / 带空格 是三个独立计数，换个写法就绕开锁定。
+    throttle_email = email.strip().lower()
+    identifier = f"{throttle_email}@{request.client.host if request.client else '?'}"
     cooldown = auth_service.login_throttled(identifier)
     if cooldown:
         return RedirectResponse(

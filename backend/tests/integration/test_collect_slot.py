@@ -270,6 +270,31 @@ class FillGapsAbortTests(unittest.TestCase):
         # 一条都没采到，缺口原样
         self.assertEqual(stats["remaining_missing"], stats["planned_missing"])
 
+    def test_intermittent_rate_limits_do_not_abort(self):
+        """偶发限流被成功打断就不算「连续」——不该中止整轮。
+
+        MAX_RETRYABLE_FAILURES 的注释承诺「**连续**撞上几次才收手，不至于因为
+        偶发一次超时就不采了」。若成功分支不重置计数，穿插在成功之间的 3 次
+        限流会被误判成连续，剩下的问题一条都不采，缺口补不满。
+        """
+        # core 5 + 长尾 1 = 6 个槽位；序列：限流、成功交替，共 3 次限流但不连续
+        self.conn.execute("UPDATE sampling_plan SET core_times = 5")
+        self.conn.commit()
+        outcomes = []
+
+        def alternating(*_args, **kwargs):
+            outcomes.append(kwargs.get("question_text", ""))
+            if len(outcomes) % 2 == 1:  # 第 1/3/5 次调用限流
+                raise CollectorError("RATE_LIMITED", "偶发限流")
+            return {"inserted": True}
+
+        with mock.patch.object(collect_service, "run_once", side_effect=alternating):
+            stats = self.fill()
+
+        self.assertFalse(stats["aborted"], "限流被成功打断，不该判成连续限流中止整轮")
+        self.assertEqual(len(outcomes), 6, "6 个槽位应全部尝试，不该在第 5 次就 break")
+        self.assertEqual(stats["inserted"], 3, "穿插其间的 3 次成功都该被处理")
+
     def test_config_errors_do_not_abort(self):
         """离线库里没有的问题会一直 NOT_FOUND，但不能因此停下——
 

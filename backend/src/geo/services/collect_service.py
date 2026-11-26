@@ -295,6 +295,9 @@ def fill_gaps(
                 continue
             inserted += 1 if outcome.get("inserted") else 0
             duplicates += 0 if outcome.get("inserted") else 1
+            # 注释承诺的是「连续」撞上 N 次才收手：一次成功就把连击清零，
+            # 否则穿插在成功之间的偶发限流会累计成「连续」，提前中止整轮。
+            retryable_failures = 0
         if aborted:
             break
 
