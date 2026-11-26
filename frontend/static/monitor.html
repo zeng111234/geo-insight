@@ -165,6 +165,13 @@
   .source-banner.demo-only { color: #6b6b6b; background: #f6f6f6; border-color: #dcdcdc; }
   .source-banner.real-only { color: #0a6b32; background: #e6f6ec; border-color: #68bb8a; }
   .source-banner b { font-weight: 600; }
+  /* 小样本提示：诚实说明数据还在积累，不把"样本不足"渲染成故障告警。 */
+  .sample-notice { margin: 0 14px 12px; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid #f2dcb3; background: #fdf8ec; color: #7a5a12;
+    font-size: var(--fs-meta); line-height: 1.6; }
+  .sample-notice b { color: #8a4f0a; }
+  .kpi.pending { background: var(--panel); border-color: var(--border); }
+  .kpi.pending .v { color: var(--muted); font-size: var(--fs-title); font-weight: 500; }
   .correction-form { position: fixed; z-index: 60; right: 24px; bottom: 24px; width: 340px;
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
     box-shadow: 0 12px 40px rgba(0,0,0,.18); padding: 16px; }
@@ -392,9 +399,14 @@
   var SENTI_TEXT = { pos: "正面", neu: "中性", neg: "负面" };
   var fmtPct = function (v) { return v === null || v === undefined ? "—" : (v * 100).toFixed(1) + "%"; };
   var fmtNum = function (v, d) { return v === null || v === undefined ? "—" : Number(v).toFixed(d === undefined ? 2 : d); };
+  // 小样本时指标卡怎么显示。口径不变（后端仍返回 insufficient_samples），
+  // 只把"样本不足"这种像报错的措辞换成"待积累"+原因，避免看起来像系统坏了。
   var metric = function (m, kind) {
     if (!m) return { text: "—", sub: "" };
-    if (m.status === "insufficient_samples") return { text: "样本不足", sub: "分母 " + (m.sample_base || 0) + " 条", warn: true };
+    if (m.status === "insufficient_samples") {
+      var why = (m.sample_base || 0) === 0 ? "暂无带位次的样本" : "分母 " + m.sample_base + " 条，仍在积累";
+      return { text: "待积累", sub: why, warn: true };
+    }
     return {
       text: kind === "num" ? fmtNum(m.value) : fmtPct(m.value),
       sub: "分母 " + (m.sample_base || 0) + " 条"
@@ -621,16 +633,20 @@
         (sub ? '<div class="s">' + esc(sub) + "</div>" : "") + "</div>";
     };
 
-    var exposure = '<div class="kpi lit"><div class="k">高位曝光</div><div class="rows">' +
+    // 小样本阈值：低于这个量，提及率会随一条样本剧烈跳动，排名/情感不足以判断。
+    // 只影响呈现与提示，不改任何指标口径或后端计算。
+    var SMALL_SAMPLE = 30;
+    var small = (d.valid_total || 0) < SMALL_SAMPLE;
+    var exposure = '<div class="kpi' + (small ? " pending" : " lit") + '"><div class="k">高位曝光</div><div class="rows">' +
       [["Top1", c.top1_rate], ["Top3", c.top3_rate], ["Top10", c.top10_rate]].map(function (p) {
         var m = p[1] || {};
-        var text = m.status === "insufficient_samples" ? "样本不足" : fmtPct(m.value);
+        var text = m.status === "insufficient_samples" ? "待积累" : fmtPct(m.value);
         return "<div><i>" + p[0] + "</i><b>" + esc(text) + "</b></div>";
-      }).join("") + "</div></div>";
+      }).join("") + "</div>" + (small ? '<div class="s">需答案给出排名列表</div>' : "") + "</div>";
 
     var sentiment = '<div class="kpi"><div class="k">情感倾向</div>' +
       (sentiWarn
-        ? '<div class="v small">样本不足</div>'
+        ? '<div class="v small">待积累</div>'
         : '<div class="sentiment-split">' +
           '<span class="pos">正 <b>' + fmtPct(senti.pos) + "</b></span>" +
           '<span class="neu">中 <b>' + fmtPct(senti.neu) + "</b></span>" +
@@ -646,7 +662,7 @@
         ? fmtPct(q.mention_rate)
         : q.status === "no_samples"
           ? '<span class="muted">未采集</span>'
-          : '<span class="muted">样本不足</span>';
+          : '<span class="muted">样本少·待积累</span>';
       var bar = q.status === "ok"
         ? '<span class="cmp-bar"><span style="width:' + (q.mention_rate * 100).toFixed(1) + '%"></span></span>'
         : "";
@@ -685,7 +701,14 @@
       "<div><i>视频占比</i><b>" + fmtPct(cites.video_share) + "</b><span>按引用数</span></div>" +
       "</div>";
 
-    $("tabBody").innerHTML = '<div class="kpis">' +
+    // 小样本提示：摆在明面上，说明"数字在动、别当定论"，而不是让用户对着跳动的百分比猜。
+    var sampleNotice = small
+      ? '<div class="sample-notice"><b>试运行 · 样本积累中</b>：当前周期仅 ' +
+        G.num(d.valid_total) + " 条真实样本，提及率每变化一条就会明显跳动；" +
+        "排名/情感等指标需更多样本与带位次的答案才能稳定。此阶段数据仅供参考，<b>不代表最终效果</b>。</div>"
+      : "";
+
+    $("tabBody").innerHTML = sampleNotice + '<div class="kpis">' +
       kpi("提问次数", G.num(d.valid_total), "周期内有效回答 " + G.num(d.valid_total) + " 条") +
       kpi("提及率", mention.text, mention.sub) +
       kpi("平均排名", rank.text, rank.sub) +
