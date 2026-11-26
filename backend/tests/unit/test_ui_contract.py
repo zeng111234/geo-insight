@@ -286,5 +286,37 @@ class ArticleBarContractTest(unittest.TestCase):
         self.assertNotIn("const chips = state.articles.map((a)", self.html)
 
 
+class CsrfInjectionContractTest(unittest.TestCase):
+    """不加载 app.js 的页面若发写请求，必须自己注入 CSRF 头。
+
+    真 bug：settings.html / reports.html 自写 api() 只发 Content-Type，
+    鉴权开启时所有写操作 403。HTTP 层测试（TestClient 手动带头）全绿，
+    只有真浏览器点一遍才发现。这里把"哪些页面必须自带 CSRF 注入"写成静态契约，
+    以后新增页面漏了能在单测阶段抓到，不必等浏览器 E2E。
+    """
+
+    # 有写操作（POST/PATCH/DELETE/PUT）但不加载 app.js 的页面。
+    # studio.html 已有注入；login.html 的登录 POST 走服务端豁免，不算。
+    WRITE_PAGES_WITHOUT_APP_JS = ("settings.html", "reports.html", "studio.html")
+
+    def test_every_write_page_injects_csrf_header(self):
+        static = PROJECT_ROOT / "frontend" / "static"
+        for name in self.WRITE_PAGES_WITHOUT_APP_JS:
+            html = (static / name).read_text(encoding="utf-8")
+            self.assertIn("csrfToken()", html, f"{name} 缺 csrfToken 读取")
+            self.assertIn('"X-CSRF-Token"', html, f"{name} 的 api() 没注入 CSRF 头")
+
+    def test_csrf_header_merged_not_replacing_content_type(self):
+        """注入头时不能让 options.headers 覆盖掉 Content-Type（否则 JSON body 解析失败）。"""
+        static = PROJECT_ROOT / "frontend" / "static"
+        for name in ("settings.html", "reports.html"):
+            html = (static / name).read_text(encoding="utf-8")
+            self.assertIn(
+                'Object.assign({ "Content-Type": "application/json" }, options.headers || {})',
+                html,
+                f"{name} 的 headers 合并写错了，会丢 Content-Type",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

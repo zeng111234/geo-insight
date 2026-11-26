@@ -429,6 +429,7 @@ python backend/scripts/restore_rehearse.py
 **上线清单**（缺一项就别开公网）：
 
 1. `GEO_ADMIN_PASSWORD` 换成强密码，`GEO_AUTH_REQUIRED=1`；
+   登录 → 会话 cookie → CSRF 写操作这条链路由 `authcheck.mjs` 真浏览器验过（见下方验证命令）；
 2. 反代终结 TLS 并透传 `X-Forwarded-Proto: https`，否则应用卡白屏；
 3. `GEO_PUBLISH_HEADLESS=1`，本地登录好的 `.browser-profiles/` 传到同一路径；
 4. 数据库路径固定（默认项目根 `geo.db`，可用 `GEO_DB_PATH` 指到数据盘）；
@@ -500,9 +501,11 @@ node scripts/pagercheck.mjs                                   # 22 条分页组�
 node scripts/interactioncheck.mjs                             # 46 条 CDP 真实点击（删除确认/暂停恢复/新建抽屉+字段落库/表格浏览/首页下钻+口径/报告打印/采集任务/设置删除确认，需 Chrome/Edge）
 node scripts/imagecheck.mjs                                   # 8 条 CDP 真点：文章配图 选图→上传→预览取真 PNG 字节→删除→无 JS 异常（自包含测试图，需 Chrome/Edge）
 node scripts/p3check.mjs                                      # 8 条 CDP 真点：模型×端筛选（选端→URL带client→API/竞品tab请求带client→刷新保持→清除还原，需 Chrome/Edge）
+node scripts/p7check.mjs                                      # 5 条 CDP 真点：19 个监控对象（左栏数→搜索可筛→切空对象显示诚实空态→无 JS 异常）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）
 python scripts/deploy_rehearse.py                              # 部署首启演练：临时空库起真服务，验迁移链+seed+13页+4接口
 python scripts/restore_rehearse.py                             # 恢复演练：真实旧备份→临时库，验迁移补齐+数据完整+安全副本
+node scripts/authcheck.mjs                                    # 鉴权开启下的真浏览器端到端：登录→cookie→CSRF写操作（自起临时实例+库，9条）
 # P2 专项：先在 8137 起新实例（GEO_PORT=8137），再跑：
 GEO_BASE=http://127.0.0.1:8137 node scripts/p2check.mjs        # 8 条 CDP 真点：截图产图/纠正落库回显/取消不改
 ```

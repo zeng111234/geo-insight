@@ -102,8 +102,17 @@ function toast(text, kind = "") {
   toast._t = setTimeout(() => (el.className = "toast " + kind), 4200);
 }
 
+// CSRF 双提交：本页不加载 app.js，写请求要自己带 X-CSRF-Token（与 studio.html / app.js 同款）。
+function csrfToken() {
+  const m = document.cookie.match(/(?:^|;\s*)geo_csrf=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(API + path, { headers: { "Content-Type": "application/json" }, ...options });
+  // 合并 headers，不让 options.headers 覆盖掉 Content-Type。
+  const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
+  if (options.method && options.method !== "GET") headers["X-CSRF-Token"] = csrfToken();
+  const res = await fetch(API + path, { ...options, headers });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.message || body.code || res.status);
   return body;
