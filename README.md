@@ -308,6 +308,28 @@ python scripts/baijiahao_check.py --init            # 百家号:开放平台 API
   公众号正常，换 IP 无效），两渠道的登录与发布要等网络恢复才能校准——check 会把连接错误
   如实落附注，不装有效。
 
+### 服务器部署（无显示器环境）
+
+服务器没有图形界面，必须同时满足三件事，否则浏览器起不来或立刻崩：
+
+1. **`GEO_PUBLISH_HEADLESS=1`**：worker 调 CLI 时给浏览器渠道追加 `--headless`。
+   默认 0 是本机的"有头可盯"行为；服务器不设这个，知乎/公众号/抖音/头条/小红书五个渠道
+   会在浏览器启动那步直接崩（它们默认有头）。搜狐本来就无头、百家号走 API，两者不受影响。
+2. **登录态要先在本地登录好再上传**：扫码/验证码必须人来做，服务器做不了。在本机对每个渠道
+   跑 `python scripts/<渠道>_publish.py login` 登录成功，把整个
+   `backend/src/.browser-profiles/<渠道>/` 目录传到服务器同一路径（该目录已 gitignore）。
+   登录态会过期，过期后要重做这一步。
+3. **Linux 启动参数自动加**：`launch()` 在 Linux 下自动带 `--no-sandbox`（root 必需）和
+   `--disable-dev-shm-usage`（Docker 的 64MB /dev/shm 会让 Chrome 崩）。非 root 容器想保留
+   沙箱，设 `GEO_CHROME_SANDBOX=1`（此时只加 shm 参数）。Windows/macOS 不加任何参数。
+
+**安全取舍**：headless 环境的浏览器指纹（`navigator.webdriver`、WebGL 软件渲染、插件数为 0）
+比本地更容易被平台风控识别，弹验证码时也没人能点——代码明确不做任何绕过，遇到验证就停到超时。
+所以服务器自动发布只适合风控宽松的渠道，小红书这类重风控渠道仍建议本地有头盯跑。
+
+**验证到哪**：参数拼接与平台判断有 8 条单测 + 3 次变异守着；真实服务器端到端发布**没有跑过**
+（需要真实账号登录态和平台网络），属于"代码就位、未实机验证"。
+
 ## 接口
 
 契约权威源：`specs/001-geo-insight-platform/contracts/openapi.yaml`（OpenAPI 3.1，21 路径），根目录 `contracts/openapi.yaml` 是同步副本。

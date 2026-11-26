@@ -88,6 +88,24 @@ def profile_dir(name: str) -> Path:
     return d
 
 
+def chrome_args() -> list[str]:
+    """按平台生成 Chrome 启动参数。Windows/macOS 本机不需要,返回空。
+
+    Linux(尤其 Docker/root)下两个参数是硬性的:
+    - --no-sandbox:root 用户跑 Chrome,不带这个直接"Running as root without
+      --no-sandbox is not supported"启动失败。设 GEO_CHROME_SANDBOX=1 可保留
+      沙箱(非 root 容器里更安全),代价是那些环境可能起不来,由部署者自己权衡。
+    - --disable-dev-shm-usage:Docker 默认 /dev/shm 只有 64MB,Chrome 渲染大页面
+      会直接崩;加了改用 /tmp,几乎无副作用。
+    """
+    if not sys.platform.startswith("linux"):
+        return []
+    args = ["--disable-dev-shm-usage"]
+    if os.getenv("GEO_CHROME_SANDBOX", "0") != "1":
+        args.insert(0, "--no-sandbox")
+    return args
+
+
 def launch(pw: sync_playwright, name: str, headless: bool = False):
     """用系统 Chrome 启动持久化上下文。首登需要 headless=False(要扫码)。
 
@@ -100,6 +118,9 @@ def launch(pw: sync_playwright, name: str, headless: bool = False):
         "headless": headless,
         "viewport": {"width": 1440, "height": 900},
     }
+    args = chrome_args()
+    if args:
+        kwargs["args"] = args
     chrome = find_chrome()
     if chrome:
         kwargs["executable_path"] = chrome

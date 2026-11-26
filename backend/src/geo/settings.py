@@ -65,6 +65,10 @@ class Settings:
     # 进程内信号量，和 session/渠道锁一样只对单进程部署有效（决策 012）。
     # max(1, ...) 防止误配 0/负数把队列永久卡死。
     publish_concurrency: int = max(1, int(os.getenv("GEO_PUBLISH_CONCURRENCY", "3")))
+    # 服务器模式:worker 调 CLI 时要求无头浏览器。默认 0 保持本机开发行为
+    # (搜狐本来无头,其余渠道有头可盯)。服务器没显示器必须设 1,否则浏览器
+    # 启动即崩——这不是"更省资源",是"能不能跑"的区别。
+    publish_headless: bool = os.getenv("GEO_PUBLISH_HEADLESS", "0") == "1"
 
 
 settings = Settings()

@@ -42,36 +42,40 @@ DRAFT_DIR = BACKEND_DIR / "data" / "publish_drafts"
 
 # 渠道支持表。publish_args 是 CLI 的发布参数形态:浏览器渠道用子命令
 # `publish <draft>`,百家号用 argparse 标志 `--publish <draft>`。
+# headless_args 是"强制无头"要追加的参数,随 GEO_PUBLISH_HEADLESS=1 生效:
+#   搜狐 main 是 `headless = "--show" not in sys.argv` —— 默认就无头,追加空;
+#   其余五家 main 是 `headless = "--headless" in sys.argv` —— 默认有头,要追加;
+#   百家号走 API 不开浏览器,参数不认,绝不能追加(否则 CLI 直接报错)。
 # 抖音/小红书是图文平台:draft 必须带 images(发布器侧校验,缺失即 rejected)。
 # 头条/小红书 2026-11-24 本机网络被重置,模块就位但登录/发布待网络恢复后校准。
 CHANNEL_SUPPORT: dict[str, dict[str, Any]] = {
     "sohu": {
         "script": "sohu_publish.py", "kind": "browser",
-        "title_min": 5, "title_max": 72, "publish_args": ("publish",),
+        "title_min": 5, "title_max": 72, "publish_args": ("publish",), "headless_args": (),
     },
     "zhihu": {
         "script": "zhihu_publish.py", "kind": "browser",
-        "title_min": 2, "title_max": 100, "publish_args": ("publish",),
+        "title_min": 2, "title_max": 100, "publish_args": ("publish",), "headless_args": ("--headless",),
     },
     "wechat": {
         "script": "wechat_publish.py", "kind": "browser",
-        "title_min": 1, "title_max": 64, "publish_args": ("publish",),
+        "title_min": 1, "title_max": 64, "publish_args": ("publish",), "headless_args": ("--headless",),
     },
     "baijiahao": {
         "script": "baijiahao_check.py", "kind": "api",
-        "title_min": 8, "title_max": 40, "publish_args": ("--publish",),
+        "title_min": 8, "title_max": 40, "publish_args": ("--publish",), "headless_args": (),
     },
     "douyin": {
         "script": "douyin_publish.py", "kind": "browser",
-        "title_min": 1, "title_max": 55, "publish_args": ("publish",),
+        "title_min": 1, "title_max": 55, "publish_args": ("publish",), "headless_args": ("--headless",),
     },
     "toutiao": {
         "script": "toutiao_publish.py", "kind": "browser",
-        "title_min": 5, "title_max": 30, "publish_args": ("publish",),
+        "title_min": 5, "title_max": 30, "publish_args": ("publish",), "headless_args": ("--headless",),
     },
     "xiaohongshu": {
         "script": "xiaohongshu_publish.py", "kind": "browser",
-        "title_min": 1, "title_max": 20, "publish_args": ("publish",),
+        "title_min": 1, "title_max": 20, "publish_args": ("publish",), "headless_args": ("--headless",),
     },
 }
 
@@ -331,8 +335,13 @@ def dispatch_publication(pub_id: str, channel_key: str, article: dict) -> None:
         draft_path.write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
 
         try:
+            # 服务器模式追加无头标志。放在 draft 路径之后:各渠道 main 用
+            # sys.argv[2] 取路径、sys.argv[3:] 认 --headless,顺序错了就解析不到。
+            cli_args = [*support["publish_args"], str(draft_path)]
+            if settings.publish_headless:
+                cli_args.extend(support["headless_args"])
             proc = _run_cli(
-                support["script"], *support["publish_args"], str(draft_path),
+                support["script"], *cli_args,
                 timeout=settings.publish_timeout_s,
             )
             result = _extract_result_json(proc.stdout)
