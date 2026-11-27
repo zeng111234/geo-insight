@@ -33,6 +33,7 @@ from geo.domain import channels as channels_domain
 from geo.domain import citation as citation_domain
 from geo.domain import methodology as methodology_module
 from geo.domain import relevance
+from geo.repositories import asset_repository as asset_repo
 from geo.repositories import config_repository as config_repo
 from geo.repositories import report_repository as report_repo
 from geo.repositories import sqlite_repository as repo
@@ -48,6 +49,7 @@ from geo.services import (
     fact_service,
     mention_service,
     site_service,
+    tracker_asset_service,
     metric_service,
     opportunity_service,
     publish_service,
@@ -1430,6 +1432,82 @@ async def site_page(request: Request):
     return FileResponse(STATIC_DIR / "site.html")
 
 
+async def tracker_assets(request: Request):
+    """客户资料：GET 列表+清单，POST 上传（SOP 第一步照片归档）。"""
+    tracker_id = request.path_params["tracker_id"]
+    tenant_id = _tenant(request)
+    conn = db.connect()
+    try:
+        tracker = repo.get_tracker(conn, tracker_id, tenant_id)
+        if not tracker:
+            return _error(request, "NOT_FOUND", "对象不存在", 404)
+
+        if request.method == "GET":
+            return JSONResponse({
+                "items": asset_repo.list_assets(conn, tracker_id, tenant_id),
+                "checklist": asset_repo.checklist(conn, tracker_id, tenant_id),
+            })
+
+        try:
+            form = await request.form()
+            upload = form.get("file")
+            if upload is None or not hasattr(upload, "read"):
+                return _error(request, "VALIDATION_ERROR", "需要 file 字段上传资料")
+            category = (form.get("category") or "other").strip()
+            data = await upload.read()
+            filename, size = tracker_asset_service.save(
+                data, getattr(upload, "filename", ""), category
+            )
+        except tracker_asset_service.AssetError as exc:
+            return _error(request, "VALIDATION_ERROR", str(exc))
+
+        asset = asset_repo.add_asset(
+            conn,
+            asset_id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            tracker_id=tracker_id,
+            category=category,
+            filename=filename,
+            original_name=getattr(upload, "filename", "") or "file",
+            size_bytes=size,
+            now=_now(),
+        )
+        conn.commit()  # 文件已落盘，SQL 一起提交；失败时下面 rollback 不留半截
+        return JSONResponse(asset, status_code=201)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+async def tracker_asset_file(request: Request):
+    """下载/查看一张客户资料；DELETE 同时删库记录和文件。"""
+    asset_id = request.path_params["asset_id"]
+    tenant_id = _tenant(request)
+    conn = db.connect()
+    try:
+        asset = asset_repo.get_asset(conn, asset_id, tenant_id)
+        if not asset:
+            return _error(request, "NOT_FOUND", "资料不存在", 404)
+
+        if request.method == "DELETE":
+            asset_repo.delete_asset(conn, asset_id, tenant_id)
+            conn.commit()
+            tracker_asset_service.delete(asset["filename"])
+            return Response(status_code=204)
+
+        path = tracker_asset_service.path_for(asset["filename"])
+        if not path.is_file():
+            return _error(request, "NOT_FOUND", "资料文件已丢失", 404)
+        media = "image/png" if path.suffix.lower() == ".png" else (
+            "image/jpeg" if path.suffix.lower() in (".jpg", ".jpeg") else "image/gif"
+        )
+        return FileResponse(path, media_type=media, filename=asset["original_name"])
+    finally:
+        conn.close()
+
+
 async def brand_aliases(request: Request):
     payload = await _json_body(request)
     if isinstance(payload, JSONResponse):
@@ -2121,6 +2199,7 @@ def create_app() -> Starlette:
         Route("/tasks", _page("tasks.html", "tasks")),
         Route("/publish", _page("publish.html", "publish")),
         Route("/assets", _page("assets.html", "assets")),
+        Route("/files", _page("files.html", "assets")),
         Route("/sources", _page("sources.html", "sources")),
         Route("/update", _page("update.html")),
         Route("/site/{tracker_id}", site_page),
@@ -2206,6 +2285,16 @@ def create_app() -> Starlette:
         Route(f"{settings.api_prefix}/system/update/apply", update_apply, methods=["POST"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/citations/summary", citations_summary),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/citations", citations_detail),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/assets",
+            tracker_assets,
+            methods=["GET", "POST"],
+        ),
+        Route(
+            f"{settings.api_prefix}/trackers/{{tracker_id}}/assets/{{asset_id}}",
+            tracker_asset_file,
+            methods=["GET", "DELETE"],
+        ),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/reports", list_reports, methods=["GET"]),
         Route(f"{settings.api_prefix}/trackers/{{tracker_id}}/reports", create_report, methods=["POST"]),
         Route(f"{settings.api_prefix}/reports/{{report_id}}", report_detail),

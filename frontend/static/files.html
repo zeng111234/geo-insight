@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/static/theme.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<script src="/static/app.js"></script>
+<title>GEO Insight · 客户资料归档</title>
+</head>
+<body>
+<div class="shell">
+  <main>
+    <header class="top">
+      <h1>客户资料归档</h1>
+      <span class="sub">服务 SOP 第一步 · 开户资料：形象照 / 环境 / 荣誉 / 活动合影</span>
+      <span class="spacer"></span>
+      <select id="tracker" aria-label="监控对象"></select>
+      <button id="load" class="primary">刷新</button>
+    </header>
+    <div class="content">
+      <div class="panel">
+        <h2>资料齐备情况 <span class="badge" id="assetMeta">—</span></h2>
+        <div class="body" id="checklist"><div class="empty">加载中…</div></div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2>上传资料</h2>
+        <div class="body">
+          <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <label class="muted">分类<br/>
+              <select id="category">
+                <option value="portrait">形象照（目标 10 张）</option>
+                <option value="environment">环境设施实景（目标 10 张）</option>
+                <option value="honor">荣誉墙 / 证书 / 旌旗</option>
+                <option value="event">颁奖 / 出访 / 采访 / 活动合影（目标 30 张+）</option>
+                <option value="other">其它资料</option>
+              </select>
+            </label>
+            <label class="muted">选择图片（png/jpg/gif，单张 ≤10MB）<br/>
+              <input type="file" id="file" accept="image/png,image/jpeg,image/gif" />
+            </label>
+            <button id="upload" class="primary">上传</button>
+          </div>
+          <div id="upState" class="muted" style="margin-top:8px"></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:14px">
+        <h2>已归档资料 <span class="badge" id="listMeta">—</span></h2>
+        <div class="body" id="gallery"><div class="empty">加载中…</div></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+(function () {
+  var G = window.GEO, $ = G.$, esc = G.esc;
+  var CAT = { portrait:"形象照", environment:"环境设施", honor:"荣誉/证书", event:"活动合影", other:"其它" };
+  // CSRF 双提交：写请求带 X-CSRF-Token（值与登录下发的 geo_csrf cookie 一致）
+  function csrfToken() {
+    var m = document.cookie.match(/(?:^|;\s*)geo_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : "";
+  }
+
+  async function load() {
+    var t = G.tracker(); if (!t) return;
+    var res = await G.get("/trackers/" + encodeURIComponent(t) + "/assets");
+    renderCheck(res.checklist);
+    renderGallery(res.items);
+  }
+
+  function renderCheck(cl) {
+    if (!cl || !cl.items) { $("checklist").innerHTML = '<div class="empty">暂无清单</div>'; return; }
+    $("assetMeta").textContent = cl.total + " 张";
+    $("checklist").innerHTML = cl.items.map(function (x) {
+      var state = x.target == null ? '<span class="muted">不限</span>'
+        : (x.met ? '<span style="color:var(--green-ink)">已达标</span>'
+                 : '<span style="color:var(--amber-ink)">' + x.count + " / " + x.target + '</span>');
+      return '<div class="row" style="margin-bottom:7px"><span style="width:190px">' + esc(x.label) +
+             '</span><strong>' + x.count + ' 张</strong><span class="spacer"></span>' + state + '</div>';
+    }).join("");
+  }
+
+  function renderGallery(items) {
+    $("listMeta").textContent = items.length + " 张";
+    if (!items.length) { $("gallery").innerHTML = '<div class="empty">还没有归档资料。上传后会出现在这里。</div>'; return; }
+    var t = G.tracker();
+    $("gallery").innerHTML = '<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">' +
+      items.map(function (a) {
+        var url = "/v1/trackers/" + encodeURIComponent(t) + "/assets/" + encodeURIComponent(a.id);
+        return '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+          '<a href="' + url + '" target="_blank" rel="noreferrer"><img src="' + url + '" alt="' + esc(a.original_name) +
+          '" style="width:100%;height:110px;object-fit:cover;display:block;background:var(--panel-2)"/></a>' +
+          '<div style="padding:8px;font-size:var(--fs-caption)">' +
+          '<div>' + esc(CAT[a.category] || a.category) + '</div>' +
+          '<div class="muted" title="' + esc(a.original_name) + '">' + esc(a.original_name) + '</div>' +
+          '<button class="small" data-del="' + esc(a.id) + '" style="margin-top:5px">删除</button>' +
+          '</div></div>';
+      }).join("") + '</div>';
+  }
+
+  $("upload").addEventListener("click", async function () {
+    var t = G.tracker(); if (!t) { $("upState").textContent = "请先选监控对象"; return; }
+    var f = $("file").files[0];
+    if (!f) { $("upState").textContent = "请先选择图片"; return; }
+    var fd = new FormData();
+    fd.append("category", $("category").value);
+    fd.append("file", f, f.name);
+    $("upState").textContent = "上传中…";
+    try {
+      var r = await fetch("/v1/trackers/" + encodeURIComponent(t) + "/assets", {
+        method: "POST", headers: { "X-CSRF-Token": csrfToken() }, body: fd
+      });
+      if (!r.ok) { var e = await r.json().catch(function(){return {message:r.statusText}}); throw new Error(e.message || r.status); }
+      $("file").value = "";
+      $("upState").textContent = "上传成功";
+      await load();
+    } catch (e) { $("upState").textContent = "上传失败：" + e.message; }
+  });
+
+  $("gallery").addEventListener("click", async function (e) {
+    var btn = e.target.closest("[data-del]"); if (!btn) return;
+    if (!window.confirm("确定删除这张资料？")) return;
+    var t = G.tracker();
+    var r = await fetch("/v1/trackers/" + encodeURIComponent(t) + "/assets/" + encodeURIComponent(btn.dataset.del), {
+      method: "DELETE", headers: { "X-CSRF-Token": csrfToken() }
+    });
+    if (r.status === 204) await load();
+    else $("upState").textContent = "删除失败：" + r.status;
+  });
+
+  $("load").addEventListener("click", load);
+  $("tracker").addEventListener("change", load);
+  (async function () { await G.fillTrackers(); await load(); })();
+})();
+</script>
+</body>
+</html>
