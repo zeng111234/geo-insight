@@ -71,6 +71,22 @@ def _build_prompt(material: dict) -> str:
         lines.append(f"围绕的问题：{question}")
     if keywords:
         lines.append("必须覆盖的关键词：" + "、".join(keywords[:12]))
+    profile = material.get("client_profile") or {}
+    profile_lines = []
+    if profile.get("intro"):
+        profile_lines.append(f"- 品牌简介：{profile['intro']}")
+    if profile.get("expertise"):
+        profile_lines.append(f"- 专业特长：{profile['expertise']}")
+    if profile.get("honors"):
+        profile_lines.append(f"- 荣誉资质：{profile['honors']}")
+    if profile.get("cases"):
+        profile_lines.append("- 成功案例：" + "；".join(str(c) for c in profile["cases"]))
+    if profile.get("geo_words"):
+        profile_lines.append(f"- 服务方向：{profile['geo_words']}")
+    if profile_lines:
+        lines.append("\n客户自行登记的资料（第一方自述，可作为品牌事实写入；")
+        lines.append("引用这些时 source_ref 写「客户档案」，不要当成外部信源）：")
+        lines.extend(profile_lines)
     if citations:
         lines.append("\n可引用的信源（标题 / URL）：")
         for c in citations[:12]:
@@ -194,6 +210,44 @@ def generate(
     }
 
 
+def client_profile_from_settings(settings_raw: str | None) -> dict:
+    """从 tracker.settings 提取客户在台账/表一/表三里登记的自述资料。
+
+    SOP 第二步要「导入客户资料搭建企业知识库」——客户在系统里填的简介、专业特长、
+    服务方向，就是写稿该用的第一方素材。这是客户自述，不是外部引用信源，
+    在 prompt 里会与 citation 明确分开标注，source_ref 记为「客户档案」。
+    坏 JSON / 缺字段一律当没登记，不臆造。
+    """
+    try:
+        data = json.loads(settings_raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    service = data.get("service") if isinstance(data.get("service"), dict) else {}
+    assets = data.get("assets") if isinstance(data.get("assets"), dict) else {}
+    t1 = assets.get("table1") if isinstance(assets.get("table1"), dict) else {}
+    t3 = assets.get("table3") if isinstance(assets.get("table3"), dict) else {}
+
+    def txt(v) -> str:
+        return v.strip() if isinstance(v, str) else ""
+
+    cases = [c.strip() for c in (t1.get("cases") or []) if isinstance(c, str) and c.strip()]
+    profile = {
+        "intro": txt(t1.get("intro")),
+        "expertise": txt(t1.get("expertise")),
+        "honors": txt(t1.get("honors")),
+        "cases": cases[:10],
+        "geo_words": txt(t3.get("geo_words")),
+        "package": txt(service.get("package")),
+        "website": txt(service.get("website")) or txt(data.get("website")),
+    }
+    # 全是空就当没登记：返回空 dict，调用方一眼能判「没有客户档案」，不塞一堆空串。
+    if not any(profile.values()):
+        return {}
+    return profile
+
+
 def collect_material(
     conn: sqlite3.Connection,
     tracker_id: str,
@@ -259,6 +313,8 @@ def collect_material(
         "question_text": question_text,
         "citations": citations,
         "reference": reference,
+        # 客户在系统台账里登记的自述资料（SOP 第二步的知识库投喂）
+        "client_profile": client_profile_from_settings(tracker.get("settings")),
     }
 
 

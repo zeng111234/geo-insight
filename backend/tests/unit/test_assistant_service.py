@@ -82,6 +82,30 @@ class AssistantServiceTest(unittest.TestCase):
         self.assertIn("只使用提供的素材", prompt)
         self.assertIn("不要输出 JSON 以外的任何文字", prompt)
 
+    def test_client_profile_reaches_actual_llm_payload(self):
+        """SOP第二步知识库投喂：客户登记的资料真进了发给LLM的消息，不止在中间结构里。"""
+        import json as _json
+        settings = {
+            "assets": {
+                "table1": {"intro": "惠策自述：专注可核验案例"},
+                "table3": {"geo_words": "GEO服务方向"},
+            }
+        }
+        self.conn.execute(
+            "UPDATE tracker SET settings=? WHERE id=?",
+            (_json.dumps(settings, ensure_ascii=False), TRACKER),
+        )
+        self.conn.commit()
+        transport = FakeTransport(writer_body(GOOD_TEXT))
+        assistant_service.generate_draft(
+            self.conn, TRACKER, TENANT, api_key="sk-test-placeholder", transport=transport,
+        )
+        self.assertEqual(len(transport.calls), 1)
+        prompt_sent = transport.calls[0]["messages"][0]["content"]
+        self.assertIn("惠策自述：专注可核验案例", prompt_sent)
+        self.assertIn("GEO服务方向", prompt_sent)
+        self.assertIn("source_ref 写「客户档案」", prompt_sent)
+
     def test_generate_draft_lands_article_facts_stages_and_credit(self):
         transport = FakeTransport(writer_body(GOOD_TEXT))
         article = assistant_service.generate_draft(
@@ -181,6 +205,54 @@ class AssistantServiceTest(unittest.TestCase):
                         api_key="", transport=FakeTransport(writer_body(GOOD_TEXT)),
                     )
         self.assertEqual(ctx.exception.code, "NOT_CONFIGURED")
+
+
+class ClientProfileTest(unittest.TestCase):
+    """SOP 第二步「客户资料喂入知识库」：台账登记的资料要进写稿 prompt。"""
+
+    def test_settings_extracted_into_client_profile(self):
+        raw = json.dumps({
+            "service": {"package": "GEO标准版", "website": "https://huice.example"},
+            "assets": {
+                "table1": {"intro": "惠策专注广州GEO服务", "expertise": "生成式引擎优化",
+                           "honors": "行业认证", "cases": ["案例A", "案例B"]},
+                "table3": {"geo_words": "GEO优化,AI搜索"},
+            },
+        }, ensure_ascii=False)
+        p = assistant_service.client_profile_from_settings(raw)
+        self.assertEqual(p["intro"], "惠策专注广州GEO服务")
+        self.assertEqual(p["expertise"], "生成式引擎优化")
+        self.assertEqual(p["cases"], ["案例A", "案例B"])
+        self.assertEqual(p["geo_words"], "GEO优化,AI搜索")
+        self.assertEqual(p["website"], "https://huice.example")
+
+    def test_bad_json_gives_no_profile(self):
+        self.assertEqual(assistant_service.client_profile_from_settings("{bad"), {})
+        self.assertEqual(assistant_service.client_profile_from_settings(None), {})
+        self.assertEqual(assistant_service.client_profile_from_settings("[]"), {})
+
+    def test_prompt_injects_client_profile_as_first_party(self):
+        prompt = assistant_service._build_prompt({
+            "brand_name": "惠策",
+            "keywords": ["GEO"],
+            "client_profile": {
+                "intro": "惠策专注GEO", "expertise": "生成式引擎优化",
+                "cases": ["某律所案例"],
+            },
+            "citations": [{"url": "https://example.com", "title": "外部信源"}],
+        })
+        self.assertIn("客户自行登记的资料", prompt)
+        self.assertIn("惠策专注GEO", prompt)
+        self.assertIn("某律所案例", prompt)
+        # 客户自述与外部信源必须分开标注，不能混为一谈
+        self.assertIn("source_ref 写「客户档案」", prompt)
+        self.assertIn("可引用的信源", prompt)
+
+    def test_prompt_without_profile_has_no_section(self):
+        prompt = assistant_service._build_prompt({
+            "brand_name": "惠策", "keywords": ["GEO"], "client_profile": {},
+        })
+        self.assertNotIn("客户自行登记的资料", prompt)
 
 
 if __name__ == "__main__":
