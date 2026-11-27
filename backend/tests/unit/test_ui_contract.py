@@ -455,5 +455,21 @@ class AiGenerateButtonContractTest(unittest.TestCase):
         self.assertNotIn('catch (e) {}', html)
 
 
+class E2EScriptAuthContractTest(unittest.TestCase):
+    """AI 生成按钮 E2E 必须能在默认鉴权环境跑，不能只在免鉴权环境绿。
+
+    默认服务开鉴权，直接 navigate /studio 会被 302 到登录页；脚本若无登录检测，
+    报晦涩 CDP 异常（隔壁踩过）。Node fetch 不带 cookie 也会 401。
+    """
+
+    def test_aigen_script_handles_auth(self):
+        script = (PROJECT_ROOT / "backend" / "scripts" / "aigenbuttoncheck.mjs").read_text(encoding="utf-8")
+        self.assertIn('location.pathname', script, "缺当前页检测")
+        self.assertIn('"/login"', script, "缺登录页检测")
+        self.assertIn("geo-demo-2026", script, "缺自动登录凭据")
+        # count 必须在浏览器里 fetch（带 cookie），不能用 Node fetch
+        self.assertIn("await ev(`(async function(){", script, "文章数读取未走浏览器 cookie")
+
+
 if __name__ == "__main__":
     unittest.main()

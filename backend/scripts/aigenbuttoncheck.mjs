@@ -12,10 +12,22 @@ const chrome = spawn(CHROME, ["--headless=new", "--disable-gpu", "--no-sandbox",
 async function target() { for (let i = 0; i < 60; i++) { try { const r = await fetch(`http://127.0.0.1:${PORT}/json/list`); const l = await r.json(); const p = l.find((t) => t.type === "page"); if (p) return p.webSocketDebuggerUrl; } catch {} await sleep(250); } throw Error("no cdp"); }
 let id = 0; const pending = new Map(); let ws;
 function send(m, p = {}) { const mid = ++id; ws.send(JSON.stringify({ id: mid, method: m, params: p })); return new Promise((res, rej) => pending.set(mid, { resolve: res, reject: rej })); }
-async function ev(e) { const r = await send("Runtime.evaluate", { expression: e, returnByValue: true, awaitPromise: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 200)); return r.result.value; }
+async function ev(e) {
+  const r = await send("Runtime.evaluate", { expression: e, returnByValue: true, awaitPromise: true });
+  if (r.exceptionDetails) {
+    const d = r.exceptionDetails;
+    const msg = (d.exception && d.exception.description) || d.text || "未知 JS 异常";
+    throw new Error("浏览器执行失败: " + String(msg).split("\n")[0].slice(0, 160));
+  }
+  return r.result.value;
+}
 const results = [];
 const check = (ok, label, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${label}${extra ? ` (${extra})` : ""}`); };
-const count = async () => (await (await fetch(`${BASE}/v1/trackers/11111111-1111-1111-1111-111111111111/articles`)).json()).items?.length ?? -1;
+// 在浏览器里 fetch（带登录 cookie），不能用 Node fetch——鉴权环境会 401。
+const count = async () => await ev(`(async function(){
+  var r=await fetch('/v1/trackers/11111111-1111-1111-1111-111111111111/articles');
+  if(!r.ok) return -1;
+  var d=await r.json(); return (d.items||[]).length; })()`);
 try {
   ws = new WebSocket(await target());
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
@@ -25,8 +37,20 @@ try {
   ws.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails.text || "exception"); });
 
   await send("Page.navigate", { url: BASE + "/studio" });
-  await sleep(3000);
+  await sleep(2500);
+  // 项目默认开鉴权：未登录会被 302 到 /login，按钮不存在会导致晦涩异常。
+  // 检测到登录页就用演示账号登录再回工作室，鉴权/免鉴权两种环境都能跑。
+  if (await ev(`location.pathname`) === "/login") {
+    await ev(`(function(){
+      document.querySelector('input[name=email]').value='demo@example.com';
+      document.querySelector('input[name=password]').value='geo-demo-2026';
+      document.querySelector('form').submit(); return true; })()`);
+    await sleep(2200);
+    await send("Page.navigate", { url: BASE + "/studio" });
+    await sleep(2500);
+  }
   const before = await count();
+  if (before < 0) throw new Error("文章列表读取失败（401？登录没成功？）");
 
   // 打开新建面板并选一个问题
   await ev(`document.getElementById('newArticle').click()`);
