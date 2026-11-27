@@ -34,6 +34,17 @@ class WhaleAvatarContractTest(unittest.TestCase):
         self.assertIn("<svg viewBox=", self.answer)
         self.assertNotIn("deepseek-logo.png", self.app_js)
 
+    def test_whale_uses_official_path_not_handdrawn(self):
+        """用 DeepSeek 官方 logo 的 path（Simple Icons 收录），不是手画剪影。
+
+        用户明确嫌手画的鲸鱼丑、要求用官方的。官方 path 以 M23.748 开头；
+        手画版以 M2.6 开头。锁住官方特征防止回退。
+        """
+        self.assertIn("M23.748 4.651c", self.app_js)
+        self.assertIn("M23.748 4.651c", self.answer)
+        self.assertNotIn("M2.6 13.9c", self.app_js)
+        self.assertNotIn("M2.6 13.9c", self.answer)
+
     def test_both_renderers_use_avatar_html_helper(self):
         """两个头像渲染点都走 modelAvatarHtml（有 svg 用 svg，否则回退字母）。"""
         self.assertIn("modelAvatarHtml(m)", self.app_js)
