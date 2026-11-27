@@ -583,6 +583,18 @@ class ServiceLedgerContractTest(unittest.TestCase):
         self.assertIn("rel=\"noopener noreferrer\"", html, "外链缺安全 rel")
         self.assertIn("需人工核实", html, "缺口径说明")
 
+    def test_keyboard_focus_ring_visible(self):
+        """WCAG 2.4.11：键盘焦点环要实色可见，且不能被 input:focus 的 outline:none 盖掉。"""
+        css = (PROJECT_ROOT / "frontend" / "static" / "app.css").read_text(encoding="utf-8")
+        self.assertIn("focus-visible", css, "缺键盘焦点样式")
+        self.assertIn("outline: 2px solid var(--accent)", css, "焦点环不是实色 accent")
+        self.assertNotIn("outline: 2px solid rgba(108, 92, 231, .45)", css, "旧的低透明焦点环还在")
+        # 顺序铁律：focus-visible 规则必须在 input:focus(outline:none) 之后，
+        # 同为 (0,1,1) 优先级，否则 outline:none 会盖掉键盘焦点环。
+        fv_pos = css.find("button:focus-visible")
+        input_focus_pos = css.find("input:focus, select:focus")
+        self.assertGreater(fv_pos, input_focus_pos, "focus-visible 必须定义在 :focus 之后，否则焦点环被盖")
+
 
 if __name__ == "__main__":
     unittest.main()
