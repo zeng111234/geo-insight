@@ -91,10 +91,16 @@ const SENTI = { pos: "正面", neu: "中性", neg: "负面" };
 const answerId = location.pathname.split("/").pop();
 
 // 模型显示名与头像，与后端 domain/channels.py 的 8 模型口径一致。
-// 头像用缩写字母 + 品牌色（CSS 画，不依赖图片），离线也能显示。
+// 大多数用缩写字母 + 品牌色（CSS 画，离线也能显示）；DeepSeek 例外——
+// 它的标志是那只鲸鱼，用字母 D 不对（用户指出），改用内联 SVG 鲸鱼剪影。
+const DEEPSEEK_WHALE =
+  '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">' +
+  '<path fill="#fff" d="M2.6 13.9c1.7 0 3-.5 4.2-1.6 1.2-1.1 2.5-1.7 4.2-1.7 2.6 0 4.6 1.9 5 4.4 0 .4.3.7.8.7h1.7l-1.9 2.4c-.3.4-.8.6-1.3.6h-.3c-1.6 0-2.9-.7-3.9-1.9-1.3-1.6-3.2-2.5-5.4-2.5-1.6 0-3 .5-4.2 1.5-.5.4-1.2.4-1.7-.1l-1.1-1.1c-.2-.2-.3-.5-.3-.8 0-.6.5-1.1 1.1-1.1.7 0 1.3.1 1.9.2z"/>' +
+  '<path fill="#fff" d="M15.6 5.2c.3-.3.8-.3 1.1 0l1 1.1 1.2-1c.3-.3.8-.2 1 .1.2.3.2.7-.1 1l-1.1 1 1.2 1.1c.3.3.3.8 0 1.1-.3.3-.8.3-1.1 0l-1.2-1.1-1 1.1c-.3.3-.8.3-1.1 0-.3-.3-.3-.8 0-1.1l1-1.1-1-1c-.3-.3-.3-.8 0-1.1z"/>' +
+  "</svg>";
 const MODEL_META = {
   doubao:   { label: "豆包",      abbr: "豆", color: "#3b6cf0" },
-  deepseek: { label: "DeepSeek",  abbr: "D",  color: "#4d6bfe" },
+  deepseek: { label: "DeepSeek",  abbr: "D",  color: "#4d6bfe", svg: DEEPSEEK_WHALE },
   kimi:     { label: "Kimi",      abbr: "K",  color: "#1f2430" },
   qwen:     { label: "千问",      abbr: "千", color: "#6155d6" },
   yuanbao:  { label: "元宝",      abbr: "元", color: "#e05a4d" },
@@ -104,6 +110,9 @@ const MODEL_META = {
 };
 function modelMeta(key) {
   return MODEL_META[key] || { label: key || "AI", abbr: (key || "AI").slice(0, 1).toUpperCase(), color: "#6c5ce7" };
+}
+function modelAvatarHtml(m) {
+  return m.svg ? m.svg : esc(m.abbr);
 }
 
 function renderMentions(mentions, brandName) {
@@ -146,7 +155,7 @@ function renderChat(d) {
   const channel = d.channel === "web" ? "网页端" : "API";
   return `
     <div class="chat-head">
-      <div class="bubble-av" style="background:${esc(m.color)}">${esc(m.abbr)}</div>
+      <div class="bubble-av" style="background:${esc(m.color)}">${modelAvatarHtml(m)}</div>
       <div class="meta"><b>${esc(m.label)}</b><small>${esc(date)} · ${esc(channel)}</small></div>
       <span class="spacer"></span>
       <span class="tag ${d.is_valid ? "ok" : "warn"}">${d.is_valid ? "有效样本" : "无效样本"}</span>
@@ -157,7 +166,7 @@ function renderChat(d) {
         <div><div class="bubble-role">用户提问</div><div class="bubble user">${esc(d.question_text)}</div></div>
       </div>
       <div class="bubble-row">
-        <div class="bubble-av" style="background:${esc(m.color)}">${esc(m.abbr)}</div>
+        <div class="bubble-av" style="background:${esc(m.color)}">${modelAvatarHtml(m)}</div>
         <div><div class="bubble-role">${esc(m.label)} 的回答</div><div class="bubble ai">${esc(d.text)}</div></div>
       </div>
     </div>`;

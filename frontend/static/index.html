@@ -14,6 +14,16 @@
     background:var(--subtle); line-height:1.7; }
   .asst-msg .who { color:var(--muted); font-size:var(--fs-caption); margin-bottom:3px; }
   .asst-msg .text { color:var(--text-body); font-size:var(--fs-meta); white-space:pre-wrap; }
+  /* markdown 渲染后的结构：标题/列表/粗体/行内码。正文用 renderMd 后是 HTML 块，
+     气泡整体仍保留 pre-wrap（用户消息/错误原样换行），块级元素靠 margin 分隔。 */
+  .asst-msg .md-body { white-space:normal; }
+  .asst-msg .md-body h4 { font-size:var(--fs-meta); font-weight:700; color:var(--text-strong);
+    margin:2px 0 4px; }
+  .asst-msg .md-body ul { margin:3px 0; padding-left:18px; }
+  .asst-msg .md-body li { margin:1px 0; }
+  .asst-msg .md-body strong { font-weight:700; }
+  .asst-msg .md-body code { background:var(--panel); border:1px solid var(--border);
+    border-radius:4px; padding:0 4px; font-size:var(--fs-caption); }
   .asst-msg .meta { color:var(--muted); font-size:var(--fs-caption); margin-top:6px;
     border-top:1px dashed var(--border); padding-top:5px; }
   .asst-msg.user { background:var(--accent-weak); border-color:var(--accent-weak); }
@@ -107,6 +117,46 @@ const API = API_BASE + "/v1";
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// 把 LLM 回复里的轻量 markdown 渲染成 HTML。安全顺序很关键：
+// 先整体 esc 转义（任何 <script> 都变成文本），再只在转义后的文本上替换有限标记，
+// 绝不让模型输出直接进 innerHTML 形成 XSS。
+// 支持的子集：# / ## / ### 标题、- / * 列表、**粗体**、`行内码`。
+// 不认识的标记原样显示——宁可少渲染，也不瞎解释模型的话。
+function renderMd(text) {
+  var out = esc(text);
+  // 行内码先抽成占位，避免里面的 ** / * 被后面的规则误伤。
+  var codes = [];
+  out = out.replace(/`([^`]+)`/g, function (_, code) {
+    codes.push("<code>" + code + "</code>");
+    return "\u0000" + (codes.length - 1) + "\u0000";
+  });
+  var lines = out.split("\n");
+  var html = [], inList = false;
+  function closeList() { if (inList) { html.push("</ul>"); inList = false; } }
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var h = line.match(/^(#{1,3})\s+(.*)$/);
+    var li = line.match(/^\s*[-*]\s+(.*)$/);
+    if (h) {
+      closeList();
+      html.push("<h4>" + h[2].replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") + "</h4>");
+    } else if (li) {
+      if (!inList) { html.push("<ul>"); inList = true; }
+      html.push("<li>" + li[1].replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") + "</li>");
+    } else if (line.trim() === "") {
+      closeList();
+    } else {
+      closeList();
+      html.push("<div>" + line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") + "</div>");
+    }
+  }
+  closeList();
+  var result = html.join("");
+  // 还原行内码占位。
+  result = result.replace(/\u0000(\d+)\u0000/g, function (_, idx) { return codes[Number(idx)]; });
+  return '<div class="md-body">' + result + "</div>";
+}
+
 const fmtPct = (v) => (v === null || v === undefined ? null : (v * 100).toFixed(1) + "%");
 const fmtNum = (v, d = 2) => (v === null || v === undefined ? null : Number(v).toFixed(d));
 const SENTI = { pos: "正面", neu: "中性", neg: "负面" };
@@ -157,9 +207,12 @@ function assistantHtml() {
         var meta = m.meta
           ? '<div class="meta">' + esc(m.meta) + "</div>"
           : "";
+        // 助手回复可能含 markdown（# 标题、**粗**、- 列表），走 renderMd 渲染；
+        // 用户自己的输入是纯文本，仍用 esc，不把用户输入当 markdown 解释。
+        var body = m.role === "assistant" ? renderMd(m.text) : esc(m.text);
         return '<div class="asst-msg ' + m.role + '"><div class="who">' +
           (m.role === "user" ? "你" : "AI 助手") + '</div><div class="text">' +
-          esc(m.text) + "</div>" + meta + "</div>";
+          body + "</div>" + meta + "</div>";
       }).join("")
     : '<div class="empty">还没有对话。试着问「这期提及率怎么样？」</div>';
   return '<div class="notice" style="margin:0 0 10px">回答基于当前监控对象的<b>真实数据快照</b>，' +

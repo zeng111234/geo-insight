@@ -177,11 +177,18 @@
   });
 
   // 模型头像徽章：所有显示模型名的地方共用，避免纯文字墙。
-  // 显示名与后端 domain/channels.py 的 8 模型一致；头像用 CSS 首字母+品牌色，
-  // 不依赖图片（离线可用、无版权问题）。
+  // 显示名与后端 domain/channels.py 的 8 模型一致；大多数模型用 CSS 首字母+品牌色，
+  // 不依赖图片（离线可用）。DeepSeek 例外：它的标志是那只跃出水面的鲸鱼，
+  // 用字母 D 是错的（用户指出）；这里用内联 SVG 鲸鱼剪影，仍不依赖外部图片。
+  // DeepSeek 鲸鱼：白色身体 + 上方水花，viewBox 适应 20px 圆形头像。
+  var DEEPSEEK_WHALE =
+    '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">' +
+    '<path fill="#fff" d="M2.6 13.9c1.7 0 3-.5 4.2-1.6 1.2-1.1 2.5-1.7 4.2-1.7 2.6 0 4.6 1.9 5 4.4 0 .4.3.7.8.7h1.7l-1.9 2.4c-.3.4-.8.6-1.3.6h-.3c-1.6 0-2.9-.7-3.9-1.9-1.3-1.6-3.2-2.5-5.4-2.5-1.6 0-3 .5-4.2 1.5-.5.4-1.2.4-1.7-.1l-1.1-1.1c-.2-.2-.3-.5-.3-.8 0-.6.5-1.1 1.1-1.1.7 0 1.3.1 1.9.2z"/>' +
+    '<path fill="#fff" d="M15.6 5.2c.3-.3.8-.3 1.1 0l1 1.1 1.2-1c.3-.3.8-.2 1 .1.2.3.2.7-.1 1l-1.1 1 1.2 1.1c.3.3.3.8 0 1.1-.3.3-.8.3-1.1 0l-1.2-1.1-1 1.1c-.3.3-.8.3-1.1 0-.3-.3-.3-.8 0-1.1l1-1.1-1-1c-.3-.3-.3-.8 0-1.1z"/>' +
+    "</svg>";
   var MODEL_META = {
     doubao:   { label: "豆包",      abbr: "豆", color: "#3b6cf0" },
-    deepseek: { label: "DeepSeek",  abbr: "D",  color: "#4d6bfe" },
+    deepseek: { label: "DeepSeek",  abbr: "D",  color: "#4d6bfe", svg: DEEPSEEK_WHALE },
     kimi:     { label: "Kimi",      abbr: "K",  color: "#1f2430" },
     qwen:     { label: "千问",      abbr: "千", color: "#6155d6" },
     yuanbao:  { label: "元宝",      abbr: "元", color: "#e05a4d" },
@@ -192,18 +199,22 @@
   var modelMeta = function (key) {
     return MODEL_META[key] || { label: key || "未知", abbr: (key || "?").slice(0, 1).toUpperCase(), color: "#6c5ce7" };
   };
+  // 头像内容：有 svg（DeepSeek 鲸鱼）用 svg，否则回退转义后的首字母。
+  var modelAvatarHtml = function (m) {
+    return m.svg ? m.svg : esc(m.abbr);
+  };
   // 返回完整 HTML 片段（已 esc），可直接塞进 <td>。
   var modelBadge = function (key) {
     var m = modelMeta(key);
     return '<span class="model-badge"><span class="model-badge-av" style="background:' +
-      esc(m.color) + '">' + esc(m.abbr) + "</span><span>" + esc(m.label) + "</span></span>";
+      esc(m.color) + '">' + modelAvatarHtml(m) + "</span><span>" + esc(m.label) + "</span></span>";
   };
 
   window.GEO = {
     API: API, $: $, esc: esc, pct: pct, metricText: metricText, num: num,
     get: get, post: post, patch: patch, del: del, toast: toast, dates: dates, tracker: tracker,
     fillTrackers: fillTrackers, fail: fail, empty: empty,
-    modelBadge: modelBadge, modelMeta: modelMeta,
+    modelBadge: modelBadge, modelMeta: modelMeta, modelAvatarHtml: modelAvatarHtml,
     pagerInit: pagerInit, pagerReset: pagerReset, pagerNav: pagerNav, pagerSlice: pagerSlice
   };
 })();
