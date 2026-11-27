@@ -445,6 +445,14 @@ python backend/scripts/restore_rehearse.py
 齐全。全程不碰真实 `geo.db` 与 `backups/`。**没验证的是**：真实停服后恢复（脚本用临时库，
 不干扰正在跑的服务）与恢复后的全量 HTTP/浏览器回归——那需要专门停服窗口。
 
+**生产安全加固**：所有响应（含错误响应）带三个安全头——`X-Content-Type-Options: nosniff`、
+`Referrer-Policy: strict-origin-when-cross-origin`、`X-Frame-Options: SAMEORIGIN`
+（系统有 iframe 嵌入场景，故不用 DENY）。CORS 不再用 `*` 通配符：默认只放行本地回环端口
+供调试，生产若有独立前端域名，用 `GEO_CORS_ORIGINS=https://front.example.com`（逗号分隔多个）
+显式列出。7 条单测（`test_security_headers.py`）守着安全头、恶意站点拿不到 CORS 头、
+本地端口兼容、白名单覆盖；两次变异（去掉安全头中间件 / CORS 改回 `*`）都精确红。
+没上 CSP：页面大量内联脚本，需先做 nonce 改造，不在本次范围。
+
 **上线清单**（缺一项就别开公网）：
 
 1. `GEO_ADMIN_PASSWORD` 换成强密码，`GEO_AUTH_REQUIRED=1`；
@@ -458,7 +466,9 @@ python backend/scripts/restore_rehearse.py
 7. 定时备份 timer 已 `enable --now`，两套 unit 的 `GEO_DB_PATH` 一致，手动跑一次确认；
 8. 每日采集 timer 已 `enable --now`，`GEO_COLLECT_EXCLUDE` 含演示对象 ID、
    `GEO_DB_PATH` 与主服务一致，手动 `systemctl start geo-insight-collect` 采一轮确认；
-9. `deploy_rehearse.py` 与 `doctor.py --server` 都退出 0，再 `systemctl enable --now geo-insight`。
+9. 安全头已生效（curl `/health` 看 `x-content-type-options`）；若有独立前端域名，
+   `GEO_CORS_ORIGINS` 配成显式白名单，不要留默认（默认只放行本地端口，生产跨源会失败）；
+10. `deploy_rehearse.py` 与 `doctor.py --server` 都退出 0，再 `systemctl enable --now geo-insight`。
 
 ## 接口
 

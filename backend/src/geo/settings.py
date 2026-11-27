@@ -57,6 +57,13 @@ class Settings:
     # 登录限流(FR-006):连续失败 N 次锁定 M 秒,锁定期内正确密码也拒绝
     login_max_failures: int = int(os.getenv("GEO_LOGIN_MAX_FAILURES", "5"))
     login_lockout_s: int = int(os.getenv("GEO_LOGIN_LOCKOUT_S", "300"))
+    # ---- 安全加固 ----
+    # 允许的跨源来源白名单(逗号分隔)。同源部署不需要跨源,留空即只允许同源;
+    # 本地调试从别的端口打开页面时才需要配。绝不默认 "*"——那是把接口对任意站点敞开。
+    # 生产若要跨源(如独立前端域名),显式列出,例如 https://geo.example.com。
+    cors_origins: tuple[str, ...] = tuple(
+        o.strip() for o in os.getenv("GEO_CORS_ORIGINS", "").split(",") if o.strip()
+    )
 
     # ---- 渠道发布（决策 011：发布通道真实化）----
     # 渠道自动化开关(登录派发 + 发布 worker)。默认开；冒烟/自动化测试设 0:

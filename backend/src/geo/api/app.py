@@ -83,6 +83,27 @@ EXPORT_FIELDS = (
 request_window = observability.RequestWindow()
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """给所有响应加低风险安全头（含 500 错误响应）。
+
+    只加不会弄坏本系统的三个头：
+    - X-Content-Type-Options: nosniff —— 防 MIME 嗅探把 JSON/文本当脚本执行；
+    - Referrer-Policy: strict-origin-when-cross-origin —— 跨源跳转不带完整 URL；
+    - X-Frame-Options: SAMEORIGIN —— 系统有 iframe 嵌入场景（见 monitor.html 剪贴板兜底），
+      所以不用 DENY；同源可嵌、外部站点不能套框架点此页面。
+
+    不加 CSP：页面大量内联 <script>/<style>，直接上 CSP 会全部失效，需引入 nonce
+    改造，超出本次加固范围。宁可少加也别把能用的页面弄崩。
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        return response
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request.state.request_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex
@@ -2379,15 +2400,30 @@ Route(f"{settings.api_prefix}/channels/{{channel_id}}/check", check_channel, met
     ]
     if STATIC_DIR is not None:
         routes.append(Mount("/static", app=StaticFiles(directory=STATIC_DIR), name="static"))
+    # CORS 不再用 "*"：同源部署本不需要跨源头。只有配了 GEO_CORS_ORIGINS 才放行走私来源；
+    # 没配时用 allow_origin_regex 只放行本地回环端口（调试时从别的端口打开页面），
+    # 绝不对任意站点敞开接口。allow_credentials 与显式来源一起才安全。
+    cors_kwargs = dict(
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["X-CSRF-Token", "Content-Type", "X-Request-Id"],
+        allow_credentials=True,
+    )
+    if settings.cors_origins:
+        cors_kwargs["allow_origins"] = list(settings.cors_origins)
+    else:
+        # 未配白名单：仅本地回环端口可跨源，满足开发调试，不留通配符。
+        cors_kwargs["allow_origins"] = []
+        cors_kwargs["allow_origin_regex"] = r"^http://(?:127\.0\.0\.1|localhost):\d+$"
+
     return Starlette(
         routes=routes,
         middleware=[
-            # 顺序有讲究：RequestContext 最外层保证任何响应都有 request_id；
-            # CORS 在 Auth 外面，预检请求不会被鉴权拦掉；Auth 最内层。
+            # 顺序（由外到内）：安全头最外层，任何响应（含 500）都带头；
+            # RequestContext 保证任何响应都有 request_id；CORS 在 Auth 外面，
+            # 预检请求不会被鉴权拦掉；Auth 最内层。
+            Middleware(SecurityHeadersMiddleware),
             Middleware(RequestContextMiddleware),
-            # Same-origin serving makes CORS unnecessary; kept so the page still
-            # works when opened from another local port during debugging.
-            Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]),
+            Middleware(CORSMiddleware, **cors_kwargs),
             Middleware(AuthMiddleware),
             Middleware(CsrfMiddleware),
         ],
