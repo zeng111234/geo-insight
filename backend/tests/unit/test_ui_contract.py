@@ -595,6 +595,17 @@ class ServiceLedgerContractTest(unittest.TestCase):
         input_focus_pos = css.find("input:focus, select:focus")
         self.assertGreater(fv_pos, input_focus_pos, "focus-visible 必须定义在 :focus 之后，否则焦点环被盖")
 
+    def test_intervention_followup_panel(self):
+        """SOP 第三步缺口：采集健康告警后要有人工干预跟进记录（存 settings.interventions）。"""
+        html = (PROJECT_ROOT / "frontend" / "static" / "monitor.html").read_text(encoding="utf-8")
+        self.assertIn("interventionHtml", html, "缺干预面板渲染")
+        self.assertIn("settings: { interventions", html, "干预记录没写进 settings")
+        for t in ("官媒投喂", "三方高权媒体投喂"):
+            self.assertIn(t, html, f"缺干预类型: {t}")
+        self.assertIn("data-int-del", html, "缺删除干预记录入口")
+        # 提示状态不能被重渲染冲掉（踩过这个坑）
+        self.assertIn("preserveInterventionState", html, "缺保留提示标志，保存后用户看不到反馈")
+
 
 if __name__ == "__main__":
     unittest.main()

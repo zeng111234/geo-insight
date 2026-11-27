@@ -1453,17 +1453,100 @@
       "</tr></thead><tbody>" + rows + "</tbody></table></div>";
   }
 
+  // ---- 人工干预跟进（SOP 第三步「专人监测→人工干预」缺口）----
+  // 采集健康页能告警，但告警之后「谁在什么时间做了什么干预」以前没有系统内记录。
+  // 存 tracker.settings.interventions（复用 settings 深合并，不加新表，符合决策 012）。
+  var interventions = [];
+  var interventionState = ""; // 保存/删除后的提示，重渲染后仍保留
+  var preserveInterventionState = false; // add/delete 触发的重渲染要保留提示
+  var INTERVENTION_TYPES = ["官媒投喂", "三方高权媒体投喂", "人工补采", "其它"];
+
+  function interventionHtml() {
+    var list = interventions.length
+      ? interventions.slice().reverse().map(function (it, i) {
+          var idx = interventions.length - 1 - i;
+          return '<div class="kv"><span><span class="tag">' + esc(it.type) + "</span> " +
+            esc(it.note || "（无说明）") +
+            '<span class="muted" style="font-size:var(--fs-caption)"> · ' + esc(it.actor || "未署名") +
+            " · " + esc(String(it.at || "").slice(0, 16).replace("T", " ")) + "</span></span>" +
+            '<button class="small" data-int-del="' + idx + '" title="删除这条记录">×</button></div>';
+        }).join("")
+      : '<div class="empty">还没有干预记录。告警后在这里记下「谁、何时、做了什么」。</div>';
+    return '<div class="rule" style="margin-top:16px">人工干预跟进</div>' +
+      '<div class="muted" style="font-size:var(--fs-caption);margin-bottom:8px">' +
+      '对应 SOP「专人监测、节点预警、人工干预」。只记录真人做过的动作，不假装系统会自动投喂。</div>' +
+      '<div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+      '<label class="muted">类型<br/><select id="intType">' +
+      INTERVENTION_TYPES.map(function (t) { return '<option value="' + esc(t) + '">' + esc(t) + "</option>"; }).join("") +
+      '</select></label>' +
+      '<label class="muted" style="flex:1">说明<br/><input id="intNote" type="text" placeholder="例：已向官媒补投 3 篇，等待收录" /></label>' +
+      '<label class="muted">操作人<br/><input id="intActor" type="text" placeholder="例：运营A" style="width:110px" /></label>' +
+      '<button class="primary" id="intAdd">添加记录</button></div>' +
+      '<div id="intList" style="margin-top:10px">' + list + "</div>" +
+      '<div id="intState" class="muted" style="font-size:var(--fs-caption);margin-top:6px">' +
+      esc(interventionState) + "</div>";
+  }
+
+  function bindIntervention() {
+    var add = document.getElementById("intAdd");
+    if (!add) return;
+    add.addEventListener("click", async function () {
+      var note = document.getElementById("intNote").value.trim();
+      var actor = document.getElementById("intActor").value.trim();
+      if (!note) { G.toast("请填写干预说明", "warn"); return; }
+      var item = {
+        type: document.getElementById("intType").value,
+        note: note, actor: actor, at: new Date().toISOString(),
+      };
+      var next = interventions.concat([item]);
+      try {
+        await G.patch("/trackers/" + state.trackerId, { settings: { interventions: next } });
+        interventions = next;
+        interventionState = "已记录 " + new Date().toLocaleTimeString();
+        preserveInterventionState = true;
+        renderHealthTab();
+      } catch (e) { G.toast("保存干预记录失败：" + e.message, "error"); }
+    });
+    var list = document.getElementById("intList");
+    list.addEventListener("click", async function (e) {
+      var btn = e.target.closest("[data-int-del]");
+      if (!btn) return;
+      var idx = Number(btn.dataset.intDel);
+      var next = interventions.filter(function (_, i) { return i !== idx; });
+      try {
+        await G.patch("/trackers/" + state.trackerId, { settings: { interventions: next } });
+        interventions = next;
+        interventionState = "已删除 " + new Date().toLocaleTimeString();
+        preserveInterventionState = true;
+        renderHealthTab();
+      } catch (err) { G.toast("删除失败：" + err.message, "error"); }
+    });
+  }
+
+  async function loadInterventions() {
+    try {
+      var d = await G.get("/trackers/" + state.trackerId);
+      var arr = d.settings && d.settings.interventions;
+      interventions = Array.isArray(arr) ? arr : [];
+    } catch (e) { interventions = []; }
+    if (!preserveInterventionState) interventionState = "";
+    preserveInterventionState = false;
+  }
+
   async function renderHealthTab() {
     var results = await Promise.all([
       G.get("/trackers/" + state.trackerId + "/collection-health?" + datesF()),
       loadRuns(),
+      loadInterventions(),
     ]);
     var d = results[0], runs = results[1];
     if (!d.configured) {
       $("tabBody").innerHTML = '<div class="tab-pad"><div class="notice warn">' +
         esc(d.message || "采样计划还没配置，无从计算应采数") +
         '<br />去 <a class="plain" href="/settings">设置</a> 配好采样计划与问题后，这里才有可比较的分母。</div>' +
-        '<div style="height:12px"></div>' + failureAlertHtml(d) + runsHtml(runs) + "</div>";
+        '<div style="height:12px"></div>' + failureAlertHtml(d) + runsHtml(runs) +
+        interventionHtml() + "</div>";
+      bindIntervention();
       return;
     }
 
@@ -1532,7 +1615,8 @@
       "</tr></thead><tbody>" + dayRows + "</tbody></table></div>" +
       '<div class="note-line">' + esc(source) +
       " · 没有自动采集调度，缺口需人工补采：<code>python scripts/sample_gaps.py --export gaps.csv</code>" +
-      "</div>" + runsHtml(runs) + "</div>";
+      "</div>" + runsHtml(runs) + interventionHtml() + "</div>";
+    bindIntervention();
   }
 
   // 还没接数据的 tab：写清缺什么，不画假图。
