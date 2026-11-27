@@ -240,9 +240,13 @@ if (location.protocol === "file:") {
           <input type="text" id="newTitle" placeholder="直接用问题做标题，别用品牌口号" />
           <div class="label">正文</div>
           <textarea id="newBody" rows="5" placeholder="开头 100 字先给结论，后面放事实、日期、可核验来源"></textarea>
+          <div class="label">补充素材（可选，AI 生成时一起参考）</div>
+          <textarea id="aiReference" rows="2" placeholder="粘贴要写进去的事实/链接；留空则自动用该题的引用与竞品答案"></textarea>
           <div style="margin-top:9px">
             <button class="primary" id="createArticle">创建草稿</button>
+            <button id="aiGenerate">✦ AI 生成草稿</button>
             <button id="cancelNew">取消</button>
+            <span class="hint" id="aiHint"></span>
           </div>
         </div>
       </div>
@@ -970,6 +974,41 @@ $("createArticle").addEventListener("click", async function () {
     toast("草稿已创建，可以接着改正文");
   } catch (e) {
     toast("创建失败：" + e.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// AI 生成草稿：真调 LLM（后端 collect 素材→生成→落库→记账本）。
+// 诚实边界：失败就显式报错，绝不拿假内容糊弄；生成完也要人工核对再发布。
+$("aiGenerate").addEventListener("click", async function () {
+  const btn = $("aiGenerate"), hint = $("aiHint");
+  btn.disabled = true;
+  hint.textContent = "生成中…（真调 LLM，可能要几秒）";
+  try {
+    const created = await api("/trackers/" + TRACKER + "/articles/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question_id: $("newQuestion").value || null,
+        reference: $("aiReference").value.trim(),
+      }),
+    });
+    $("newPanel").style.display = "none";
+    $("newTitle").value = "";
+    $("newBody").value = "";
+    $("aiReference").value = "";
+    hint.textContent = "";
+    state.articles = (await api("/trackers/" + TRACKER + "/articles")).items || [];
+    await selectArticle(created.id);
+    toast("AI 草稿已生成，请人工核对事实后再发布");
+  } catch (e) {
+    // 后端给的是真原因：无 key 说没配、LLM 失败说失败，不编草稿。
+    const msg = e.status === 503 ? (e.message || "AI 写作暂不可用")
+      : e.status === 404 ? (e.message || "问题或对象不存在")
+      : (e.message || "生成失败");
+    hint.textContent = "";
+    toast("AI 生成失败：" + msg, "error");
   } finally {
     btn.disabled = false;
   }

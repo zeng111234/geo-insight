@@ -436,8 +436,13 @@ def main() -> None:
         # 入口必须在、必须诚实标注未接入、余额必须来自真账本、不得偷带生成动作。
         check("studio shows real credit ledger", "creditBalance" in html
               and "账本是真的" in html, "missing credit ledger badge")
-        for forbidden in ("5 积分", "AI 生成草稿"):
-            check(f"studio has no fake affordance [{forbidden}]", forbidden not in html, {"found": forbidden})
+        # 2026-11-27：AI 生成草稿后端已真接（ffedaa5，真调 LLM+账本+人工审核），
+        # 前端按钮也是真的了——从负向词移到正向契约：入口必须在、必须显式标人工核对。
+        # 不是放宽：旧负向断言只查「没有假按钮」，新断言还要查「真按钮+诚实标注」。
+        check("studio has no fake price", "5 积分" not in html, {"found": "5 积分"})
+        check("studio has real AI generate button", "AI 生成草稿" in html
+              and 'articles/generate' in html and "人工核对" in html,
+              "missing honest AI generate button")
         check("studio states human authorship", "人工成稿" in html, "missing 人工成稿 statement")
 
         # A3 正向契约：每个路由页都注入公共顶栏脚本；打印/详情页排除。

@@ -520,6 +520,7 @@ node scripts/imagecheck.mjs                                   # 8 条 CDP 真点
 node scripts/p3check.mjs                                      # 8 条 CDP 真点：模型×端筛选（选端→URL带client→API/竞品tab请求带client→刷新保持→清除还原，需 Chrome/Edge）
 node scripts/p7check.mjs                                      # 5 条 CDP 真点：19 个监控对象（左栏数→搜索可筛→切空对象显示诚实空态→无 JS 异常）
 node scripts/p5check.mjs                                      # 9 条 CDP 真点：A3 壳（徽章余额=API真账本→AI助手开抽屉明写未接入→无假生成→打印页无按钮）
+node scripts/aigenbuttoncheck.mjs                             # 5 条 CDP 真点：工作室 AI 生成按钮（真调LLM→草稿落库载入编辑器）；需 key，会真花一次调用
 node scripts/loopcheck.mjs                                    # 7 条 CDP 真点：业务闭环（机会页写这篇→正确对象建草稿→演示对象不受影响）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）
 python scripts/deploy_rehearse.py                              # 部署首启演练：临时空库起真服务，验迁移链+seed+13页+4接口
@@ -614,7 +615,12 @@ docs/decisions/                  # 002 不用 Docker、003 不复刻、004 静�
 - ~~CSRF 防护~~ **已补上（003 US3，2026-11-24）**：双提交 cookie（`geo_csrf` + `X-CSRF-Token`
   头，决策 010 的洞清零）+ 登录限流（连续 5 错锁定，`GEO_LOGIN_MAX_FAILURES`/`GEO_LOGIN_LOCKOUT_S`
   可调）。注意 `GEO_AUTH_REQUIRED=0` 时鉴权与 CSRF 一并跳过（自动化检查专用）
-- **AI 成稿与 AI 助手面板**：按决策 003 取消；决策 009 改判为 H2.5 恢复，但**真调 LLM 尚未接**（额度由脚本人工发放）。
+- **AI 成稿**：按决策 003 取消、决策 009 恢复。**2026-11-27 已真接**：工作室新建面板的
+  「✦ AI 生成草稿」真调 DeepSeek LLM（`POST /v1/trackers/{id}/articles/generate`），素材来自
+  该题的引用与竞品答案（可再粘贴补充素材），生成后落 article_fact/六阶段/积分流水，
+  **必须人工核对事实再发布**。无 key 显式报 503「没有配置 LLM key」，LLM 失败报真原因，
+  绝不生成假草稿。key 用现有 DeepSeek（`keys.local.json` / `GEO_DEEPSEEK_API_KEY`），不需新批。
+  AI 助手面板（全局抽屉）仍明写未接入——那是另一条线，不要和真写作按钮混淆。
   积分账本本身已落地，见下。
 
 ### 积分账本（决策 009：账本是真的，定价是假的）

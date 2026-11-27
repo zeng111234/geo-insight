@@ -434,5 +434,26 @@ class ApiPathPrefixContractTest(unittest.TestCase):
         self.assertEqual(html.count("/system/update/"), 5, "更新页 5 个接口路径应都不带 /v1")
 
 
+class AiGenerateButtonContractTest(unittest.TestCase):
+    """工作室 AI 生成草稿按钮：接后端 generate 接口，失败显式报错不假造。
+
+    后端 ffedaa5 落地了 POST /trackers/{id}/articles/generate，前端按钮曾没接。
+    """
+
+    def test_ai_generate_button_wired(self):
+        html = (PROJECT_ROOT / "frontend" / "static" / "studio.html").read_text(encoding="utf-8")
+        self.assertIn('id="aiGenerate"', html, "AI 生成按钮缺失")
+        self.assertIn('id="aiHint"', html, "生成状态提示缺失")
+        self.assertIn('"/articles/generate"', html, "未接后端 generate 接口")
+        self.assertIn("生成中", html, "缺 loading 提示")
+
+    def test_failure_is_honest(self):
+        html = (PROJECT_ROOT / "frontend" / "static" / "studio.html").read_text(encoding="utf-8")
+        self.assertIn("AI 生成失败：", html, "失败没有显式报错")
+        self.assertIn("e.status === 503", html, "无 key 503 没有专门提示")
+        # 不允许静默吞掉错误假装成功
+        self.assertNotIn('catch (e) {}', html)
+
+
 if __name__ == "__main__":
     unittest.main()
