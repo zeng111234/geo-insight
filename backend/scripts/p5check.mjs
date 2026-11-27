@@ -35,14 +35,16 @@ function send(method, params = {}) {
 }
 async function evaluate(expr) {
   const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
-  if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails));
+  if (r.exceptionDetails) {
+    const d = r.exceptionDetails;
+    const msg = (d.exception && d.exception.description) || d.text || "未知 JS 异常";
+    throw new Error("浏览器执行失败: " + String(msg).split("\n")[0].slice(0, 160));
+  }
   return r.result.value;
 }
 const results = [];
 const check = (ok, label, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${label}${extra ? ` (${extra})` : ""}`); };
 try {
-  const apiBalance = (await (await fetch(BASE + "/v1/credits")).json()).balance;
-
   ws = new WebSocket(await target());
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
   ws.onmessage = (e) => {
@@ -60,7 +62,23 @@ try {
   });
 
   await send("Page.navigate", { url: `${BASE}/monitor` });
-  await sleep(3000);
+  await sleep(2500);
+  // 项目默认开鉴权：未登录会 302 到 /login，徽章/按钮都不存在。
+  // 自动登录后再继续；余额也在浏览器里 fetch（带 cookie），不用 Node fetch（会 401）。
+  if (await evaluate(`location.pathname`) === "/login") {
+    await evaluate(`(function(){
+      document.querySelector('input[name=email]').value='demo@example.com';
+      document.querySelector('input[name=password]').value='geo-demo-2026';
+      document.querySelector('form').submit(); return true; })()`);
+    await sleep(2200);
+    await send("Page.navigate", { url: `${BASE}/monitor` });
+    await sleep(2500);
+  }
+  const apiBalance = await evaluate(`(async function(){
+    var r=await fetch('/v1/credits'); if(!r.ok) return -1;
+    return (await r.json()).balance; })()`);
+  // 余额可以为负（AI 生成记 SPEND 但人工还没预充，决策 009 允许），-1 是读取失败哨兵。
+  check(apiBalance !== -1, "API 账本可读（带登录 cookie）", String(apiBalance));
   const badge = await evaluate(`document.getElementById('globalCreditBalance').textContent`);
   check(badge === apiBalance + " 分", "徽章余额 = API 真账本", `${badge} vs ${apiBalance} 分`);
 

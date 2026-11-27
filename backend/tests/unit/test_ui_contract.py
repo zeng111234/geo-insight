@@ -491,5 +491,21 @@ class AssistantDrawerHonestyContractTest(unittest.TestCase):
         self.assertNotIn("AI 能力尚未接入", js, "过时表述还在")
 
 
+class E2EAuthAdaptationContractTest(unittest.TestCase):
+    """所有 CDP E2E 脚本必须适配默认鉴权环境（同类问题出现过 3 次）。
+
+    规则已升级到 .workbuddy/memory/MEMORY.md。这里守脚本不退化。
+    """
+
+    def test_all_e2e_scripts_handle_auth(self):
+        scripts_dir = PROJECT_ROOT / "backend" / "scripts"
+        for name in ("aigenbuttoncheck.mjs", "aifactcheck.mjs", "p5check.mjs", "authflowcheck.mjs"):
+            src = (scripts_dir / name).read_text(encoding="utf-8")
+            self.assertIn('"/login"', src, f"{name} 缺登录页检测")
+            self.assertIn("geo-demo-2026", src, f"{name} 缺自动登录凭据")
+            # 不能有 Node 侧直接 fetch BASE+/v1（不带 cookie 会 401）
+            self.assertNotIn("fetch(BASE + \"/v1/", src, f"{name} 用了 Node fetch 读接口")
+
+
 if __name__ == "__main__":
     unittest.main()

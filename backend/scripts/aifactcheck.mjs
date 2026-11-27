@@ -24,7 +24,18 @@ try {
   await send("Page.enable"); await send("Runtime.enable");
 
   await send("Page.navigate", { url: BASE + "/studio" });
-  await sleep(2600);
+  await sleep(2500);
+  // 项目默认开鉴权：未登录会被 302 到 /login，按钮不存在会报晦涩异常。
+  // 自动登录再继续，鉴权/免鉴权两种环境都能跑。
+  if (await ev(`location.pathname`) === "/login") {
+    await ev(`(function(){
+      document.querySelector('input[name=email]').value='demo@example.com';
+      document.querySelector('input[name=password]').value='geo-demo-2026';
+      document.querySelector('form').submit(); return true; })()`);
+    await sleep(2200);
+    await send("Page.navigate", { url: BASE + "/studio" });
+    await sleep(2500);
+  }
   await ev(`document.getElementById('newArticle').click()`);
   await sleep(1000);
   await ev(`(function(){var s=document.getElementById('newQuestion');if(s.options.length>1){s.selectedIndex=1}return true})()`);
