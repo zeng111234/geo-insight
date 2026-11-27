@@ -506,6 +506,15 @@ class E2EAuthAdaptationContractTest(unittest.TestCase):
             # 不能有 Node 侧直接 fetch BASE+/v1（不带 cookie 会 401）
             self.assertNotIn("fetch(BASE + \"/v1/", src, f"{name} 用了 Node fetch 读接口")
 
+    def test_node_fetch_scripts_handle_auth(self):
+        """pagecheck 是纯 Node fetch 脚本（非浏览器），登录方式不同：POST /login 拿 cookie。"""
+        src = (PROJECT_ROOT / "backend" / "scripts" / "pagecheck.mjs").read_text(encoding="utf-8")
+        self.assertIn('method: "POST"', src, "缺 POST 登录")
+        self.assertIn("geo_session=", src, "缺 session cookie 提取")
+        self.assertIn("Cookie: sessionCookie", src, "请求没带 cookie")
+        self.assertIn("geo-demo-2026", src, "缺登录凭据")
+        self.assertNotIn("fetch(BASE + path)", src, "页面 HTML 请求没带 cookie")
+
 
 class ServiceLedgerContractTest(unittest.TestCase):
     """服务台账与资料归档（SOP 第一步）：轻量内部版，存 tracker.settings。

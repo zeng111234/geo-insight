@@ -9,11 +9,45 @@ import { fileURLToPath } from "node:url";
 const STATIC = fileURLToPath(new URL("../../frontend/static/", import.meta.url));
 const fails = [];
 const need = (c, name) => { if (!c) fails.push(name); console.log((c ? "PASS  " : "FAIL  ") + name); };
+// 项目默认开鉴权：脚本必须在鉴权/免鉴权两种环境都能跑（见 MEMORY.md 规则）。
+// 这是纯 Node fetch 脚本（非浏览器），登录方式是 POST /login 拿 Set-Cookie 后带上。
+let sessionCookie = "";
+const authFetch = (p, init = {}) => fetch(p, {
+  ...init,
+  headers: { ...(init.headers || {}), ...(sessionCookie ? { Cookie: sessionCookie } : {}) },
+  redirect: init.redirect || "follow",
+});
+
+// 首次请求若 401，就自动登录一次；免鉴权环境这里直接返回。
+async function ensureLogin() {
+  const probe = await authFetch(`${API}/meta/methodology`);
+  if (probe.status !== 401) return;
+  const res = await authFetch(`${BASE}/login`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ email: "demo@example.com", password: "geo-demo-2026", next: "/" }).toString(),
+  });
+  const raw = res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get("set-cookie") || ""];
+  const hit = raw.find((c) => c.startsWith("geo_session="));
+  if (!hit) {
+    console.log("FAIL  鉴权服务登录失败，拿不到 session cookie（换密码？服务是否可达？）");
+    process.exit(1);
+  }
+  sessionCookie = hit.split(";")[0];
+  const check = await authFetch(`${API}/meta/methodology`);
+  if (check.status !== 200) {
+    console.log("FAIL  登录后接口仍不可用：" + check.status);
+    process.exit(1);
+  }
+  console.log("PASS  自动登录成功（鉴权环境）");
+}
+await ensureLogin();
+
 const get = async (p) => {
-  const r = await fetch(p);
+  const r = await authFetch(p);
   if (r.status === 401) {
-    console.log("FAIL  服务开启了鉴权，接口返回 401，页面检查拿不到数据。");
-    console.log("      用 GEO_AUTH_REQUIRED=0 python backend/run.py 启动后再跑本脚本。");
+    console.log("FAIL  接口仍返回 401：登录态没带上（cookie 是否被拒？）");
     process.exit(1);
   }
   if (!r.ok) throw new Error(p + " -> " + r.status);
@@ -86,7 +120,7 @@ const PAGES = [
   "/monitor", "/insight", "/opportunities", "/tasks", "/publish", "/assets", "/sources"
 ];
 for (const path of PAGES) {
-  const r = await fetch(BASE + path);
+  const r = await authFetch(BASE + path);
   const html = await r.text();
   const side = (html.match(/<aside class="side">/g) || []).length;
   const active = (html.match(/class="active"/g) || []).length;
