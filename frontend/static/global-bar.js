@@ -2,8 +2,10 @@
  * A3 壳（决策 009，2026-11-26）：全局积分徽章 + AI 助手按钮。
  *
  * 诚实边界：余额只从 /v1/credits 真账本读，失败显示「—」不编数字；
- * AI 助手抽屉明写「需 key，未接入」，没有表单、没有提交、没有假分析。
- * 这不是 AI 功能，是一个承认自己没接 AI 的入口——button 是死的，但话是真话。
+ * AI 助手抽屉明写「需 key，未接入」——指的是助手对话本身没接，没有表单、没有假分析。
+ * 2026-11-27 纠偏：AI 写稿已在内容工作室真接（DeepSeek key 可用），抽屉不能再笼统宣称
+ * 整体 AI 都不可用把用户误导走。这里只承认对话未接，并指路真正可用的写稿入口。
+ * button 是死的，但话必须真——两边都不能说谎。
  *
  * 由 nav.render_page 在服务端统一注入，各页 top 栏 HTML 不动。
  * 打印/详情页（report/pilot/answer）不注入本脚本。
@@ -47,11 +49,13 @@
       '<span class="spacer"></span>' +
       '<button type="button" class="ghost small" id="aiDrawerClose">关闭</button></header>' +
       '<div class="drawer-body">' +
-      '<p><b>需 key，未接入。</b></p>' +
-      '<p class="muted">真调 LLM 需要额度批准，当前版本没有接。这里不会代写内容、' +
-      '不会扣分，也不会假装分析——积分账本是真实的，AI 能力尚未接入。</p>' +
-      '<p class="muted">积分余额可在右上角徽章查看，点开是真实流水；' +
-      '内容成稿在「内容工作室」由人工完成，系统只做事实核对与合规提示。</p>' +
+      '<p><b>助手对话：需 key，未接入。</b></p>' +
+      '<p class="muted">这个助手只会说明接入状态，不做对话问答、不代写内容、' +
+      '不会扣分，也不会假装分析——积分账本是真账本。</p>' +
+      '<p class="muted"><b>AI 写稿已经能用：</b>到「内容工作室」点新建文章，' +
+      '面板里那个带 ✦ 的 AI 按钮会真调 DeepSeek 写出初稿（key 已在本机配置），' +
+      '生成后必须人工核对事实再发布。</p>' +
+      '<p class="muted">积分余额可在右上角徽章查看，点开是真实流水。</p>' +
       "</div>";
     document.body.appendChild(scrim);
     document.body.appendChild(drawer);

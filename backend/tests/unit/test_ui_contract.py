@@ -471,5 +471,25 @@ class E2EScriptAuthContractTest(unittest.TestCase):
         self.assertIn("await ev(`(async function(){", script, "文章数读取未走浏览器 cookie")
 
 
+class AssistantDrawerHonestyContractTest(unittest.TestCase):
+    """助手抽屉文案：助手对话未接是真的，但不能笼统说「AI 能力未接入」。
+
+    2026-11-27：DeepSeek key 已配、工作室 AI 写稿已真接，抽屉还说
+    「内容成稿由人工完成」「AI 能力尚未接入」是反向说假话。
+    """
+
+    def test_drawer_distinguishes_chat_from_writing(self):
+        js = (PROJECT_ROOT / "frontend" / "static" / "global-bar.js").read_text(encoding="utf-8")
+        # 助手对话未接入：守住诚实底线（旧断言不能破）
+        self.assertIn("需 key", js)
+        self.assertIn("未接入", js)
+        self.assertIn("助手对话", js, "没说明未接入的是对话本身")
+        # AI 写稿已真接：必须指路，不能误导用户以为整个系统没 AI
+        self.assertIn("AI 写稿已经能用", js, "没指出 AI 写稿可用")
+        self.assertIn("内容工作室", js, "没指路到真正可用的入口")
+        # 不能再笼统说 AI 能力整体未接入
+        self.assertNotIn("AI 能力尚未接入", js, "过时表述还在")
+
+
 if __name__ == "__main__":
     unittest.main()
