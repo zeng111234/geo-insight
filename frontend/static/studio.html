@@ -155,6 +155,14 @@
   .fact.pending { border-color: var(--amber-line); background: #fffdf7; }
   .fact .claim { line-height: 1.6; margin-bottom: 5px; color: var(--text-body); }
   .fact .src { color: var(--muted); font-size: var(--fs-caption); }
+  .fact .src a { color: var(--accent); text-decoration: none; }
+  .fact .src a:hover { text-decoration: underline; }
+  /* 第一方自述 vs 外部信源：审核者要一眼看出哪些是客户自己说的。 */
+  .source-tag { display:inline-block; font-size:var(--fs-caption); padding:1px 6px;
+    border-radius:999px; margin-right:6px; }
+  .source-tag.firstparty { color:var(--amber-ink); background:var(--amber-tint); }
+  .source-tag.external { color:var(--green-ink); background:var(--green-tint); }
+  .fact-guide { color:var(--muted); font-size:var(--fs-caption); margin-bottom:8px; }
   .fact .verdict { font-size: var(--fs-caption); padding: 1px 7px; border-radius: 999px; margin-bottom: 5px; display: inline-block; }
   .verdict.confirmed { color: var(--green-ink); background: var(--green-tint); }
   .verdict.pending { color: var(--amber-ink); background: var(--amber-tint); }
@@ -539,6 +547,22 @@ async function removeImage(name) {
 }
 
 /* ---------- 右栏：事实 ---------- */
+// 来源分两类：外部可核验 URL vs 第一方自述（客户档案/人工参考）。
+// 审核者必须一眼看出哪些是客户自己说的——那是自述，不是外部佐证。
+function sourceTagHtml(ref) {
+  const s = (ref || "").trim();
+  // 外部信源：整串是 URL，或「名称 — URL」这种带前缀的写法（seed/E2E 都有）。
+  const m = s.match(/(https?:\/\/[^\s）)]+)/i);
+  if (m) {
+    const label = s === m[1] ? m[1] : s;
+    return '<span class="source-tag external">外部信源</span>' +
+      '<a href="' + esc(m[1]) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + "</a>";
+  }
+  if (/客户档案|人工参考/.test(s)) {
+    return '<span class="source-tag firstparty">第一方自述</span>' + esc(s);
+  }
+  return '<span class="source-tag">未标注</span>' + (s ? esc(s) : "无来源记录");
+}
 function renderFacts(a) {
   const facts = a.facts || [];
   const pending = facts.filter((f) => f.verdict === "pending").length;
@@ -547,12 +571,14 @@ function renderFacts(a) {
     $("facts").innerHTML = '<div class="empty">该草稿还没有事实条目。补充来源后可进入审核。</div>';
     return;
   }
-  $("facts").innerHTML = facts.map((f) =>
-    '<div class="fact ' + (f.verdict === "pending" ? "pending" : "") + '">' +
-    '<span class="verdict ' + f.verdict + '">' + (VERDICT_TEXT[f.verdict] || f.verdict) + "</span>" +
-    '<div class="claim">' + esc(f.claim) + "</div>" +
-    '<div class="src">来源：' + esc(f.source_ref || "未标注") + "</div></div>"
-  ).join("");
+  $("facts").innerHTML = '<div class="fact-guide">' +
+    '「第一方自述」是客户登记或人工提供的素材，需人工核实；「外部信源」为可核验原文链接。</div>' +
+    facts.map((f) =>
+      '<div class="fact ' + (f.verdict === "pending" ? "pending" : "") + '">' +
+      '<span class="verdict ' + f.verdict + '">' + (VERDICT_TEXT[f.verdict] || f.verdict) + "</span>" +
+      '<div class="claim">' + esc(f.claim) + "</div>" +
+      '<div class="src">' + sourceTagHtml(f.source_ref) + "</div></div>"
+    ).join("");
 }
 
 /* ---------- 发布通道 ---------- */

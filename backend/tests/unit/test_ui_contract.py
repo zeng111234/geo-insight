@@ -573,6 +573,16 @@ class ServiceLedgerContractTest(unittest.TestCase):
         self.assertIn('href="/files"', html, "缺去资料归档页的引导链接")
         self.assertNotIn("这里记路径", html, "旧的手填路径误导文案还在")
 
+    def test_fact_source_badges_distinguish_firstparty(self):
+        """事实来源要区分第一方自述与外部信源——审核判断需要，别都用灰色小字。"""
+        html = (PROJECT_ROOT / "frontend" / "static" / "studio.html").read_text(encoding="utf-8")
+        self.assertIn("function sourceTagHtml", html, "缺来源分类函数")
+        self.assertIn("source-tag firstparty", html, "缺第一方自述徽章")
+        self.assertIn("source-tag external", html, "缺外部信源徽章")
+        self.assertIn("客户档案|人工参考", html, "第一方自述识别不完整")
+        self.assertIn("rel=\"noopener noreferrer\"", html, "外链缺安全 rel")
+        self.assertIn("需人工核实", html, "缺口径说明")
+
 
 if __name__ == "__main__":
     unittest.main()
