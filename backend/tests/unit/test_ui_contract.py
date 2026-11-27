@@ -606,6 +606,14 @@ class ServiceLedgerContractTest(unittest.TestCase):
         # 提示状态不能被重渲染冲掉（踩过这个坑）
         self.assertIn("preserveInterventionState", html, "缺保留提示标志，保存后用户看不到反馈")
 
+    def test_table2_table3_boundary_notes(self):
+        """SOP 缺口1/2 拍板结果：表二账号与发布渠道、表三词与问题集保持分离，
+        界面必须讲清楚边界，别让用户误以为填了就能发文/就会被采集。"""
+        html = (PROJECT_ROOT / "frontend" / "static" / "settings.html").read_text(encoding="utf-8")
+        self.assertIn("填了不会自动获得发文能力", html, "表二没讲清与发布渠道的边界")
+        self.assertIn('href="/studio"', html, "表二缺去内容工作室连渠道的引导")
+        self.assertIn("不会自动变成被采集的问题", html, "表三没讲清与问题集的边界")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -147,7 +147,11 @@ if (location.protocol === "file:") {
               <textarea id="t1Photos" rows="2" placeholder="例：下周补拍前台实景；荣誉墙照片待客户确认"></textarea></label>
 
             <h3 style="font-size:var(--fs-meta);margin:18px 0 6px;color:var(--text-strong)">表二 · 自媒体账号</h3>
-            <div class="muted" style="font-size: var(--fs-caption);margin-bottom:6px">用于文章投喂的账号，逐条登记。</div>
+            <div class="muted" style="font-size: var(--fs-caption);margin-bottom:6px">
+              客户资料登记用，逐条记录，<b>填了不会自动获得发文能力</b>。<br />
+              真正发文需在内容工作室扫码连接渠道（真人登录），两者是两套：
+              <a class="plain" href="/studio">去内容工作室连接发布渠道 →</a>
+            </div>
             <div id="t2Accounts"></div>
             <div class="row" style="margin-top:6px">
               <input id="t2Platform" type="text" placeholder="平台（例：公众号）" style="flex:1" />
@@ -156,6 +160,10 @@ if (location.protocol === "file:") {
             </div>
 
             <h3 style="font-size:var(--fs-meta);margin:18px 0 6px;color:var(--text-strong)">表三 · GEO 优化词</h3>
+            <div class="muted" style="font-size:var(--fs-caption);margin-bottom:6px">
+              这里是客户约定的优化词记录，<b>不会自动变成被采集的问题</b>。<br />
+              真正被采集的问题在下方「问题集」里维护（核心/长尾分层、采样计划）。
+            </div>
             <label class="field"><span>优化词（逗号分隔，可与核心词不同）</span>
               <input id="t3Words" type="text" placeholder="例：律所，刑事辩护，离婚，交通事故" /></label>
 
