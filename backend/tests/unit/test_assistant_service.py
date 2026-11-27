@@ -57,7 +57,8 @@ GOOD_TEXT = json.dumps({
 class AssistantServiceTest(unittest.TestCase):
     def setUp(self):
         self._dir = tempfile.TemporaryDirectory()
-        self.conn = fixtures.build_minimal_db(Path(self._dir.name) / "assistant.db")
+        self.db_path = Path(self._dir.name) / "assistant.db"
+        self.conn = fixtures.build_minimal_db(self.db_path)
         self.conn.execute(
             """INSERT INTO tracker(id, tenant_id, brand_id, name, keywords, status, created_at, updated_at)
                VALUES (?, ?, ?, '惠策 · GEO服务', 'GEO,AI搜索', 'active', ?, ?)""",
@@ -87,24 +88,31 @@ class AssistantServiceTest(unittest.TestCase):
             self.conn, TRACKER, TENANT, reference="客户提供参考：看案例",
             api_key="sk-test-placeholder", transport=transport,
         )
-        self.conn.commit()
-        self.assertEqual(article["status"], "draft")
-        self.assertEqual(article["title"], "广州GEO服务怎么选")
-        self.assertEqual(article["fact_count"], 2)
-        self.assertEqual(article["source"], "ai_generated_pending_review")
-        # 落库回读
-        facts = self.conn.execute(
-            "SELECT claim, source_ref FROM article_fact WHERE article_id = ? ORDER BY position",
-            (article["id"],),
-        ).fetchall()
-        self.assertEqual(len(facts), 2)
-        self.assertEqual(facts[0]["source_ref"], "https://example.com/geo")
-        stages = self.conn.execute(
-            "SELECT COUNT(*) FROM article_stage WHERE article_id = ?", (article["id"],)
-        ).fetchone()[0]
-        self.assertEqual(stages, 6)
-        # 积分：一次生成记一条 -5，ref 幂等
-        self.assertEqual(credit_service.balance(self.conn, TENANT), -5)
+        # 注意：这里故意不 commit——service 必须自己提交。
+        # 曾经测试里手动 commit 掩盖了"草稿留了、事实和账本回滚"的生产 bug。
+        # 用新连接回读，模拟 API 关闭连接后另一个请求的视角。
+        import sqlite3
+        fresh = sqlite3.connect(str(self.db_path))
+        fresh.row_factory = sqlite3.Row
+        try:
+            self.assertEqual(article["status"], "draft")
+            self.assertEqual(article["title"], "广州GEO服务怎么选")
+            self.assertEqual(article["fact_count"], 2)
+            self.assertEqual(article["source"], "ai_generated_pending_review")
+            facts = fresh.execute(
+                "SELECT claim, source_ref FROM article_fact WHERE article_id = ? ORDER BY position",
+                (article["id"],),
+            ).fetchall()
+            self.assertEqual(len(facts), 2)
+            self.assertEqual(facts[0]["source_ref"], "https://example.com/geo")
+            stages = fresh.execute(
+                "SELECT COUNT(*) FROM article_stage WHERE article_id = ?", (article["id"],)
+            ).fetchone()[0]
+            self.assertEqual(stages, 6)
+            # 积分：一次生成记一条 -5，ref 幂等
+            self.assertEqual(credit_service.balance(fresh, TENANT), -5)
+        finally:
+            fresh.close()
         self.assertEqual(len(transport.calls), 1)
         # 原始响应可回溯
         self.assertTrue(article["raw_uri"])

@@ -314,6 +314,9 @@ def generate_draft(
         ref_id=article["id"],
         actor_label=actor_label,
     )
+    # 必须提交：create_article 内部已 commit 过一次，fact/ledger 是新事务。
+    # 这里不 commit，连接一关就回滚——草稿留了、事实与账本全丢（真踩过）。
+    conn.commit()
     return {
         **article,
         "model_version": generated["model_version"],
