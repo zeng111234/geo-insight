@@ -130,6 +130,37 @@ class AssistantServiceTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "BAD_DRAFT")
         self.conn.rollback()
 
+    def test_foreign_question_rejected_before_spending_money(self):
+        """问题不属于本对象时必须在调 LLM 之前就被拒——不能花完钱才失败。"""
+        foreign = "f0000000-0000-0000-0000-000000000001"
+        foreign_set = "fs000000-0000-0000-0000-000000000001"
+        foreign_tracker = "ft000000-0000-0000-0000-000000000001"
+        self.conn.execute(
+            """INSERT INTO tracker(id, tenant_id, brand_id, name, created_at, updated_at)
+               VALUES (?, ?, ?, '别的对象', ?, ?)""",
+            (foreign_tracker, TENANT, fixtures.BRAND, fixtures.NOW, fixtures.NOW),
+        )
+        self.conn.execute(
+            """INSERT INTO question_set(id, tenant_id, tracker_id, name, created_at)
+               VALUES (?, ?, ?, '别家问题集', ?)""",
+            (foreign_set, TENANT, foreign_tracker, fixtures.NOW),
+        )
+        self.conn.execute(
+            """INSERT INTO question(id, tenant_id, question_set_id, text, normalized_text,
+                                      tier, status, created_at)
+               VALUES (?, ?, ?, '别的对象的问题', '别的对象的问题', 'core', 'active', ?)""",
+            (foreign, TENANT, foreign_set, fixtures.NOW),
+        )
+        self.conn.commit()
+        transport = FakeTransport(writer_body(GOOD_TEXT))
+        with self.assertRaises(assistant_service.AssistantError) as ctx:
+            assistant_service.generate_draft(
+                self.conn, TRACKER, TENANT, question_id=foreign,
+                api_key="sk-test-placeholder", transport=transport,
+            )
+        self.assertEqual(ctx.exception.code, "NOT_FOUND")
+        self.assertEqual(len(transport.calls), 0, "越界问题不该触发 LLM 调用（不能白花钱）")
+
     def test_no_key_is_not_configured(self):
         import os
         from unittest import mock

@@ -218,10 +218,17 @@ def collect_material(
             keywords.append(k)
     question_text = ""
     if question_id:
-        row = conn.execute("SELECT text FROM question WHERE id = ?", (question_id,)).fetchone()
+        # 必须在调 LLM 之前校验归属：否则问题不属于本对象时，钱花完了
+        # 才在 create_article 里被 QuestionNotFoundError 拒掉。边界校验先行。
+        row = conn.execute(
+            """SELECT q.text FROM question q
+               JOIN question_set qs ON qs.id = q.question_set_id
+               JOIN tracker t ON t.active_question_set_id = qs.id
+               WHERE q.id = ? AND t.id = ? AND t.tenant_id = ?""",
+            (question_id, tracker_id, tenant_id),
+        ).fetchone()
         if not row:
-            # 归属校验交给 content_service.create_article；这里只把问题文本带上。
-            raise AssistantError("NOT_FOUND", "问题不存在")
+            raise AssistantError("NOT_FOUND", "问题不存在或不属于当前监控对象的生效问题集")
         question_text = row["text"]
 
     seen, citations = set(), []

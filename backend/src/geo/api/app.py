@@ -960,6 +960,9 @@ async def generate_ai_draft(request: Request):
         except assistant_service.AssistantError as exc:
             status = 404 if exc.code == "NOT_FOUND" else (503 if exc.code.startswith("NOT_") else 502)
             return _error(request, exc.code, exc.message, status)
+        except content_service.QuestionNotFoundError as exc:
+            # 兜底：万一越界问题绕过 collect_material，也不能让用户看到 500。
+            return _error(request, "NOT_FOUND", str(exc), 404)
         return JSONResponse(article, status_code=201)
     except Exception:
         conn.rollback()
