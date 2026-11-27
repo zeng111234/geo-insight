@@ -47,6 +47,7 @@ from geo.services import (
     content_service,
     fact_service,
     mention_service,
+    site_service,
     metric_service,
     opportunity_service,
     publish_service,
@@ -113,7 +114,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 # 登录页、健康检查、图标、静态资源不需要登录。
 # /static 必须放行：登录页自己的 css 就在那儿，否则登录页会裸奔。
 PUBLIC_PATHS = {"/login", "/health", "/favicon.ico"}
-PUBLIC_PREFIXES = ("/static/",)
+# /site/ 是信源落地页（SOP 第三步 AI 转化通道），要能被大模型/真人公开抓取，
+# 所以放行；它只展示服务方登记的品牌信息，不读任何会话态数据。
+PUBLIC_PREFIXES = ("/static/", "/site/")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -1401,6 +1404,24 @@ async def brand_profile(request: Request):
         conn.close()
 
 
+async def site_profile(request: Request):
+    """信源落地页数据（公开）：只读服务方登记的品牌信息，不碰会话态。"""
+    conn = db.connect()
+    try:
+        profile = site_service.build_site_profile(
+            conn, request.path_params["tracker_id"], settings.default_tenant_id
+        )
+        if not profile:
+            return _error(request, "NOT_FOUND", "对象不存在", 404)
+        return JSONResponse(profile)
+    finally:
+        conn.close()
+
+
+async def site_page(request: Request):
+    return FileResponse(STATIC_DIR / "site.html")
+
+
 async def brand_aliases(request: Request):
     payload = await _json_body(request)
     if isinstance(payload, JSONResponse):
@@ -2094,6 +2115,8 @@ def create_app() -> Starlette:
         Route("/assets", _page("assets.html", "assets")),
         Route("/sources", _page("sources.html", "sources")),
         Route("/update", _page("update.html")),
+        Route("/site/{tracker_id}", site_page),
+        Route("/site/{tracker_id}/data", site_profile),
         Route("/favicon.ico", favicon),
         Route("/health", health),
         Route(f"{settings.api_prefix}/meta/methodology", methodology),
