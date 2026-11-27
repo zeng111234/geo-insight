@@ -167,6 +167,11 @@
   .verdict.confirmed { color: var(--green-ink); background: var(--green-tint); }
   .verdict.pending { color: var(--amber-ink); background: var(--amber-tint); }
   .verdict.rejected { color: var(--red-ink); background: var(--red-tint); }
+  /* 人工审核：确认/驳回后写回三态。来源依据选填，留空后端如实标注"人工核实（未附来源）"。 */
+  .fact .review-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:7px; }
+  .fact .review-row input { flex:1; min-width:150px; font-size: var(--fs-caption); padding:3px 7px; }
+  .fact .review-row button { flex:none; }
+  .fact .audit-state { font-size: var(--fs-caption); color: var(--muted); margin-top:5px; }
   .empty { color: var(--muted); font-size: var(--fs-meta); padding: 10px 0; }
   /* 发布区 */
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 14px; box-shadow: var(--shadow); }
@@ -572,13 +577,42 @@ function renderFacts(a) {
     return;
   }
   $("facts").innerHTML = '<div class="fact-guide">' +
-    '「第一方自述」是客户登记或人工提供的素材，需人工核实；「外部信源」为可核验原文链接。</div>' +
+    '「第一方自述」是客户登记或人工提供的素材，需人工核实；「外部信源」为可核验原文链接。' +
+    '核实后填依据（选填）并点「确认」或「驳回」；留空会如实标注为人工核实（未附来源）。</div>' +
     facts.map((f) =>
-      '<div class="fact ' + (f.verdict === "pending" ? "pending" : "") + '">' +
+      '<div class="fact ' + (f.verdict === "pending" ? "pending" : "") + '" data-fact-id="' + esc(f.id) + '">' +
       '<span class="verdict ' + f.verdict + '">' + (VERDICT_TEXT[f.verdict] || f.verdict) + "</span>" +
       '<div class="claim">' + esc(f.claim) + "</div>" +
-      '<div class="src">' + sourceTagHtml(f.source_ref) + "</div></div>"
+      '<div class="src">' + sourceTagHtml(f.source_ref) + "</div>" +
+      '<div class="review-row">' +
+      '<input type="text" class="review-src" data-fact-id="' + esc(f.id) + '" ' +
+      'placeholder="核实依据（选填：URL 或说明）" aria-label="核实依据" ' +
+      'value="' + esc(f.verdict === "pending" ? "" : (f.source_ref || "")) + '" />' +
+      '<button type="button" class="small" data-review="confirmed" data-fact-id="' + esc(f.id) + '">确认</button>' +
+      '<button type="button" class="small ghost" data-review="rejected" data-fact-id="' + esc(f.id) + '">驳回</button>' +
+      (f.verdict === "pending" ? "" :
+        '<button type="button" class="small ghost" data-review="pending" data-fact-id="' + esc(f.id) + '">撤销回待核实</button>') +
+      '</div></div>'
     ).join("");
+}
+
+// 人工审核一条事实：写回三态。来源取该条输入框,留空交给后端如实标注,不伪造来源。
+async function reviewFact(factId, verdict) {
+  if (!state.articleId) return;
+  const input = document.querySelector('.review-src[data-fact-id="' + factId + '"]');
+  const sourceRef = input ? input.value.trim() : "";
+  const body = { verdict: verdict };
+  if (sourceRef) body.source_ref = sourceRef;
+  try {
+    const updated = await api("/articles/" + state.articleId + "/facts/" + encodeURIComponent(factId), {
+      method: "PATCH", body: JSON.stringify(body),
+    });
+    // 以服务端回读为准重渲染,不靠前端猜新的 verdict/source。
+    const article = await api("/articles/" + state.articleId);
+    state.article = article;
+    renderFacts(article);
+    toast("事实已" + (VERDICT_TEXT[updated.verdict] || verdict));
+  } catch (e) { toast("审核失败：" + e.message, "error"); }
 }
 
 /* ---------- 发布通道 ---------- */
@@ -1047,6 +1081,13 @@ $("imageFile").addEventListener("change", async function (e) {
 $("imageGrid").addEventListener("click", function (e) {
   var btn = e.target.closest("[data-del-image]");
   if (btn) removeImage(btn.getAttribute("data-del-image"));
+});
+
+// 事实审核按钮:事件委托,renderFacts 重渲染后仍生效。
+$("facts").addEventListener("click", function (e) {
+  var btn = e.target.closest("[data-review]");
+  if (!btn) return;
+  reviewFact(btn.getAttribute("data-fact-id"), btn.getAttribute("data-review"));
 });
 
 load();
