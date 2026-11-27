@@ -45,6 +45,7 @@ from geo.services import (
     correction_service,
     credit_service,
     content_service,
+    fact_service,
     mention_service,
     metric_service,
     opportunity_service,
@@ -992,6 +993,40 @@ async def article_detail(request: Request):
             article = repo.update_article(conn, article_id, title.strip(), body, _now())
 
         return JSONResponse(article)
+    finally:
+        conn.close()
+
+
+async def review_article_fact(request: Request):
+    """审核一条事实：PATCH /articles/{id}/facts/{fact_id}。
+
+    规格 002 FR-005 要求事实分「已确认/待核实/驳回」三态并可记来源。
+    此前只有 pending → 没有写入口，AI 草稿的事实永远无法核实，审核闭环断裂。
+    """
+    article_id = request.path_params["article_id"]
+    fact_id = request.path_params["fact_id"]
+    conn = db.connect()
+    try:
+        article = repo.get_article(conn, article_id)
+        if not article or article["tenant_id"] != _tenant(request):
+            return _error(request, "NOT_FOUND", "article not found", 404)
+
+        payload = await _json_body(request)
+        if isinstance(payload, JSONResponse):
+            return payload
+        verdict = payload.get("verdict")
+        source_ref = payload.get("source_ref")
+        if source_ref is not None and not isinstance(source_ref, str):
+            return _error(request, "VALIDATION_ERROR", "source_ref must be a string")
+        try:
+            updated = fact_service.review_fact(
+                conn, article_id, fact_id, verdict, source_ref=source_ref
+            )
+        except fact_service.FactError as exc:
+            code = 404 if exc.code == "NOT_FOUND" else 400
+            return _error(request, exc.code, exc.message, code)
+        conn.commit()
+        return JSONResponse(updated)
     finally:
         conn.close()
 
@@ -2164,6 +2199,11 @@ Route(f"{settings.api_prefix}/channels", list_channels),
 Route(f"{settings.api_prefix}/channels/{{channel_id}}/connect", connect_channel, methods=["POST"]),
 Route(f"{settings.api_prefix}/channels/{{channel_id}}/check", check_channel, methods=["POST"]),
         Route(f"{settings.api_prefix}/articles/{{article_id}}", article_detail, methods=["GET", "PATCH"]),
+        Route(
+            f"{settings.api_prefix}/articles/{{article_id}}/facts/{{fact_id}}",
+            review_article_fact,
+            methods=["PATCH"],
+        ),
         Route(
             f"{settings.api_prefix}/articles/{{article_id}}/stages",
             article_stages,
