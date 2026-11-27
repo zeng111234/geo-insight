@@ -138,8 +138,13 @@ if (location.protocol === "file:") {
               <label class="field" style="flex:1"><span>荣誉/头衔</span><input id="t1Honors" type="text" /></label>
               <label class="field" style="flex:1"><span>专业特长</span><input id="t1Expertise" type="text" /></label>
             </div>
-            <label class="field"><span>实景/荣誉照片说明（文件放本地，这里记路径或说明）</span>
-              <textarea id="t1Photos" rows="2" placeholder="例：前台实景3张、荣誉墙5张（本地目录 assets/…）"></textarea></label>
+            <div class="field">
+              <span>实景 / 荣誉照片 <span class="muted" style="font-size:var(--fs-caption)">（实际文件在「客户资料归档」页上传）</span></span>
+              <div id="t1AssetStatus" class="muted" style="font-size:var(--fs-caption);margin:4px 0 6px">归档状态加载中…</div>
+              <a class="plain" href="/files" style="font-size:var(--fs-meta)">去「客户资料归档」上传 →</a>
+            </div>
+            <label class="field"><span>照片补充说明（可选，如拍摄计划；不计入张数）</span>
+              <textarea id="t1Photos" rows="2" placeholder="例：下周补拍前台实景；荣誉墙照片待客户确认"></textarea></label>
 
             <h3 style="font-size:var(--fs-meta);margin:18px 0 6px;color:var(--text-strong)">表二 · 自媒体账号</h3>
             <div class="muted" style="font-size: var(--fs-caption);margin-bottom:6px">用于文章投喂的账号，逐条登记。</div>
@@ -450,6 +455,28 @@ async function loadChannels(id) {
   }).join("");
 }
 
+// 台账里的照片字段只显示真实归档进度，不再让人手填「照片说明」假装登记过。
+// 数据来自 /trackers/{id}/assets 的 checklist（资料归档页同一份真数据）。
+async function loadAssetStatus(id) {
+  const box = $("t1AssetStatus");
+  if (!box) return;
+  try {
+    const d = await api(`/trackers/${id}/assets`);
+    const items = (d.checklist && d.checklist.items) || [];
+    const total = (d.checklist && d.checklist.total) ?? (d.items || []).length;
+    if (!items.length || total === 0) {
+      box.textContent = "还没有归档照片。到「客户资料归档」页上传形象照、实景与荣誉照。";
+      return;
+    }
+    const chips = items.filter((x) => x.target != null).map((x) =>
+      `${x.met ? "✓" : "·"} ${esc(x.label)} ${x.count}/${x.target}`
+    );
+    box.innerHTML = `已归档 <b>${total}</b> 张 · ` + esc(chips.join("　"));
+  } catch (e) {
+    box.textContent = "归档状态读取失败：" + e.message;
+  }
+}
+
 async function load() {
   const id = $("tracker").value;
   if (!id) return;
@@ -458,6 +485,7 @@ async function load() {
     renderDetail(await api(`/trackers/${id}`));
     await loadQuestions();
     await loadChannels(id);
+    await loadAssetStatus(id);
   } catch (e) {
     $("hint").innerHTML = `<div class="notice error">读取失败：${esc(e.message)}</div>`;
   }

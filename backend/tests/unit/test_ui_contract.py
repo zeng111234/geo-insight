@@ -561,6 +561,18 @@ class ServiceLedgerContractTest(unittest.TestCase):
         self.assertIn("def merge_tracker_settings", repo)
         self.assertIn("deep_merge", repo, "必须深合并，否则分次保存表一/表三会互相覆盖")
 
+    def test_ledger_photo_field_points_to_real_assets(self):
+        """台账照片字段不能手填路径假装登记，要显示真实归档进度+引导到 /files。
+
+        隔壁做了资料归档页(files.html)真上传，台账曾留个手填框造成两处脱节。
+        """
+        html = (PROJECT_ROOT / "frontend" / "static" / "settings.html").read_text(encoding="utf-8")
+        self.assertIn('id="t1AssetStatus"', html, "缺真实归档状态展示位")
+        self.assertIn("loadAssetStatus", html, "没拉真实归档数据")
+        self.assertIn("/trackers/${id}/assets", html, "没读 assets 接口")
+        self.assertIn('href="/files"', html, "缺去资料归档页的引导链接")
+        self.assertNotIn("这里记路径", html, "旧的手填路径误导文案还在")
+
 
 if __name__ == "__main__":
     unittest.main()
