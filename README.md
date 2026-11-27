@@ -561,6 +561,7 @@ node scripts/sourcebadgecheck.mjs                             # 6 条 CDP 真点
 node scripts/focuscheck.mjs                                   # 8 条 CDP 真点：真Tab键验证键盘焦点环实色可见、input 焦点环不被 outline:none 盖掉（WCAG 2.4.11）
 node scripts/assistantcheck.mjs                               # 9 条 CDP 真点：AI助手真调DeepSeek(基于真实快照)→回答+扣3分落库；会真花钱，意图层验证必需
 node scripts/securityregressioncheck.mjs                      # 8 条 CDP 真点：安全加固跨切面回归——CORS恶意源拒/本地放行、下载流未被中间件破坏、公开页可访问、三安全头齐全
+node scripts/t3importcheck.mjs                                # 7 条 CDP 真点：表三GEO词填入导入框——拆分去重/不自动导入/不替用户加核心标记/追加不覆盖
 node scripts/interventioncheck.mjs                            # 9 条 CDP 真点：采集健康页人工干预跟进记录——添加/刷新仍在/删除，存 settings.interventions（SOP缺口4）
 node scripts/loopcheck.mjs                                    # 7 条 CDP 真点：业务闭环（机会页写这篇→正确对象建草稿→演示对象不受影响）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）

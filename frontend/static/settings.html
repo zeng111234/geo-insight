@@ -166,6 +166,10 @@ if (location.protocol === "file:") {
             </div>
             <label class="field"><span>优化词（逗号分隔，可与核心词不同）</span>
               <input id="t3Words" type="text" placeholder="例：律所，刑事辩护，离婚，交通事故" /></label>
+            <div class="row" style="margin:-4px 0 0">
+              <button id="t3FillImport" class="ghost small">填入下方导入框 →</button>
+              <span class="muted" style="font-size:var(--fs-caption)">只填文本，不自动导入；词建议改写成完整问句后确认导入</span>
+            </div>
 
             <div class="row" style="margin-top:12px">
               <button class="primary" id="saveLedger">保存台账与资料</button>
@@ -668,6 +672,24 @@ $("importBtn").addEventListener("click", async () => {
     renderDetail(await api(`/trackers/${state.tracker}`));
   } catch (e) { toast("导入失败：" + e.message, "error"); }
   finally { $("importBtn").disabled = false; }
+});
+
+// 表三 GEO 词 → 填入下方导入框：只是省去手动复制，绝不自动导入。
+// 边界：词≠完整问句，不加 *（不替用户决定核心/长尾），填入后由用户审视改写再点导入。
+$("t3FillImport").addEventListener("click", () => {
+  const raw = $("t3Words").value.trim();
+  if (!raw) { toast("表三还没填优化词", "warn"); return; }
+  const words = [...new Set(
+    raw.split(/[,，、;\n；]+/).map((w) => w.trim()).filter(Boolean)
+  )];
+  if (!words.length) { toast("没解析出有效优化词", "warn"); return; }
+  const box = $("importText");
+  const existing = box.value.trim();
+  // 已有内容时不覆盖：追加，避免抹掉用户正在编辑的问题。
+  box.value = (existing ? existing + "\n" : "") + words.join("\n");
+  box.scrollIntoView({ behavior: "smooth", block: "center" });
+  box.focus();
+  toast(`已填入 ${words.length} 个词，请改写成完整问句后点「导入并去重」`);
 });
 
 $("qBody").addEventListener("click", async (e) => {

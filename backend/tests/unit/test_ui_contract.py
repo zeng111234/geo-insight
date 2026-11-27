@@ -614,6 +614,15 @@ class ServiceLedgerContractTest(unittest.TestCase):
         self.assertIn('href="/studio"', html, "表二缺去内容工作室连渠道的引导")
         self.assertIn("不会自动变成被采集的问题", html, "表三没讲清与问题集的边界")
 
+    def test_table3_words_fill_import_box(self):
+        """表三 GEO 词一键填入导入框：只填文本、去重、不自动导入、不替用户加核心标记。"""
+        html = (PROJECT_ROOT / "frontend" / "static" / "settings.html").read_text(encoding="utf-8")
+        self.assertIn('id="t3FillImport"', html, "缺填入导入框按钮")
+        self.assertIn("new Set", html, "缺去重，重复的 GEO 词会被填多次")
+        self.assertIn("不自动导入", html, "没讲清只填文本不导入的边界")
+        # 填入逻辑必须写 importText，不能另建一套隐藏的问题写入
+        self.assertIn('$("importText").value', html, "没填进现有导入框")
+
     def test_ai_assistant_entry_contract(self):
         """E4 助手：工作台有入口、抽屉明示真实数据/真调/扣分，失败冲正在 service 层。"""
         html = (PROJECT_ROOT / "frontend" / "static" / "index.html").read_text(encoding="utf-8")
