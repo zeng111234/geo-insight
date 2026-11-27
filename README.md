@@ -528,6 +528,7 @@ node scripts/ledgersitecheck.mjs                              # 4 条 CDP 真点
 node scripts/ledgerassetcheck.mjs                             # 9 条 CDP 真点：台账照片字段显示真实归档进度，上传后刷新同步（第一步台账↔资料归档闭环）
 node scripts/sourcebadgecheck.mjs                             # 6 条 CDP 真点：事实清单区分「第一方自述」vs「外部信源」徽章+安全外链，审核可判断
 node scripts/focuscheck.mjs                                   # 8 条 CDP 真点：真Tab键验证键盘焦点环实色可见、input 焦点环不被 outline:none 盖掉（WCAG 2.4.11）
+node scripts/assistantcheck.mjs                               # 9 条 CDP 真点：AI助手真调DeepSeek(基于真实快照)→回答+扣3分落库；会真花钱，意图层验证必需
 node scripts/interventioncheck.mjs                            # 9 条 CDP 真点：采集健康页人工干预跟进记录——添加/刷新仍在/删除，存 settings.interventions（SOP缺口4）
 node scripts/loopcheck.mjs                                    # 7 条 CDP 真点：业务闭环（机会页写这篇→正确对象建草稿→演示对象不受影响）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）

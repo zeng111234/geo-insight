@@ -6,6 +6,22 @@
 <link rel="stylesheet" href="/static/theme.css" />
 <link rel="stylesheet" href="/static/app.css" />
 <title>GEO Insight · 工作台</title>
+<style>
+  /* AI 助手抽屉：复用统一 token，气泡区分用户/助手，错误显式标红。 */
+  .asst-log { display:flex; flex-direction:column; gap:10px; max-height:52vh; overflow:auto;
+    padding:2px 4px 6px 0; }
+  .asst-msg { border:1px solid var(--border); border-radius:10px; padding:9px 11px;
+    background:var(--subtle); line-height:1.7; }
+  .asst-msg .who { color:var(--muted); font-size:var(--fs-caption); margin-bottom:3px; }
+  .asst-msg .text { color:var(--text-body); font-size:var(--fs-meta); white-space:pre-wrap; }
+  .asst-msg .meta { color:var(--muted); font-size:var(--fs-caption); margin-top:6px;
+    border-top:1px dashed var(--border); padding-top:5px; }
+  .asst-msg.user { background:var(--accent-weak); border-color:var(--accent-weak); }
+  .asst-msg.error { border-color:var(--red-line); background:var(--red-tint); }
+  .asst-msg.error .who { color:var(--red-ink); }
+  .asst-input { border-top:1px solid var(--border); padding-top:10px; margin-top:10px; }
+  .asst-input textarea { width:100%; line-height:1.6; resize:vertical; }
+</style>
 </head>
 <body>
 <script>
@@ -39,6 +55,7 @@ if (location.protocol === "file:") {
       <input id="from" type="date" value="2026-11-01" aria-label="开始日期" />
       <input id="to" type="date" value="2026-11-30" aria-label="结束日期" />
       <button id="load" class="primary">查询</button>
+      <button id="assistantBtn" class="ghost">AI 助手</button>
       <button id="methodBtn" class="ghost">口径说明</button>
     </header>
 
@@ -125,6 +142,80 @@ function closeDrawer() {
 $("scrim").addEventListener("click", closeDrawer);
 $("drawerClose").addEventListener("click", closeDrawer);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+
+// ---- AI 助手（roadmap E4）：基于系统真实数据回答问题，真调 LLM ----
+// 诚实边界：回答只依据快照真实数据；按钮旁明示每次扣分；失败显式报错不藏。
+var assistantMessages = [];
+var assistantBusy = false;
+
+function assistantHtml() {
+  var msgs = assistantMessages.length
+    ? assistantMessages.map(function (m) {
+        if (m.role === "error") {
+          return '<div class="asst-msg error"><div class="who">请求失败</div><div class="text">' + esc(m.text) + "</div></div>";
+        }
+        var meta = m.meta
+          ? '<div class="meta">' + esc(m.meta) + "</div>"
+          : "";
+        return '<div class="asst-msg ' + m.role + '"><div class="who">' +
+          (m.role === "user" ? "你" : "AI 助手") + '</div><div class="text">' +
+          esc(m.text) + "</div>" + meta + "</div>";
+      }).join("")
+    : '<div class="empty">还没有对话。试着问「这期提及率怎么样？」</div>';
+  return '<div class="notice" style="margin:0 0 10px">回答基于当前监控对象的<b>真实数据快照</b>，' +
+    '由 <b>DeepSeek</b> 实时生成；每次提问扣 <b>3 分</b>（余额 = 积分流水求和，可点右上积分徽章查看）。' +
+    '数据不足时助手会直说，不会编造。</div>' +
+    '<div id="asstLog" class="asst-log">' + msgs + "</div>" +
+    '<div class="asst-input">' +
+    '<textarea id="asstQuestion" rows="3" placeholder="例：这期提及率怎么样？哪些问题没被提到？"></textarea>' +
+    '<div class="row" style="margin-top:6px">' +
+    '<button class="primary" id="asstSend">发送（扣 3 分）</button>' +
+    '<span class="muted" id="asstState" style="font-size:var(--fs-caption)"></span>' +
+    "</div></div>";
+}
+
+function renderAssistant() {
+  $("drawerBody").innerHTML = assistantHtml();
+  var log = $("asstLog");
+  if (log) log.scrollTop = log.scrollHeight;
+  var send = $("asstSend");
+  if (!send) return;
+  send.addEventListener("click", sendAssistant);
+  $("asstQuestion").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendAssistant(); }
+  });
+}
+
+async function sendAssistant() {
+  if (assistantBusy) return;
+  var input = $("asstQuestion");
+  var question = (input ? input.value : "").trim();
+  if (!question) { toast("先写个问题", "warn"); return; }
+  if (!state.tracker) { toast("先选一个监控对象", "warn"); return; }
+  assistantBusy = true;
+  assistantMessages.push({ role: "user", text: question });
+  input.value = "";
+  $("asstState").textContent = "正在基于真实数据回答…";
+  renderAssistant();
+  try {
+    var data = await GEO.post("/assistant/ask", { question: question, tracker_id: state.tracker });
+    assistantMessages.push({
+      role: "assistant", text: data.answer,
+      meta: "扣 " + data.cost + " 分 · 余额 " + data.balance + " 分" +
+        (data.snapshot_period ? " · 数据区间 " + data.snapshot_period.from + "～" + data.snapshot_period.to : ""),
+    });
+  } catch (e) {
+    assistantMessages.push({ role: "error", text: e.message || "请求失败" });
+  } finally {
+    assistantBusy = false;
+    renderAssistant();
+  }
+}
+
+$("assistantBtn").addEventListener("click", function () {
+  openDrawer("AI 助手", "基于系统真实数据 · 真调 DeepSeek", assistantHtml());
+  renderAssistant();
+});
 
 function card(label, metric, opts = {}) {
   if (!metric) return "";

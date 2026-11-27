@@ -614,6 +614,19 @@ class ServiceLedgerContractTest(unittest.TestCase):
         self.assertIn('href="/studio"', html, "表二缺去内容工作室连渠道的引导")
         self.assertIn("不会自动变成被采集的问题", html, "表三没讲清与问题集的边界")
 
+    def test_ai_assistant_entry_contract(self):
+        """E4 助手：工作台有入口、抽屉明示真实数据/真调/扣分，失败冲正在 service 层。"""
+        html = (PROJECT_ROOT / "frontend" / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="assistantBtn"', html, "工作台缺助手入口")
+        self.assertIn('GEO.post("/assistant/ask"', html, "助手没调真实接口")
+        self.assertIn("真实数据快照", html, "没明示数据来自真实快照")
+        self.assertIn("DeepSeek", html, "没明示真调 LLM")
+        self.assertIn("扣 3 分", html, "没明示扣分成本")
+        billing = (PROJECT_ROOT / "backend" / "src" / "geo" / "services" / "assistant_billing_service.py").read_text(encoding="utf-8")
+        self.assertIn("conn.commit()", billing, "计费必须提交，否则流水回滚")
+        self.assertIn("REVERSAL", billing, "失败必须冲正")
+        self.assertIn("credits_domain.SPEND", billing, "试点未预充要用 record(SPEND)，不能用 spend() 挡住")
+
 
 if __name__ == "__main__":
     unittest.main()

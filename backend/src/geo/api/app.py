@@ -1825,6 +1825,44 @@ async def credits_overview(request: Request):
         conn.close()
 
 
+async def assistant_ask(request: Request):
+    """AI 助手：基于系统真实数据快照回答问题，真调 LLM 并记积分流水。
+
+    计费闭环（扣费/冲正）在 assistant_billing_service，API 只做参数校验。
+    快照只来自库里真实数据，回答不臆造。
+    """
+    from geo.services import assistant_billing_service as billing
+    from geo.services import assistant_chat_service as chat
+
+    payload = await _json_body(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+    question = str(payload.get("question") or "").strip()
+    if not question:
+        return _error(request, "VALIDATION_ERROR", "question must not be empty")
+    if len(question) > 1000:
+        return _error(request, "VALIDATION_ERROR", "question too long (max 1000)")
+    tracker_id = str(payload.get("tracker_id") or "").strip()
+
+    if not chat.available():
+        return _error(request, "NOT_CONFIGURED", "没有配置 LLM key，AI 助手不可用", 503)
+
+    conn = db.connect()
+    try:
+        result = billing.ask_with_billing(
+            conn, _tenant(request), tracker_id, question,
+            actor_label=_actor_id(request) or "assistant",
+        )
+        return JSONResponse(result)
+    except billing.BillingError as exc:
+        status = 404 if exc.code == "NOT_FOUND" else (
+            503 if exc.code.startswith("NOT_") else 502
+        )
+        return _error(request, exc.code, exc.message, status)
+    finally:
+        conn.close()
+
+
 async def meta_channels(request: Request):
     """模型 × 端 16 渠道清单（决策 009 验收点）。不查库，纯口径。"""
     items = channels_domain.channel_list()
@@ -2209,6 +2247,7 @@ def create_app() -> Starlette:
         Route(f"{settings.api_prefix}/meta/methodology", methodology),
         Route(f"{settings.api_prefix}/meta/channels", meta_channels),
         Route(f"{settings.api_prefix}/credits", credits_overview),
+        Route(f"{settings.api_prefix}/assistant/ask", assistant_ask, methods=["POST"]),
         Route(
             f"{settings.api_prefix}/trackers/{{tracker_id}}/metrics/channels",
             metrics_channels,
