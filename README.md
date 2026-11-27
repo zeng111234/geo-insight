@@ -398,6 +398,25 @@ playwright 1.61.0 及传递依赖）。为什么不能直接装宽松声明：`>
 6 条测试守着「直接/传递依赖齐全、每行精确 pin、不含测试依赖、与宽松声明不打架」。
 升级依赖的做法：本地先跑全量回归，绿了再更新 lock 的 pin。
 
+**每日真实采集**：`infra/geo-insight-collect.service` + `.timer` 每天 09:00 跑
+`collect.py --all`，遍历所有监控对象、各按自己的采样计划补当天缺口（不硬编码对象 ID，
+新加的对象自动纳入；`--loop --rounds 1` 跑完即退、缺口 0 时零 API 调用）。
+演示基线对象用 `GEO_COLLECT_EXCLUDE` 排除（unit 里写明 ID 和原因），不污染已验收口径；
+真实采集对象（试点/惠策/勋证等）都会被采。安装：
+
+```bash
+sudo cp infra/geo-insight-collect.* /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now geo-insight-collect.timer
+systemctl list-timers geo-insight-collect.timer     # 确认下次触发时间
+sudo systemctl start geo-insight-collect            # 手动验一次，看 journalctl
+```
+
+**这是服务器侧的采集调度**——部署到服务器后系统自己每天采，不依赖 WorkBuddy 的定时任务。
+WorkBuddy 里的同名每日任务只是开发机辅助（仅试点对象），与服务器采集互不替代。
+`.timer` 未在真实 Linux 实机验证（与 backup.timer 同构），首次部署手动 start 确认。
+`GEO_DB_PATH` 必须与主服务/备份 unit 一致。5 条单测守着排除生效、新对象自动纳入、
+单对象失败不传染、有失败退出码 2（`test_collect_cli_all.py`），变异验证过。
+
 **定时备份**：`infra/geo-insight-backup.service` + `.timer` 每天 03:17 跑 `backup.py --keep 7`，
 `Persistent=true` 保证宕机那天的备份在开机后补跑。备份用 `VACUUM INTO` 读一致性快照，
 **服务不用停**；恢复才要先停服务。安装：
@@ -437,7 +456,9 @@ python backend/scripts/restore_rehearse.py
 6. 业务日期按北京时间算，不跟服务器时区（`date.today()` 在 UTC 机器上凌晨会错一天；
    采集/指标已用 `business_time` + `substr` 收口，见决策 007）；
 7. 定时备份 timer 已 `enable --now`，两套 unit 的 `GEO_DB_PATH` 一致，手动跑一次确认；
-8. `deploy_rehearse.py` 与 `doctor.py --server` 都退出 0，再 `systemctl enable --now geo-insight`。
+8. 每日采集 timer 已 `enable --now`，`GEO_COLLECT_EXCLUDE` 含演示对象 ID、
+   `GEO_DB_PATH` 与主服务一致，手动 `systemctl start geo-insight-collect` 采一轮确认；
+9. `deploy_rehearse.py` 与 `doctor.py --server` 都退出 0，再 `systemctl enable --now geo-insight`。
 
 ## 接口
 

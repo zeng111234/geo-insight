@@ -5,6 +5,10 @@
     python scripts/collect.py --list
     python scripts/collect.py --question "沈阳哪一家律所最专业" --model doubao
     python scripts/collect.py --limit 5 --model kimi
+    # 批量：对所有需要采集的对象各跑一轮（systemd 每日任务用这个，不硬编码对象 ID）
+    python scripts/collect.py --all --model deepseek --collector deepseek --loop --rounds 1
+    # 排除演示对象（避免污染已验收口径）：
+    #   GEO_COLLECT_EXCLUDE=<id1>,<id2> python scripts/collect.py --all --model deepseek
 
 没有平台 API 权限时，先设好离线答案库再跑，用来演练整条链路：
 
@@ -47,10 +51,61 @@ def show_collectors() -> int:
     return 0
 
 
+def run_all(conn, args) -> int:
+    """对所有需要采集的对象各跑一轮（systemd 每日任务的入口）。
+
+    设计要点：
+    - 不硬编码对象 ID：新加的对象自动纳入，不用改脚本或定时任务；
+    - 用 GEO_COLLECT_EXCLUDE 排除演示基线等不该采的对象（systemd 模板里写明原因）；
+    - 每个对象各自按自己的采样计划补当天缺口，重复跑不重复采（fill_gaps 的缺口语义）；
+    - 一个对象失败不影响其它对象，汇总后按"有无失败"决定退出码。
+    """
+    excluded = {x.strip() for x in (os.getenv("GEO_COLLECT_EXCLUDE") or "").split(",") if x.strip()}
+    trackers = [
+        t for t in repo.list_trackers(conn, settings.default_tenant_id)
+        if t["id"] not in excluded
+    ]
+    if not trackers:
+        print("[x] 没有可采集的对象（都被 GEO_COLLECT_EXCLUDE 排除了？）", file=sys.stderr)
+        return 1
+
+    total_inserted = total_failed = 0
+    skipped = []
+    for t in trackers:
+        tid = t["id"]
+        try:
+            stats = collect_service.fill_gaps(
+                conn, tracker_id=tid, model_key=args.model,
+                force=args.force, collector_key=args.collector,
+            )
+        except ValueError as exc:
+            # 没采样计划 / 没启用问题——跳过这个对象，不让它拖累其它对象。
+            skipped.append((t["name"], str(exc)))
+            continue
+        total_inserted += stats["inserted"]
+        total_failed += stats["failed"]
+        print(
+            f"  {t['name']:<24} 缺口 {stats['planned_missing']} → 补采 {stats['inserted']}，"
+            f"失败 {stats['failed']}，今日还差 {stats['remaining_missing']}"
+        )
+        for err in stats["errors"][:3]:
+            print(f"      ! [{err['code']}] {err['question'][:20]}  {err['message'][:70]}")
+    for name, reason in skipped:
+        print(f"  - {name:<24} 跳过：{reason}")
+    if excluded:
+        print(f"  （按 GEO_COLLECT_EXCLUDE 排除 {len(excluded)} 个对象）")
+    print(f"\n合计：补采 {total_inserted}，失败 {total_failed}，跳过 {len(skipped)}")
+    return 2 if total_failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="采一条答案并落库")
     parser.add_argument("--list", action="store_true", help="列出采集器")
     parser.add_argument("--tracker", default=None, help="监控对象 id，默认取第一个")
+    parser.add_argument("--all", action="store_true",
+                        help="对所有对象各跑一轮（配合 --loop --rounds 1）。"
+                             "用 GEO_COLLECT_EXCLUDE=id1,id2 排除不想采的对象（如演示基线）。"
+                             "新加的对象自动纳入，无需改脚本或定时任务")
     parser.add_argument("--question", default=None, help="问题原文")
     parser.add_argument("--model", default=None, help="模型 key，例如 doubao")
     parser.add_argument("--collector", default=None, help="采集器 key，默认取第一个可用的")
@@ -90,6 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     db.init_db()
     conn = db.connect()
     try:
+        if args.all:
+            if args.tracker or args.question:
+                print("[x] --all 不能与 --tracker/--question 同用", file=sys.stderr)
+                return 1
+            return run_all(conn, args)
         tracker_id = args.tracker
         if not tracker_id:
             tracker = import_repo.default_tracker(conn, settings.default_tenant_id)

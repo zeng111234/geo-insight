@@ -1,0 +1,24 @@
+# 每天 09:00 跑一轮真实采集（所有监控对象，排除演示基线）。
+# 选 09:00 是工作时间开始，采集完当天就能看板看到；备份在 03:17，两者错开。
+#
+# 安装：
+#   sudo cp infra/geo-insight-collect.* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now geo-insight-collect.timer
+#   systemctl list-timers geo-insight-collect.timer   # 确认下次触发时间
+#   sudo journalctl -u geo-insight-collect.service -f # 看采集日志
+#
+# 未在真实 Linux 实机验证：按 systemd 标准写法给出（与已交付的 backup.timer 同构），
+# 首次部署用上面 list-timers 和手动 start 确认一遍再放手。
+
+[Unit]
+Description=Daily GEO Insight real collection (all monitored trackers)
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+# 服务器 09:00 关机/宕机，开机后补跑一次，避免"那天空过去了却没采集"。
+# fill_gaps 按当天缺口补采，补跑不会重复采（当天已采满则缺口 0）。
+Persistent=true
+
+[Install]
+WantedBy=timers.target

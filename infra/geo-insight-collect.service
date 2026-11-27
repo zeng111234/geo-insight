@@ -1,0 +1,36 @@
+# 每日真实采集任务，由 geo-insight-collect.timer 触发。也可手动：
+#   sudo systemctl start geo-insight-collect
+#
+# 用 collect.py --all：遍历所有监控对象各跑一轮，按各自采样计划补当天缺口。
+# 新加的对象（如辽宁勋证律师事务所）自动纳入，无需改这里或定时任务——
+# 这是相对"把对象 ID 硬编码进命令"的关键改进。
+#
+# GEO_COLLECT_EXCLUDE：排除不该采的演示基线对象。这两个是 seed 灌的演示数据
+# （辽征主对象 1302 条、华辰教育），口径已验收，采了会污染演示/真实的分界。
+# 真实采集对象：试点基线、惠策、勋证，以及以后新加的对象。
+# 环境变量（GEO_DB_PATH 等）必须与 geo-insight.service / 备份 unit 保持一致。
+
+[Unit]
+Description=GEO Insight daily real collection (DeepSeek, all monitored trackers)
+Documentation=file:/opt/geo-insight/README.md
+# 采集要连数据库；备份同时跑会抢锁，错开时间即可（采集 09:00，备份 03:17）
+
+[Service]
+Type=oneshot
+User=geo
+WorkingDirectory=/opt/geo-insight/backend
+
+# 必须与 geo-insight.service、geo-insight-backup.service 相同；没设就删掉这行用默认（项目根 geo.db）
+Environment=GEO_DB_PATH=/var/lib/geo-insight/geo.db
+# 排除演示基线对象（ID 用逗号分隔）；新增对象不用动这里
+Environment=GEO_COLLECT_EXCLUDE=11111111-1111-1111-1111-111111111111,11111111-1111-1111-1111-111111111112
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+
+# key 从 backend/data/keys.local.json 读（deepseek 字段），或设 GEO_DEEPSEEK_API_KEY。
+# --loop --rounds 1：跑一轮按缺口补采后退出 0，适合定时任务；不加 --force（不超当天计划量）。
+# 联网搜索走已有 token 额度，不另计费。
+ExecStart=/opt/geo-insight/.venv/bin/python scripts/collect.py --all --model deepseek --collector deepseek --loop --rounds 1
+
+# 单条采集失败脚本内部会计入 failed 并继续采其它条；整轮有失败时退出码 2，
+# systemd 记为 failed——这是对的，宁可报警也不要静默漏采。
