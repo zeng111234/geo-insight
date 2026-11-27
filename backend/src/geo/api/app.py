@@ -1335,6 +1335,14 @@ async def tracker_detail(request: Request):
                     tracker_service.update_active_keywords(conn, tracker_id, tenant_id, words)
                 except tracker_service.QuestionSetError as e:
                     return _error(request, "QUESTION_SET_ERROR", str(e), 400)
+            # 服务台账/资料归档：存 tracker.settings JSON，深合并不丢 website。
+            # 轻量内部版（决策 012）：单租户、单对象，不做多客户/角色隔离。
+            if "settings" in payload:
+                if not isinstance(payload["settings"], dict):
+                    return _error(request, "VALIDATION_ERROR", "settings must be an object")
+                config_repo.merge_tracker_settings(
+                    conn, tracker_id, tenant_id, payload["settings"], _now()
+                )
             updated = config_repo.update_tracker(
                 conn,
                 tracker_id,

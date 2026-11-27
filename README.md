@@ -523,6 +523,8 @@ node scripts/p5check.mjs                                      # 9 条 CDP 真点
 node scripts/aigenbuttoncheck.mjs                             # 5 条 CDP 真点：工作室 AI 生成按钮（真调LLM→草稿落库载入编辑器）；需 key，会真花一次调用
 node scripts/authflowcheck.mjs                                # 5 条 CDP 真点：真实用户路径（登录→工作室→AI生成→草稿落库）；默认开鉴权，会真花一次调用
 node scripts/aifactcheck.mjs                                  # 7 条 CDP 真点：AI草稿事实+积分流水真落库（守住 commit 修复，去掉commit→6条红）；会真花一次调用
+node scripts/ledgercheck.mjs                                  # 10 条 CDP 真点：服务台账+表一/二/三保存后刷新仍在（settings深合并、不丢官网）
+node scripts/ledgersitecheck.mjs                              # 4 条 CDP 真点：台账电话/官网/简介 → 公开信源落地页读出（SOP第一步→第三步闭环）
 node scripts/loopcheck.mjs                                    # 7 条 CDP 真点：业务闭环（机会页写这篇→正确对象建草稿→演示对象不受影响）
 node scripts/freshcheck.mjs                                   # 服务/工作区代码版本一致性（旧进程假红灯的机器判据）
 python scripts/deploy_rehearse.py                              # 部署首启演练：临时空库起真服务，验迁移链+seed+13页+4接口

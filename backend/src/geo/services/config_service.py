@@ -166,6 +166,7 @@ def tracker_detail(conn: sqlite3.Connection, tracker_id: str, tenant_id: str) ->
         extra = json.loads(tracker.get("settings") or "{}")
     except (TypeError, ValueError):
         extra = {}
+    tracker["settings"] = extra if isinstance(extra, dict) else {}
     tracker["website"] = extra.get("website", "") if isinstance(extra, dict) else ""
     tracker["question_summary"] = repo.question_summary(conn, tracker_id)
     profile = config.get_brand_profile(conn, tracker_id, tenant_id) or {}

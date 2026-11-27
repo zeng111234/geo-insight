@@ -108,6 +108,59 @@ if (location.protocol === "file:") {
           </div>
         </section>
 
+        <section class="panel" id="ledgerPanel">
+          <h2>服务台账与资料归档 <span class="badge">对应服务流程表一/二/三</span></h2>
+          <div class="body">
+            <div class="muted" style="font-size: var(--fs-caption);margin-bottom:10px">
+              记录客户服务的台账与开户资料。数据存在本对象下，仅本机内部使用；不新增客户、不做多租户。
+            </div>
+
+            <h3 style="font-size:var(--fs-meta);margin:12px 0 6px;color:var(--text-strong)">服务台账</h3>
+            <div class="row">
+              <label class="field" style="flex:1"><span>服务套餐</span><input id="ldgPackage" type="text" placeholder="例：标准版" /></label>
+              <label class="field" style="flex:1"><span>价格（元）</span><input id="ldgPrice" type="number" min="0" placeholder="例：9800" /></label>
+            </div>
+            <div class="row">
+              <label class="field" style="flex:1"><span>服务开始时间</span><input id="ldgStart" type="date" /></label>
+              <label class="field" style="flex:1"><span>对接负责人</span><input id="ldgOwner" type="text" placeholder="例：运营A" /></label>
+            </div>
+            <div class="row">
+              <label class="field" style="flex:1"><span>客户电话</span><input id="ldgPhone" type="text" placeholder="用于转化落地页" /></label>
+              <label class="field" style="flex:1"><span>官网</span><input id="ldgWebsite" type="url" placeholder="https://" /></label>
+            </div>
+
+            <h3 style="font-size:var(--fs-meta);margin:18px 0 6px;color:var(--text-strong)">表一 · 律所/律师简介</h3>
+            <label class="field"><span>基本信息与服务理念</span>
+              <textarea id="t1Intro" rows="3" placeholder="基本信息介绍、服务理念等"></textarea></label>
+            <label class="field"><span>成功案例</span>
+              <textarea id="t1Cases" rows="2" placeholder="每行一条"></textarea></label>
+            <div class="row">
+              <label class="field" style="flex:1"><span>荣誉/头衔</span><input id="t1Honors" type="text" /></label>
+              <label class="field" style="flex:1"><span>专业特长</span><input id="t1Expertise" type="text" /></label>
+            </div>
+            <label class="field"><span>实景/荣誉照片说明（文件放本地，这里记路径或说明）</span>
+              <textarea id="t1Photos" rows="2" placeholder="例：前台实景3张、荣誉墙5张（本地目录 assets/…）"></textarea></label>
+
+            <h3 style="font-size:var(--fs-meta);margin:18px 0 6px;color:var(--text-strong)">表二 · 自媒体账号</h3>
+            <div class="muted" style="font-size: var(--fs-caption);margin-bottom:6px">用于文章投喂的账号，逐条登记。</div>
+            <div id="t2Accounts"></div>
+            <div class="row" style="margin-top:6px">
+              <input id="t2Platform" type="text" placeholder="平台（例：公众号）" style="flex:1" />
+              <input id="t2Name" type="text" placeholder="账号名" style="flex:1" />
+              <button id="t2Add">添加账号</button>
+            </div>
+
+            <h3 style="font-size:var(--fs-meta);margin:18px 0 6px;color:var(--text-strong)">表三 · GEO 优化词</h3>
+            <label class="field"><span>优化词（逗号分隔，可与核心词不同）</span>
+              <input id="t3Words" type="text" placeholder="例：律所，刑事辩护，离婚，交通事故" /></label>
+
+            <div class="row" style="margin-top:12px">
+              <button class="primary" id="saveLedger">保存台账与资料</button>
+              <span class="muted" id="ledgerState"></span>
+            </div>
+          </div>
+        </section>
+
         <section class="panel">
           <h2>问题集 <span class="badge" id="qSummary"></span></h2>
           <div class="body">
@@ -289,6 +342,7 @@ function renderDetail(d) {
   $("industry").value = d.industry || "";
   $("region").value = d.region || "";
   $("keywords").value = (d.keywords || []).join("，");
+  renderLedger(d.settings || {});
   $("statusBadge").textContent = STATUS_TEXT[d.status] || d.status;
   $("scope").textContent = [d.brand.name, d.industry, d.region].filter(Boolean).join(" · ");
 
@@ -425,6 +479,88 @@ function updateExport() {
     if (!state.tracker) { return; }
     window.location.href = exportUrl(fmt);
   });
+});
+
+// ---- 服务台账与资料归档（表一/表二/表三）----
+// 数据存 tracker.settings 的 service / assets 两个子对象，深合并不丢 website。
+let t2Accounts = [];
+
+function renderLedger(settings) {
+  const s = settings.service || {};
+  const a = settings.assets || {};
+  const t1 = a.table1 || {};
+  const t3 = a.table3 || {};
+  $("ldgPackage").value = s.package || "";
+  $("ldgPrice").value = s.price ?? "";
+  $("ldgStart").value = s.start_date || "";
+  $("ldgOwner").value = s.owner || "";
+  $("ldgPhone").value = s.phone || "";
+  $("ldgWebsite").value = s.website || d_website(settings);
+  $("t1Intro").value = t1.intro || "";
+  $("t1Cases").value = (t1.cases || []).join("\n");
+  $("t1Honors").value = t1.honors || "";
+  $("t1Expertise").value = t1.expertise || "";
+  $("t1Photos").value = t1.photos || "";
+  t2Accounts = Array.isArray(a.table2?.accounts) ? a.table2.accounts.slice() : [];
+  $("t3Words").value = t3.geo_words || "";
+  renderT2();
+  $("ledgerState").textContent = "";
+}
+
+// 兼容：老对象的官网存在 settings.website 顶层（create 时写的）
+function d_website(settings) { return settings.website || ""; }
+
+function renderT2() {
+  $("t2Accounts").innerHTML = t2Accounts.length
+    ? t2Accounts.map((acc, i) => `<div class="kv"><span>${esc(acc.platform)} · ${esc(acc.name)}</span>
+        <button class="small" data-t2del="${i}" title="删除账号">×</button></div>`).join("")
+    : '<div class="muted" style="font-size:var(--fs-label)">还没有登记账号</div>';
+}
+
+$("t2Add").addEventListener("click", () => {
+  const platform = $("t2Platform").value.trim(), name = $("t2Name").value.trim();
+  if (!platform || !name) { toast("平台和账号名都要填", "warn"); return; }
+  t2Accounts.push({ platform, name });
+  $("t2Platform").value = ""; $("t2Name").value = "";
+  renderT2();
+});
+$("t2Accounts").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-t2del]");
+  if (!btn) return;
+  t2Accounts.splice(Number(btn.dataset.t2del), 1);
+  renderT2();
+});
+
+$("saveLedger").addEventListener("click", async () => {
+  const priceRaw = $("ldgPrice").value.trim();
+  const settings = {
+    service: {
+      package: $("ldgPackage").value.trim(),
+      price: priceRaw === "" ? null : Number(priceRaw),
+      start_date: $("ldgStart").value,
+      owner: $("ldgOwner").value.trim(),
+      phone: $("ldgPhone").value.trim(),
+      website: $("ldgWebsite").value.trim(),
+    },
+    assets: {
+      table1: {
+        intro: $("t1Intro").value.trim(),
+        cases: $("t1Cases").value.split("\n").map((x) => x.trim()).filter(Boolean),
+        honors: $("t1Honors").value.trim(),
+        expertise: $("t1Expertise").value.trim(),
+        photos: $("t1Photos").value.trim(),
+      },
+      table2: { accounts: t2Accounts.slice() },
+      table3: { geo_words: $("t3Words").value.trim() },
+    },
+  };
+  try {
+    renderDetail(await api(`/trackers/${state.tracker}`, {
+      method: "PATCH", body: JSON.stringify({ settings }),
+    }));
+    $("ledgerState").textContent = "已保存 " + new Date().toLocaleTimeString();
+    toast("台账与资料已保存");
+  } catch (e) { toast("保存失败：" + e.message, "error"); }
 });
 
 $("saveBrand").addEventListener("click", async () => {

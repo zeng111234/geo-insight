@@ -507,5 +507,27 @@ class E2EAuthAdaptationContractTest(unittest.TestCase):
             self.assertNotIn("fetch(BASE + \"/v1/", src, f"{name} 用了 Node fetch 读接口")
 
 
+class ServiceLedgerContractTest(unittest.TestCase):
+    """服务台账与资料归档（SOP 第一步）：轻量内部版，存 tracker.settings。
+
+    决策 012：不加客户表、不做多租户/角色。字段对应 SOP 表一/表二/表三。
+    """
+
+    def test_settings_panel_has_sop_fields(self):
+        html = (PROJECT_ROOT / "frontend" / "static" / "settings.html").read_text(encoding="utf-8")
+        self.assertIn("saveLedger", html, "台账保存按钮缺失")
+        for field in ("ldgPackage", "ldgPrice", "ldgStart", "ldgOwner", "ldgPhone",
+                      "t1Intro", "t1Cases", "t1Honors", "t1Expertise",
+                      "t2Accounts", "t3Words"):
+            self.assertIn(f'id="{field}"', html, f"SOP 字段缺失: {field}")
+        self.assertIn("service:", html, "未写 service 子对象")
+        self.assertIn("assets:", html, "未写 assets 子对象")
+
+    def test_backend_merges_settings_without_dropping_website(self):
+        repo = (PROJECT_ROOT / "backend" / "src" / "geo" / "repositories" / "config_repository.py").read_text(encoding="utf-8")
+        self.assertIn("def merge_tracker_settings", repo)
+        self.assertIn("deep_merge", repo, "必须深合并，否则分次保存表一/表三会互相覆盖")
+
+
 if __name__ == "__main__":
     unittest.main()

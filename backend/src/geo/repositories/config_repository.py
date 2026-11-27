@@ -191,6 +191,48 @@ def create_tracker(
     return {"tracker_id": tracker_id, "brand_id": brand_id, "has_questions": False}
 
 
+def merge_tracker_settings(
+    conn: sqlite3.Connection,
+    tracker_id: str,
+    tenant_id: str,
+    patch: dict,
+    now: str,
+) -> dict | None:
+    """深合并 tracker.settings JSON（不丢已有 website 等键）。
+
+    服务台账/资料归档（表一/表二/表三）存这里，不新增列、不改表结构。
+    只接受 dict；非 dict 或坏 JSON 由调用方先校验。
+    """
+    row = conn.execute(
+        "SELECT settings FROM tracker WHERE id = ? AND tenant_id = ?", (tracker_id, tenant_id)
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        current = json.loads(row["settings"] or "{}")
+    except (TypeError, ValueError):
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    def deep_merge(base: dict, incoming: dict) -> dict:
+        """递归合并：分次保存表一/表二/表三时不能互相覆盖。"""
+        out = dict(base)
+        for key, value in incoming.items():
+            if isinstance(value, dict) and isinstance(out.get(key), dict):
+                out[key] = deep_merge(out[key], value)
+            else:
+                out[key] = value
+        return out
+
+    merged = deep_merge(current, patch)
+    conn.execute(
+        "UPDATE tracker SET settings = ?, updated_at = ? WHERE id = ? AND tenant_id = ?",
+        (json.dumps(merged, ensure_ascii=False), now, tracker_id, tenant_id),
+    )
+    conn.commit()
+    return merged
+
+
 def update_tracker(
     conn: sqlite3.Connection,
     tracker_id: str,
