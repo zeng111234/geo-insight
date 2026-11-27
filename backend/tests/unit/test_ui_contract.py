@@ -515,6 +515,30 @@ class E2EAuthAdaptationContractTest(unittest.TestCase):
         self.assertIn("geo-demo-2026", src, "缺登录凭据")
         self.assertNotIn("fetch(BASE + path)", src, "页面 HTML 请求没带 cookie")
 
+    def test_no_bare_node_v1_fetch_without_auth(self):
+        """扫全部 E2E 脚本：有裸 Node fetch /v1 的，必须带 cookie 或明确降级提示。
+
+        同类问题已出现 4 次。这里改成全站守门，而不是等第 5 次再补一个脚本名。
+        browsercheck 有 401 提示属优雅降级，放行；其余必须已适配鉴权。
+        """
+        import re
+        scripts_dir = PROJECT_ROOT / "backend" / "scripts"
+        violations = []
+        for path in scripts_dir.glob("*.mjs"):
+            src = path.read_text(encoding="utf-8")
+            # 裸 Node fetch `${BASE}/v1/...`（浏览器内 fetch('/v1/...') 不算）
+            bare = re.findall(r"fetch\(\s*`?\$\{BASE\}/v1/[^`'\s]*", src)
+            if not bare:
+                continue
+            has_auth = (
+                "geo_session" in src                       # Node 侧登录拿 cookie
+                or "geo-demo-2026" in src                  # 浏览器侧登录
+                or ("用 GEO_AUTH_REQUIRED=0" in src)        # 明确的降级提示
+            )
+            if not has_auth:
+                violations.append(f"{path.name} ({len(bare)} 处裸 fetch)")
+        self.assertEqual(violations, [], f"这些脚本在默认鉴权环境会静默失败：{violations}")
+
 
 class ServiceLedgerContractTest(unittest.TestCase):
     """服务台账与资料归档（SOP 第一步）：轻量内部版，存 tracker.settings。

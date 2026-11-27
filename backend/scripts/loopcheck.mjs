@@ -29,6 +29,13 @@ async function evaluate(expr) { const r = await send("Runtime.evaluate", { expre
 const results = [];
 const check = (ok, label, extra = "") => { results.push(ok); console.log(`${ok ? "PASS" : "FAIL"}  ${label}${extra ? ` (${extra})` : ""}`); };
 const count = async (tracker) => (await (await fetch(`${BASE}/v1/trackers/${tracker}/articles`)).json()).items?.length ?? -1;
+// 默认开鉴权：Node fetch 不带 cookie 会静默 401，早点说清楚（同类问题第 4 次）。
+const probe = await fetch(`${BASE}/v1/trackers/11111111-1111-1111-1111-111111111111/articles`);
+if (probe.status === 401) {
+  console.log("FAIL  服务开启了鉴权，本脚本的 Node fetch 不带 cookie，会静默失败。");
+  console.log("      用 GEO_AUTH_REQUIRED=0 python backend/run.py 启动后再跑本脚本。");
+  process.exit(1);
+}
 try {
   const beforeTrial = await count(TRACKER);
   const beforeDemo = await count("11111111-1111-1111-1111-111111111111");

@@ -61,6 +61,15 @@ async function waitTarget() {
   throw new Error("拿不到 CDP 页面");
 }
 
+// 默认开鉴权：本脚本有 Node fetch 写操作(DELETE correction)不带 cookie 会 401，
+// 早点说清楚，别让人对着假 FAIL 猜（同类问题第 4 次）。
+const probe = await fetch(`${BASE}/v1/trackers/11111111-1111-1111-1111-111111111111/report`);
+if (probe.status === 401) {
+  console.log("FAIL  服务开启了鉴权，本脚本的 Node fetch 不带 cookie，会静默失败。");
+  console.log("      用 GEO_AUTH_REQUIRED=0 python backend/run.py 启动后再跑本脚本。");
+  process.exit(1);
+}
+
 let answerId = "";
 try {
   ws = new WebSocket(await waitTarget());

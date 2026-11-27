@@ -77,6 +77,15 @@ const check = (ok, label, extra = "") => {
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${extra ? ` (${extra})` : ""}`);
 };
 
+// 本项目默认开鉴权：本脚本用 Node fetch(不带 cookie)读接口，鉴权下会静默 401
+// 导致判断全乱。早点说清楚，别让人对着一堆假 FAIL 猜（同类问题已出现 4 次）。
+const probe = await fetch(`${BASE}/v1/trackers`);
+if (probe.status === 401) {
+  console.log("FAIL  服务开启了鉴权，本脚本的 Node fetch 不带 cookie，会静默失败。");
+  console.log("      用 GEO_AUTH_REQUIRED=0 python backend/run.py 启动后再跑本脚本。");
+  process.exit(1);
+}
+
 try {
   ws = new WebSocket(await target());
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
